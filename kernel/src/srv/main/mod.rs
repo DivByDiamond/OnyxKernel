@@ -13,6 +13,7 @@ pub unsafe fn kmain(hartid: usize, fdt_addr: usize) -> ! {
 
     early::early_init(fdt_addr);
     let ndevs = early::probe_devices();
+    early::probe_peripherals();
     display::init_and_draw();
     vfs::setup(ndevs);
     vfs::load_font();

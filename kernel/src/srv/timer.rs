@@ -59,6 +59,13 @@ pub unsafe fn handle() {
     let now = read_mtime();
     write_mtimecmp(now + G_TICK_INTERVAL);
     proc::sched_tick();
+    // Heartbeat: ping the watchdog every tick (100 Hz) so the system
+    // resets if a scheduler stall prevents us from reaching this point.
+    crate::drivers::watchdog::tick();
+    // LED activity pulse once every 50 ticks (~0.5 s at 100 Hz).
+    if G_UPTICKS % 50 == 0 {
+        crate::drivers::led::pulse_activity();
+    }
 }
 pub fn uptime_us() -> u64 {
     unsafe { G_UPTICKS * 10_000 }

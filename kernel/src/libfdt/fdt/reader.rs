@@ -24,3 +24,7 @@ pub(crate) unsafe fn cstr_at(offset: u32) -> &'static str {
     }
     core::str::from_utf8(core::slice::from_raw_parts(p, len)).unwrap_or("")
 }
+
+pub unsafe fn prop_name(name_off: u32) -> &'static str {
+    cstr_at(name_off)
+}

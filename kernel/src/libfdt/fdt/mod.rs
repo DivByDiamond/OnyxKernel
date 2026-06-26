@@ -25,3 +25,4 @@ pub use sdhci::find_sdhci;
 pub use uart::find_uart;
 pub use model::model;
 pub use types::{FdtMemory, FdtMmio};
+pub use reader::prop_name;

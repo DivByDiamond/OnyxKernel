@@ -91,3 +91,21 @@ pub unsafe fn sfence_vma(va: u64, asid: u64) {
 pub unsafe fn wfi() {
     asm!("wfi", options(nostack));
 }
+#[inline]
+pub unsafe fn read_cycle() -> u64 {
+    let v: u64;
+    asm!("csrr {0}, cycle", out(reg) v, options(nomem, nostack));
+    v
+}
+#[inline]
+pub unsafe fn read_time() -> u64 {
+    let v: u64;
+    asm!("csrr {0}, time", out(reg) v, options(nomem, nostack));
+    v
+}
+#[inline]
+pub unsafe fn read_instret() -> u64 {
+    let v: u64;
+    asm!("csrr {0}, instret", out(reg) v, options(nomem, nostack));
+    v
+}
