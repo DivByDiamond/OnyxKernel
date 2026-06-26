@@ -6,12 +6,12 @@ license.workspace = true
 
 [[bin]]
 name = "elf2onx"
-path = "src/elf2onx.rs"
+path = "src/elf2onx/main.rs"
 
 [[bin]]
 name = "mkimage"
-path = "src/mkimage.rs"
+path = "src/mkimage/main.rs"
 
 [[bin]]
 name = "psfgen"
-path = "src/psfgen.rs"
+path = "src/psfgen/main.rs"
