@@ -18,15 +18,15 @@ cargo build --release -p onyx_tools 2>&1 | tail -3
 # Convert all userland ELFs to .onx (v2 format is now the default)
 BUILD="$ROOT/build"
 mkdir -p "$BUILD"
-echo "==> Converting userland ELFs → .onx (v2 default)"
-"$ROOT/target/release/elf2onx" --ring=1 "$ROOT/target/riscv64gc-unknown-none-elf/release/onyx-init" "$BUILD/init.onx"
-"$ROOT/target/release/elf2onx" --ring=1 "$ROOT/target/riscv64gc-unknown-none-elf/release/onyx-hello" "$BUILD/hello.onx"
-"$ROOT/target/release/elf2onx" --ring=1 "$ROOT/target/riscv64gc-unknown-none-elf/release/onyx-login" "$BUILD/login.onx"
-"$ROOT/target/release/elf2onx" "$ROOT/target/riscv64gc-unknown-none-elf/release/onyx-osh" "$BUILD/osh.onx"
-"$ROOT/target/release/elf2onx" "$ROOT/target/riscv64gc-unknown-none-elf/release/onyx-passwd" "$BUILD/passwd.onx"
-"$ROOT/target/release/elf2onx" --ring=1 "$ROOT/target/riscv64gc-unknown-none-elf/release/onyx-useradd" "$BUILD/useradd.onx"
-"$ROOT/target/release/elf2onx" --ring=1 "$ROOT/target/riscv64gc-unknown-none-elf/release/onyx-userdel" "$BUILD/userdel.onx"
-"$ROOT/target/release/elf2onx" "$ROOT/target/riscv64gc-unknown-none-elf/release/onyx-argv-test" "$BUILD/argv_test.onx"
+echo "==> Converting userland ELFs → .onx (v2 default, --compress)"
+"$ROOT/target/release/elf2onx" --ring=1 --compress "$ROOT/target/riscv64gc-unknown-none-elf/release/onyx-init" "$BUILD/init.onx"
+"$ROOT/target/release/elf2onx" --ring=1 --compress "$ROOT/target/riscv64gc-unknown-none-elf/release/onyx-hello" "$BUILD/hello.onx"
+"$ROOT/target/release/elf2onx" --ring=1 --compress "$ROOT/target/riscv64gc-unknown-none-elf/release/onyx-login" "$BUILD/login.onx"
+"$ROOT/target/release/elf2onx" --compress "$ROOT/target/riscv64gc-unknown-none-elf/release/onyx-osh" "$BUILD/osh.onx"
+"$ROOT/target/release/elf2onx" --compress "$ROOT/target/riscv64gc-unknown-none-elf/release/onyx-passwd" "$BUILD/passwd.onx"
+"$ROOT/target/release/elf2onx" --ring=1 --compress "$ROOT/target/riscv64gc-unknown-none-elf/release/onyx-useradd" "$BUILD/useradd.onx"
+"$ROOT/target/release/elf2onx" --ring=1 --compress "$ROOT/target/riscv64gc-unknown-none-elf/release/onyx-userdel" "$BUILD/userdel.onx"
+"$ROOT/target/release/elf2onx" --compress "$ROOT/target/riscv64gc-unknown-none-elf/release/onyx-argv-test" "$BUILD/argv_test.onx"
 
 # No default passwd/shadow — first boot creates them interactively.
 

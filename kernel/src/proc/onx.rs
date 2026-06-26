@@ -1,10 +1,8 @@
-//! OnyxExec (.onx) binary loader with ring parsing.
-//! Supports both v1 (fixed 8 segments) and v2 (dynamic segments).
 use crate::arch::regs::*;
 use crate::mm::{pmm, vmm};
 use core::ptr;
 use onyx_core::errno::{Errno, KResult};
-use onyx_core::formats::{ONX_FLAGS_RING1, ONX_MAGIC, VMM_R, VMM_W, VMM_X};
+use onyx_core::formats::{ONX_FLAGS_COMPRESSED, ONX_FLAGS_RING1, ONX_MAGIC, VMM_R, VMM_W, VMM_X};
 
 pub struct OnxLoadResult {
     pub entry: u64,
@@ -19,14 +17,14 @@ pub unsafe fn load(image: *const u8, image_size: usize) -> KResult<OnxLoadResult
         return Err(Errno::Inval);
     }
 
-    // Parse header using onyx_core::formats.
     let image_slice = core::slice::from_raw_parts(image, image_size);
     let hdr = onyx_core::formats::OnxHeader::from_bytes(image_slice).ok_or(Errno::Inval)?;
+
+    let compressed = hdr.flags & ONX_FLAGS_COMPRESSED != 0;
 
     let root_pa = vmm::new_root()?;
     let root = root_pa as *mut u64;
 
-    // 3 baseline 1GB leaves (kernel-only, no U).
     let leaf_flags = PTE_V | PTE_R | PTE_W | PTE_X | PTE_A | PTE_D;
     for i in 0..3u64 {
         let pa = i << 30;
@@ -36,14 +34,6 @@ pub unsafe fn load(image: *const u8, image_size: usize) -> KResult<OnxLoadResult
         );
     }
 
-    // Map each segment.
-    //
-    // We always OR in PTE_A | PTE_D alongside PTE_U: QEMU's RISC-V machine
-    // starts with menvcfg.ADUE = 0, which means the CPU will trap (page
-    // fault) on the first access to a leaf PTE whose A bit is clear, instead
-    // of setting A/D in hardware. Without these bits every userspace load
-    // or store faults on first touch. This matches what vmm::map and
-    // vmm::map_anon already do for their own callers.
     for s in &hdr.segs {
         if s.vaddr < USER_BASE || s.vaddr >= USER_TOP {
             return Err(Errno::Range);
@@ -51,45 +41,96 @@ pub unsafe fn load(image: *const u8, image_size: usize) -> KResult<OnxLoadResult
         if s.filesz > s.memsz {
             return Err(Errno::Inval);
         }
-        if s.offset as u64 + s.filesz > image_size as u64 {
+        let data_end = if compressed && s.compressed_size > 0 {
+            s.offset as u64 + s.compressed_size as u64
+        } else {
+            s.offset as u64 + s.filesz
+        };
+        if data_end > image_size as u64 {
             return Err(Errno::Range);
         }
 
         let seg_flags = (s.flags as u64) | PTE_U | PTE_A | PTE_D;
+
+        // First pass: map all pages for the segment.
         let mut va = s.vaddr;
         let end = s.vaddr + s.memsz;
-        let mut file_pos: u64 = 0;
         while va < end {
             let page_base = va & !0xFFF;
-            let existing = vmm::translate_user(root_pa, page_base);
-            let mut page_pa = 0;
-            if existing == 0 {
-                page_pa = pmm::alloc_zero()?;
+            if vmm::translate_user(root_pa, page_base) == 0 {
+                let page_pa = pmm::alloc_zero()?;
                 vmm::map_one_pub(root_pa, page_base, page_pa, seg_flags, 0)?;
             }
-            let page_end = page_base + 4096;
-            let page_va_end = page_end.min(end);
-            let copy_len = (page_va_end - va).min(s.filesz.saturating_sub(file_pos));
-            if copy_len > 0 {
-                let abs_off = s.offset as u64 + file_pos;
-                let src = image.add(abs_off as usize);
-                let dst = if existing != 0 {
-                    (existing as *mut u8).add((va & 0xFFF) as usize)
+            va = (page_base + 4096).min(end);
+        }
+
+        if compressed && s.compressed_size > 0 {
+            let comp_src = image.add(s.offset as usize);
+            let comp_end = s.compressed_size as usize;
+            let file_end = s.vaddr + s.filesz;
+            let mut in_off = 0usize;
+            let mut out_va = s.vaddr;
+            while in_off < comp_end && out_va < file_end {
+                let tag = *comp_src.add(in_off);
+                in_off += 1;
+                if tag & 0x80 != 0 {
+                    let count = ((tag & 0x7F) as usize) + 1;
+                    if in_off >= comp_end {
+                        return Err(Errno::Inval);
+                    }
+                    let val = *comp_src.add(in_off);
+                    in_off += 1;
+                    let mut left = count.min((file_end - out_va) as usize);
+                    while left > 0 {
+                        let pb = out_va & !0xFFF;
+                        let paddr = vmm::translate(root_pa, pb);
+                        let poff = (out_va & 0xFFF) as usize;
+                        let chunk = left.min(4096 - poff);
+                        ptr::write_bytes((paddr as *mut u8).add(poff), val, chunk);
+                        out_va += chunk as u64;
+                        left -= chunk;
+                    }
                 } else {
-                    (page_pa as *mut u8).add((va & 0xFFF) as usize)
-                };
-                ptr::copy_nonoverlapping(src, dst, copy_len as usize);
+                    let count = (tag as usize) + 1;
+                    let mut left = count.min((file_end - out_va) as usize);
+                    if in_off + left > comp_end {
+                        return Err(Errno::Inval);
+                    }
+                    while left > 0 {
+                        let pb = out_va & !0xFFF;
+                        let paddr = vmm::translate(root_pa, pb);
+                        let poff = (out_va & 0xFFF) as usize;
+                        let chunk = left.min(4096 - poff);
+                        ptr::copy_nonoverlapping(comp_src.add(in_off), (paddr as *mut u8).add(poff), chunk);
+                        in_off += chunk;
+                        out_va += chunk as u64;
+                        left -= chunk;
+                    }
+                }
             }
-            file_pos += copy_len;
-            va = page_va_end;
+        } else {
+            // Uncompressed: page-by-page copy as before.
+            let mut va = s.vaddr;
+            let end = s.vaddr + s.memsz;
+            let mut file_pos: u64 = 0;
+            while va < end {
+                let page_base = va & !0xFFF;
+                let existing = vmm::translate_user(root_pa, page_base);
+                let page_end = page_base + 4096;
+                let page_va_end = page_end.min(end);
+                let copy_len = (page_va_end - va).min(s.filesz.saturating_sub(file_pos));
+                if copy_len > 0 {
+                    let abs_off = s.offset as u64 + file_pos;
+                    let src = image.add(abs_off as usize);
+                    let dst = (existing as *mut u8).add((va & 0xFFF) as usize);
+                    ptr::copy_nonoverlapping(src, dst, copy_len as usize);
+                }
+                file_pos += copy_len;
+                va = page_va_end;
+            }
         }
     }
 
-    // User stack.
-    // Same A/D reasoning as for segment mapping above: QEMU starts with
-    // menvcfg.ADUE = 0, so we must set PTE_A | PTE_D ourselves or the very
-    // first stack push (e.g. by `drop_to_user` returning to user _start)
-    // traps as a store page fault.
     let ustack_top = USER_TOP;
     let ustack_bottom = ustack_top - (USER_STACK_PAGES as u64) * 4096;
     let mut va = ustack_bottom;
@@ -99,7 +140,6 @@ pub unsafe fn load(image: *const u8, image_size: usize) -> KResult<OnxLoadResult
         va += 4096;
     }
 
-    // User heap.
     let heap_bottom = USER_HEAP_BASE;
     let heap_top = heap_bottom + (USER_HEAP_PAGES as u64) * 4096;
     let mut va = heap_bottom;
@@ -109,7 +149,6 @@ pub unsafe fn load(image: *const u8, image_size: usize) -> KResult<OnxLoadResult
         va += 4096;
     }
 
-    // Parse ring from header flags.
     let ring = if hdr.flags & ONX_FLAGS_RING1 != 0 {
         1
     } else {
@@ -128,8 +167,6 @@ pub unsafe fn load(image: *const u8, image_size: usize) -> KResult<OnxLoadResult
 const MAX_ARGV: usize = 16;
 const MAX_ARGV_BYTES: usize = 1024;
 
-/// Copy argv from parent user space to process address space.
-/// Returns (argc, new_sp) where new_sp points to argc value on stack.
 unsafe fn argv_ptr_ok(p: u64) -> bool {
     p >= USER_BASE && p < USER_TOP
 }

@@ -77,10 +77,11 @@
 - [ ] **SDHCI драйвер** — для Milk-V Duo S
 
 ### Приоритет 6 — Инструменты:
-- [ ] **elf2onx v2** — v2 формат с compressed_size
-- [ ] **mkimage v2** — v2 образы с snapshot area + journal
+- [x] **elf2onx v2** — v2 формат с compressed_size (RLE сжатие сегментов + флаг ONX_FLAGS_COMPRESSED)
+- [x] **mkimage v2** — v2 образы с snapshot area + journal (уже было реализовано)
 
 ### Приоритет 7 — Общее:
 - [x] **Panic recovery** — kdump (CSR, backtrace, hartid, dump_all), QEMU reboot
 - [x] **Multi-core (SMP)** — G_HART_CURRENT, G_HART_IDLE_TF, SpinLock, sched_enter_idle()
+- [x] **RLE decompression в загрузчике onx** — распаковка сжатых сегментов при загрузке
 - [ ] **SMP scheduler improvements** — per-CPU run queues, load balancing, CPU affinity

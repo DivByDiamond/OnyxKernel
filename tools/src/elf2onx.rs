@@ -1,8 +1,3 @@
-//! elf2onx — ELF64 RISC-V → .onx converter with --ring, --v1 and --v2 flags.
-//!
-//! Output formats:
-//!   v2 (default): 32-byte header + dynamic segs × 48 bytes (adds compressed_size).
-//!   v1 (--v1):    344-byte header (24 fixed + 8 segments × 40 bytes), max 8 segs.
 use std::env;
 use std::fs::File;
 use std::io::{Read, Write};
@@ -14,16 +9,15 @@ const ONX_VERSION_2: u32 = 2;
 const ONX_MAX_SEGS_V1: usize = 8;
 const ONX_MAX_SEGS_V2: usize = 256;
 const ONX_FLAGS_RING1: u32 = 0x2;
+const ONX_FLAGS_COMPRESSED: u32 = 0x4;
 const VMM_R: u32 = 1 << 1;
 const VMM_W: u32 = 1 << 2;
 const VMM_X: u32 = 1 << 3;
 
-// v1 header layout: 24-byte fixed + 8 × 40-byte segments = 344 bytes.
 const V1_FIXED_HDR: usize = 24;
 const V1_SEG_SIZE: usize = 40;
-const V1_HEADER_SIZE: usize = V1_FIXED_HDR + ONX_MAX_SEGS_V1 * V1_SEG_SIZE; // 344
+const V1_HEADER_SIZE: usize = V1_FIXED_HDR + ONX_MAX_SEGS_V1 * V1_SEG_SIZE;
 
-// v2 header layout: 32-byte fixed + nsegs × 48-byte segments.
 const V2_FIXED_HDR: usize = 32;
 const V2_SEG_SIZE: usize = 48;
 
@@ -37,7 +31,7 @@ struct OnxSegment {
     flags: u32,
     align: u32,
     reserved: u32,
-    compressed_size: u32, // v2 only
+    compressed_size: u32,
 }
 
 impl OnxSegment {
@@ -63,19 +57,65 @@ impl OnxSegment {
         b[32..36].copy_from_slice(&self.align.to_le_bytes());
         b[36..40].copy_from_slice(&self.reserved.to_le_bytes());
         b[40..44].copy_from_slice(&self.compressed_size.to_le_bytes());
-        // 44..48 pad/reserved
         b
     }
+}
+
+fn rle_compress(src: &[u8]) -> Vec<u8> {
+    let max_dst = src.len() + src.len() / 128 + 2;
+    let mut dst = vec![0u8; max_dst];
+    let n = src.len();
+    let mut i = 0usize;
+    let mut out = 0usize;
+    while i < n {
+        let cur = src[i];
+        let mut run = 1usize;
+        while i + run < n && src[i + run] == cur && run < 128 {
+            run += 1;
+        }
+        if run >= 3 {
+            dst[out] = 0x80 | ((run - 1) as u8);
+            dst[out + 1] = cur;
+            out += 2;
+            i += run;
+        } else {
+            let lit_start = i;
+            let mut lit_len = 0usize;
+            while i + lit_len < n && lit_len < 128 {
+                let b = src[i + lit_len];
+                let mut k = 0usize;
+                while i + lit_len + k < n && src[i + lit_len + k] == b && k < 3 {
+                    k += 1;
+                }
+                if k >= 3 {
+                    break;
+                }
+                lit_len += 1;
+            }
+            if lit_len == 0 {
+                lit_len = 1;
+            }
+            dst[out] = (lit_len - 1) as u8;
+            for j in 0..lit_len {
+                dst[out + 1 + j] = src[lit_start + j];
+            }
+            out += 1 + lit_len;
+            i += lit_len;
+        }
+    }
+    dst.truncate(out);
+    dst
 }
 
 fn main() {
     let args: Vec<String> = env::args().collect();
     if args.len() < 3 {
-        eprintln!("usage: elf2onx [--ring=1] [--v1] <input.elf> <output.onx>");
+        eprintln!("usage: elf2onx [--ring=1] [--v1] [--compress] <input.elf> <output.onx>");
         process::exit(1);
     }
     let mut ring1 = false;
     let mut v1 = false;
+    let mut do_compress = false;
     let mut input = String::new();
     let mut output = String::new();
     for arg in &args[1..] {
@@ -83,6 +123,8 @@ fn main() {
             ring1 = true;
         } else if arg == "--v1" {
             v1 = true;
+        } else if arg == "--compress" {
+            do_compress = true;
         } else if input.is_empty() {
             input = arg.clone();
         } else {
@@ -90,7 +132,7 @@ fn main() {
         }
     }
     if input.is_empty() || output.is_empty() {
-        eprintln!("usage: elf2onx [--ring=1] [--v1] <input.elf> <output.onx>");
+        eprintln!("usage: elf2onx [--ring=1] [--v1] [--compress] <input.elf> <output.onx>");
         process::exit(1);
     }
     let v2 = !v1;
@@ -136,16 +178,10 @@ fn main() {
     let e_phnum = u16::from_le_bytes([elf_data[56], elf_data[57]]) as usize;
 
     let max_segs = if v2 { ONX_MAX_SEGS_V2 } else { ONX_MAX_SEGS_V1 };
-    let mut segs: Vec<OnxSegment> = Vec::with_capacity(max_segs);
 
-    // Compute the offset where the first segment's data begins.
-    // For v1: fixed 344-byte header. For v2: 32 + nsegs*48, but nsegs
-    // isn't known yet — we compute it in two passes.
-    // First pass: collect PT_LOAD segments and record ELF offsets/sizes.
     struct LoadInfo {
-        p_offset: usize,
-        p_filesz: usize,
         seg: OnxSegment,
+        data: Vec<u8>,
     }
     let mut loads: Vec<LoadInfo> = Vec::with_capacity(max_segs);
 
@@ -162,7 +198,7 @@ fn main() {
         ]);
         if p_type != 1 {
             continue;
-        } // PT_LOAD
+        }
         if loads.len() >= max_segs {
             break;
         }
@@ -182,37 +218,60 @@ fn main() {
         if p_flags & 1 != 0 {
             flags |= VMM_X;
         }
+
+        let raw_data = if do_compress && v2 && p_filesz > 0 {
+            let start = p_offset;
+            let end = (p_offset + p_filesz as usize).min(elf_data.len());
+            let slice = &elf_data[start..end];
+            let compressed = rle_compress(slice);
+            let compressed_size = compressed.len() as u32;
+            if compressed_size < p_filesz as u32 {
+                Some((compressed, compressed_size))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        let (seg_data, compressed_size) = if let Some((cdata, csize)) = raw_data {
+            (cdata, csize)
+        } else {
+            let start = p_offset;
+            let end = (p_offset + p_filesz as usize).min(elf_data.len());
+            (elf_data[start..end].to_vec(), 0u32)
+        };
+
         let seg = OnxSegment {
             vaddr: p_vaddr,
             filesz: p_filesz,
             memsz: p_memsz,
-            offset: 0, // patched below
+            offset: 0,
             flags,
             align: p_align as u32,
             reserved: 0,
-            compressed_size: 0,
+            compressed_size,
         };
         loads.push(LoadInfo {
-            p_offset,
-            p_filesz: p_filesz as usize,
             seg,
+            data: seg_data,
         });
     }
 
     let nsegs = loads.len() as u32;
-    let data_start: u32 = if v2 {
+
+    // Compute header size (v2: 32 + nsegs * 48, v1: 344)
+    let hdr_size: u32 = if v2 {
         (V2_FIXED_HDR + nsegs as usize * V2_SEG_SIZE) as u32
     } else {
         V1_HEADER_SIZE as u32
     };
 
-    // Assign offsets and gather final segments.
-    let mut filesz_acc: u32 = data_start;
-    for li in &loads {
-        let mut s = li.seg;
-        s.offset = filesz_acc;
-        filesz_acc = filesz_acc.saturating_add(li.p_filesz as u32);
-        segs.push(s);
+    // Assign offsets based on actual (possibly compressed) data size.
+    let mut data_offset: u32 = hdr_size;
+    for li in &mut loads {
+        li.seg.offset = data_offset;
+        data_offset = data_offset.saturating_add(li.data.len() as u32);
     }
 
     let mut out = File::create(&output).unwrap_or_else(|e| {
@@ -220,22 +279,30 @@ fn main() {
         process::exit(1);
     });
 
+    let mut any_compressed = false;
+
     if v2 {
-        // v2 header: magic(4) + version(4=2) + entry(8) + nsegs(4) + flags(4) + reserved(8) = 32
         let mut hdr = [0u8; V2_FIXED_HDR];
         hdr[0..4].copy_from_slice(&ONX_MAGIC.to_le_bytes());
         hdr[4..8].copy_from_slice(&ONX_VERSION_2.to_le_bytes());
         hdr[8..16].copy_from_slice(&e_entry.to_le_bytes());
         hdr[16..20].copy_from_slice(&nsegs.to_le_bytes());
-        let flags = if ring1 { ONX_FLAGS_RING1 } else { 0 };
+        let mut flags = if ring1 { ONX_FLAGS_RING1 } else { 0 };
+        for li in &loads {
+            if li.seg.compressed_size > 0 {
+                any_compressed = true;
+                break;
+            }
+        }
+        if any_compressed {
+            flags |= ONX_FLAGS_COMPRESSED;
+        }
         hdr[20..24].copy_from_slice(&flags.to_le_bytes());
-        // 24..32 reserved (already zero)
         out.write_all(&hdr).unwrap();
-        for s in &segs {
-            out.write_all(&s.to_bytes_v2()).unwrap();
+        for li in &loads {
+            out.write_all(&li.seg.to_bytes_v2()).unwrap();
         }
     } else {
-        // v1 header: 344 bytes total.
         let mut hdr = [0u8; V1_HEADER_SIZE];
         hdr[0..4].copy_from_slice(&ONX_MAGIC.to_le_bytes());
         hdr[4..8].copy_from_slice(&ONX_VERSION_1.to_le_bytes());
@@ -243,30 +310,31 @@ fn main() {
         hdr[16..20].copy_from_slice(&nsegs.to_le_bytes());
         let flags = if ring1 { ONX_FLAGS_RING1 } else { 0 };
         hdr[20..24].copy_from_slice(&flags.to_le_bytes());
-        for (i, s) in segs.iter().enumerate() {
+        for (i, li) in loads.iter().enumerate() {
             let off = V1_FIXED_HDR + i * V1_SEG_SIZE;
-            hdr[off..off + V1_SEG_SIZE].copy_from_slice(&s.to_bytes_v1());
+            hdr[off..off + V1_SEG_SIZE].copy_from_slice(&li.seg.to_bytes_v1());
         }
         out.write_all(&hdr).unwrap();
     }
 
-    // Write segment data.
     for li in &loads {
-        let p_offset = li.p_offset;
-        let p_filesz = li.p_filesz;
-        if p_offset + p_filesz <= elf_data.len() {
-            out.write_all(&elf_data[p_offset..p_offset + p_filesz])
-                .unwrap();
-        }
+        out.write_all(&li.data).unwrap();
     }
 
     eprintln!(
-        "elf2onx: {} -> {} (v{}, entry=0x{:x}, nsegs={}, ring={})",
+        "elf2onx: {} -> {} (v{}, entry=0x{:x}, nsegs={}, ring={}{})",
         input,
         output,
         if v2 { 2 } else { 1 },
         e_entry,
         nsegs,
-        if ring1 { 1 } else { 2 }
+        if ring1 { 1 } else { 2 },
+        if any_compressed {
+            let saved: u32 = loads.iter().map(|li| li.seg.filesz as u32).sum::<u32>()
+                - loads.iter().map(|li| li.data.len() as u32).sum::<u32>();
+            format!(", compressed saved={}B", saved)
+        } else {
+            String::new()
+        }
     );
 }
