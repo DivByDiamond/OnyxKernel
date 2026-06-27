@@ -38,6 +38,16 @@ pub struct Proc {
     pub kstack: [u8; KSTACK_SIZE],
     pub pending_signals: u32,
     pub signal_mask: u32,
+    /// Per-signal user handler entry points (0 = default action).
+    /// Indexed by signal number 1..NSIG. Signal 0 is unused (POSIX reserves
+    /// it as "no signal"). Length is 32 to match NSIG.
+    pub signal_handlers: [u64; 32],
+    /// Saved trap frame for `sigreturn`. When a signal handler is entered,
+    /// the original user tf is stashed here so the `sigreturn` syscall can
+    /// restore it. Single-deep — nested signals are not yet supported.
+    pub saved_tf: TrapFrame,
+    /// True if a signal handler is currently executing for this process.
+    pub in_signal_handler: bool,
     pub fds: [crate::fs::vfs::VfsFd; PROC_MAX_FDS],
     pub next: *mut Proc,
     pub wait_next: *mut Proc,
@@ -65,6 +75,9 @@ impl Proc {
             kstack: [0; KSTACK_SIZE],
             pending_signals: 0,
             signal_mask: 0,
+            signal_handlers: [0; 32],
+            saved_tf: TrapFrame::zero(),
+            in_signal_handler: false,
             fds: [crate::fs::vfs::VfsFd {
                 ino: 0,
                 size: 0,

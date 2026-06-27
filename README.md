@@ -1,7 +1,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/platform-RISC--V%2064--bit-green" alt="RISC-V 64">
   <img src="https://img.shields.io/badge/language-Rust%20%7E98%25-orange" alt="Rust ~98%">
-  <img src="https://img.shields.io/badge/version-v0.3-blue" alt="v0.3">
+  <img src="https://img.shields.io/badge/version-v0.4-blue" alt="v0.4">
   <img src="https://img.shields.io/badge/MMU-Sv39-yellow" alt="Sv39 MMU">
   <img src="https://img.shields.io/badge/license-GPL--3.0-red" alt="GPL-3.0">
   <a href="README.ru.md"><img src="https://img.shields.io/badge/ru_readme-blue" alt="ru_readme"></a>
@@ -47,10 +47,13 @@ Part of the [OnyxOS](https://github.com/anomalyco/OnyxOS) ecosystem. Booted by
 - **Write-ahead journal** — crash recovery on mount
 - **VFS with mount table** — OnyxFS, procfs, ipcfs
 - **IPC channels** — `chan_create` / `connect` / `send` / `recv` / `close`; named channels via `/ipc/*` VFS
-- **Syscall ABI** — 31 syscalls: `spawn`, `wait`, `read`, `write`, `exec`, `sbrk`, `kill`, `sigmask`, `snapshot_*`, `create`, `mkdir`, etc.
+- **Syscall ABI** — 77 syscalls (was 31 in v0.3): POSIX-flavoured `open` with `O_CREAT/O_TRUNC/O_APPEND`, `fstat`, `waitpid`, `fork`, `execve`, `getdents64`, `ioctl`, `mprotect`, `sigaction`/`sigprocmask`/`sigreturn`, `clock_gettime`, `isatty`, `getentropy`, `setuid`/`setgid`, `fsync`, `truncate` with length, `ftruncate`, `readlink`/`symlink`, `chmod`/`fchmod`, plus the original `spawn`/`wait`/`exec`/`sbrk`/`kill`/`sigmask`/`snapshot_*`/`create`/`mkdir`/IPC channel set.
 - **Preemptive multitasking** — timer tick scheduling with `NEED_RESCHED` → `sched_yield`
-- **Signal delivery** — `SYS_kill`, `SIGKILL` terminates process
-- **Blocking wait** — `Waiting` state + `sched_yield` for child process notification
+- **Signal delivery** — `SYS_kill` with full `sigaction` / `sigprocmask` / `sigreturn` support for user-space handlers; KILL and STOP cannot be caught or blocked.
+- **Blocking wait** — `Waiting` state + `sched_yield` for child process notification; `waitpid` with `WNOHANG`.
+- **Generous user heap** — 64 MiB ceiling (was 64 KiB) with on-demand page mapping via `sbrk`/`brk`; 256 KiB user stack.
+- **Proper ELF-style initial stack** — argc + argv + envp + auxv (AT_PAGESZ, AT_RANDOM, AT_ENTRY, AT_UID/GID, AT_NULL); compatible with musl/picolibc/glibc `_start`.
+- **Demand-paged heap** — `sbrk(N)` no longer just bumps a pointer; new pages are mapped on demand via `pmm::alloc_zero` + `vmm::map_one_pub`.
 - **Framebuffer console** — PSF1/PSF2 font support, `/font/default.psf` loaded at boot
 - **Hardware drivers** — UART (NS16550A), VirtIO block, PCI, PLIC
 - **FDT parser** — device tree discovery (memory, PLIC, devices)

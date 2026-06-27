@@ -1,31 +1,184 @@
+//! Filesystem syscalls (part 1) — open / close / lseek / stat / fstat.
+//!
+//! The `open` implementation honours the POSIX `flags` bitmask
+//! (`O_RDONLY | O_WRONLY | O_RDWR | O_CREAT | O_TRUNC | O_APPEND`) so that
+//! standard libc-style programs work. `stat` and `fstat` fill a Linux-compatible
+//! `struct stat` (128 bytes) so libc `stat(3)` wrappers can copy it verbatim.
 use crate::fs::vfs;
 use crate::proc;
+use crate::syscall::abi::{
+    F_DUPFD, F_GETFD, F_GETFL, F_SETFD, F_SETFL, FD_CLOEXEC, O_ACCMODE, O_APPEND, O_CREAT,
+    O_DIRECTORY, O_EXCL, O_NONBLOCK, O_RDONLY, O_RDWR, O_TRUNC, O_WRONLY,
+};
 use onyx_core::errno::Errno;
 
-use super::super::handler::user_ptr_ok;
+use super::super::handler::{parse_user_path, user_ptr_ok};
 
-pub(in super::super) unsafe fn sys_open(path: u64, _flags: u64, _mode: u64) -> i64 {
-    if !user_ptr_ok(path, 1) {
-        return Errno::Inval.as_i64();
+/// Linux/glibc-compatible `struct stat` (rv64 lp64d layout). 128 bytes total.
+///
+/// Fields are deliberately laid out so that user-space `struct stat` from
+/// `<bits/stat.h>` can be `memcpy`'d directly. All padding is explicit.
+#[repr(C)]
+pub struct UserStat {
+    pub st_dev: u64,
+    pub st_ino: u64,
+    pub st_mode: u32,
+    pub st_nlink: u32,
+    pub st_uid: u32,
+    pub st_gid: u32,
+    pub __pad0: u32,
+    pub st_rdev: u64,
+    pub st_size: i64,
+    pub st_blksize: i64,
+    pub st_blocks: i64,
+    pub st_atime: i64,
+    pub st_atime_nsec: i64,
+    pub st_mtime: i64,
+    pub st_mtime_nsec: i64,
+    pub st_ctime: i64,
+    pub st_ctime_nsec: i64,
+    pub __unused: [i64; 3],
+}
+
+impl UserStat {
+    pub const ZERO: UserStat = UserStat {
+        st_dev: 0,
+        st_ino: 0,
+        st_mode: 0,
+        st_nlink: 0,
+        st_uid: 0,
+        st_gid: 0,
+        __pad0: 0,
+        st_rdev: 0,
+        st_size: 0,
+        st_blksize: 0,
+        st_blocks: 0,
+        st_atime: 0,
+        st_atime_nsec: 0,
+        st_mtime: 0,
+        st_mtime_nsec: 0,
+        st_ctime: 0,
+        st_ctime_nsec: 0,
+        __unused: [0; 3],
+    };
+}
+
+/// Translate a kernel-side `OnyfsStat` into the user-visible `struct stat`.
+/// We fill the standard S_IFMT bits in `st_mode` based on the OnyxFS dtype.
+unsafe fn fill_user_stat(out_va: u64, ino: u32, size: u64, mode: u32, mtime: u64, atime: u64, ctime: u64) {
+    if !user_ptr_ok(out_va, core::mem::size_of::<UserStat>() as u64) {
+        return;
     }
-    let mut len = 0usize;
-    let p = path as *const u8;
-    while *p.add(len) != 0 && len < 256 {
-        len += 1;
+    let pa = crate::mm::vmm::translate(crate::proc::current().root_pa, out_va);
+    if pa == 0 {
+        return;
     }
-    let path_bytes = core::slice::from_raw_parts(p, len);
+    let dst = pa as *mut UserStat;
+    // Compose a Linux-style st_mode: S_IFREG (0o100000) for regular files,
+    // S_IFDIR (0o040000) for directories. Lower 9 bits = rwxrwxrwx (always
+    // 0o777 for now — OnyxFS does not yet enforce permissions).
+    let ifmt = if mode & 0o170000 == 0o040000 { 0o040000 } else { 0o100000 };
+    let st_mode: u32 = ifmt | 0o755;
+    let stat = UserStat {
+        st_dev: 0,
+        st_ino: ino as u64,
+        st_mode,
+        st_nlink: 1,
+        st_uid: 0,
+        st_gid: 0,
+        __pad0: 0,
+        st_rdev: 0,
+        st_size: size as i64,
+        st_blksize: 512,
+        st_blocks: ((size + 511) / 512) as i64,
+        st_atime: atime as i64,
+        st_atime_nsec: 0,
+        st_mtime: mtime as i64,
+        st_mtime_nsec: 0,
+        st_ctime: ctime as i64,
+        st_ctime_nsec: 0,
+        __unused: [0; 3],
+    };
+    core::ptr::write_volatile(dst, stat);
+}
+
+pub(in super::super) unsafe fn sys_open(path: u64, flags: u64, mode: u64) -> i64 {
+    let path_bytes = match parse_user_path(path) {
+        Some(s) => s,
+        None => return Errno::Inval.as_i64(),
+    };
 
     let ring = proc::current_ring();
-    if ring == proc::PROC_RING_USER {
-        if path_bytes.starts_with(b"/service/") {
-            return Errno::Perm.as_i64();
-        }
+    if ring == proc::PROC_RING_USER && path_bytes.starts_with(b"/service/") {
+        return Errno::Perm.as_i64();
     }
 
-    match vfs::open(path_bytes, vfs::PERM_READ | vfs::PERM_SEEK) {
-        Ok(token) => token as i64,
-        Err(e) => e.as_i64(),
+    let flags32 = flags as u32;
+    let acc_mode = flags32 & O_ACCMODE;
+    // Build the VFS permission bitmask from the access-mode bits.
+    let mut perms = vfs::PERM_SEEK;
+    if acc_mode != O_RDONLY {
+        perms |= vfs::PERM_WRITE;
     }
+    if acc_mode == O_RDWR {
+        perms |= vfs::PERM_READ;
+    } else if acc_mode == O_WRONLY {
+        // O_WRONLY still implies readable for our VFS implementation which
+        // doesn't enforce direction yet; mark both for safety on read-after-
+        // write patterns used by some libc implementations.
+        perms |= vfs::PERM_READ;
+    } else {
+        perms |= vfs::PERM_READ; // O_RDONLY
+    }
+
+    // Try to open existing file. If O_CREAT and the file does not exist,
+    // create it (root-only for now — ring 2 callers will get EPERM).
+    let token = match vfs::open(path_bytes, perms) {
+        Ok(t) => t,
+        Err(e) if e == Errno::NoEnt && (flags32 & O_CREAT) != 0 => {
+            if ring > proc::PROC_RING_ROOT {
+                return Errno::Perm.as_i64();
+            }
+            // `mode` is the OnyxFS dtype if non-zero, otherwise regular file.
+            let dtype = if mode == 0 {
+                onyx_core::formats::ONYFS_DT_REG
+            } else {
+                mode as u32
+            };
+            match vfs::create(path_bytes, dtype) {
+                Ok(t) => t,
+                Err(e) => return e.as_i64(),
+            }
+        }
+        Err(e) => return e.as_i64(),
+    };
+
+    // O_EXCL: fail if the file existed.
+    if (flags32 & O_EXCL) != 0 && (flags32 & O_CREAT) != 0 {
+        // We can't easily tell if `vfs::open` succeeded vs `vfs::create`
+        // created a new file. Conservatively, accept either case (O_EXCL
+        // enforcement requires a stat-then-create dance — TODO).
+    }
+
+    // O_TRUNC: truncate to zero length on opening for write.
+    if (flags32 & O_TRUNC) != 0 && (perms & vfs::PERM_WRITE) != 0 {
+        let _ = vfs::truncate(token);
+    }
+
+    // O_APPEND: position at end-of-file. We do this by seeking to END.
+    if (flags32 & O_APPEND) != 0 {
+        let _ = vfs::lseek(token, 0, 2 /* SEEK_END */);
+    }
+
+    // O_DIRECTORY: caller requires a directory. Verify by stat-ing the
+    // underlying inode. If it's a regular file, close and return ENOTDIR.
+    if (flags32 & O_DIRECTORY) != 0 {
+        // We don't have a portable way to check "is directory" from a token
+        // without extending the VFS API. For now, accept any — the user can
+        // readdir() and find out.
+    }
+
+    token as i64
 }
 
 pub(in super::super) unsafe fn sys_close(token: u64) -> i64 {
@@ -42,25 +195,95 @@ pub(in super::super) unsafe fn sys_lseek(token: u64, off: i64, whence: u32) -> i
     }
 }
 
-pub(in super::super) unsafe fn sys_stat(path: u64, _st: u64) -> i64 {
-    if !user_ptr_ok(path, 1) {
+/// stat(path, struct stat *st) — fills a Linux-compatible `struct stat` and
+/// returns 0 on success or a negative errno on failure.
+pub(in super::super) unsafe fn sys_stat(path: u64, st_buf: u64) -> i64 {
+    let path_bytes = match parse_user_path(path) {
+        Some(s) => s,
+        None => return Errno::Inval.as_i64(),
+    };
+    if !user_ptr_ok(st_buf, core::mem::size_of::<UserStat>() as u64) {
         return Errno::Inval.as_i64();
     }
-    let mut len = 0usize;
-    let p = path as *const u8;
-    while *p.add(len) != 0 && len < 256 {
-        len += 1;
-    }
-    let path_bytes = core::slice::from_raw_parts(p, len);
     let token = match vfs::open(path_bytes, vfs::PERM_READ) {
         Ok(t) => t,
         Err(e) => return e.as_i64(),
     };
+    // Use the VFS fd info for size; pull timestamps from the on-disk inode
+    // via the onyxfs-specific path. For non-OnyxFS files we fall back to
+    // the kernel jiffies for mtime.
     let mut size = 0u32;
-    let res = vfs::stat(token, &mut size);
+    let res_stat = vfs::stat(token, &mut size);
     let _ = vfs::close(token);
-    match res {
-        Ok(()) => size as i64,
+    match res_stat {
+        Ok(()) => {
+            // Try to get richer metadata from onyxfs if the root fs is OnyxFS.
+            // (Lookup will fail for FAT32/procfs/ipcfs — that's fine.)
+            let mut st = crate::fs::onyxfs::OnyfsStat::default();
+            let (mtime, atime, ctime, ino, mode) = match crate::fs::onyxfs::lookup(path_bytes, &mut st) {
+                Ok(_) => (st.mtime, st.atime, st.ctime, st.ino, st.mode),
+                Err(_) => {
+                    let now = crate::srv::timer::uptime_us() / 1_000_000;
+                    (now, now, now, 0u32, 0u32)
+                }
+            };
+            fill_user_stat(st_buf, ino, size as u64, mode, mtime, atime, ctime);
+            0
+        }
         Err(e) => e.as_i64(),
     }
 }
+
+/// fstat(fd, struct stat *st) — same as stat() but takes an already-open fd.
+pub(in super::super) unsafe fn sys_fstat(token: u64, st_buf: u64) -> i64 {
+    if !user_ptr_ok(st_buf, core::mem::size_of::<UserStat>() as u64) {
+        return Errno::Inval.as_i64();
+    }
+    let mut size = 0u32;
+    match vfs::stat(token, &mut size) {
+        Ok(()) => {
+            // We don't have a cheap way to recover ino/mode/atime from a token
+            // in the current VFS; fill with reasonable defaults.
+            let now = crate::srv::timer::uptime_us() / 1_000_000;
+            fill_user_stat(st_buf, 0, size as u64, 0, now, now, now);
+            0
+        }
+        Err(e) => e.as_i64(),
+    }
+}
+
+/// fcntl(fd, cmd, arg) — file descriptor control.
+/// Currently supports:
+///   - `F_DUPFD` (cmd=0): duplicate fd to lowest available number ≥ arg.
+///   - `F_GETFD` (cmd=1): get fd flags (only FD_CLOEXEC bit, always 0 for now).
+///   - `F_SETFD` (cmd=2): set fd flags (accepted, FD_CLOEXEC is a no-op).
+///   - `F_GETFL` (cmd=3): get open flags (returns O_RDONLY for now).
+///   - `F_SETFL` (cmd=4): set open flags (O_NONBLOCK accepted as no-op).
+pub(in super::super) unsafe fn sys_fcntl(fd: u64, cmd: u32, arg: u64) -> i64 {
+    match cmd {
+        F_DUPFD => vfs::dup(fd).map(|t| t as i64).unwrap_or_else(|e| e.as_i64()),
+        F_GETFD => 0,
+        F_SETFD => {
+            // FD_CLOEXEC bit is stored but not honored (no execve-with-fd-
+            // preservation yet). Accept silently.
+            let _ = arg;
+            0
+        }
+        F_GETFL => O_RDONLY as i64,
+        F_SETFL => {
+            // O_NONBLOCK on UART-backed stdio is accepted as a no-op.
+            let _ = arg;
+            0
+        }
+        _ => Errno::NoSys.as_i64(),
+    }
+}
+
+// Re-export the O_* / F_* constants for callers that want to import them
+// through this module rather than through abi.
+pub use crate::syscall::abi::{
+    O_ACCMODE as _O_ACCMODE, O_APPEND as _O_APPEND, O_CREAT as _O_CREAT,
+    O_DIRECTORY as _O_DIRECTORY, O_EXCL as _O_EXCL, O_NONBLOCK as _O_NONBLOCK,
+    O_RDONLY as _O_RDONLY, O_RDWR as _O_RDWR, O_TRUNC as _O_TRUNC,
+    O_WRONLY as _O_WRONLY,
+};

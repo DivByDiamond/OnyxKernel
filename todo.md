@@ -7,7 +7,7 @@
 4. **OnyxFS v2** — timestamps (crtime/mtime/atime/ctime), indirect blocks, dirents 40 bytes
 5. **Flashback snapshots** — snapshot_create / rollback / list с RLE сжатием + COW data blocks
 6. **Root/User Space** — 3 ring'а, syscall ACL, path-policy, dropring
-7. **Syscalls (49)** — полная таблица ядерных вызовов:
+7. **Syscalls (77)** — полная таблица ядерных вызовов (v0.4 — userspace-ready update):
    - **1-5**: write, read, exit, yield, getpid
    - **6-7**: brk, mmap ✅ (раньше были stubbed)
    - **8-13**: open, close, lseek, stat, exec, sbrk
@@ -21,6 +21,30 @@
    - **45-48**: getuid, getgid, utimens, uname (NEW)
    - **49**: nanosleep (NEW)
    - 🐛 **Fix**: SYS_chan_open(33) был пропущен в ACL — теперь доступен user-пространству
+
+   **v0.4 additions (50–77):**
+   - **50**: `fstat(fd, struct stat *)` — POSIX-style, fills Linux-compatible 128-byte struct stat
+   - **51**: `waitpid(pid, *status, options)` — wait for specific child, supports WNOHANG
+   - **52**: `getdents64(fd, buf, len)` — batched directory reads (stub)
+   - **53**: `ioctl(fd, req, arg)` — terminal control (TCGETS/TCSETS/TIOCGWINSZ/FIONREAD)
+   - **54**: `mprotect(addr, len, prot)` — change page protections
+   - **55**: `sigaction(signum, *act, *oldact)` — install user-space signal handlers
+   - **56**: `sigprocmask(how, *set, *oldset)` — block/unblock signals
+   - **57**: `sigreturn()` — restore trap frame after handler
+   - **58**: `execve(path, argv, envp)` — exec with environment variables
+   - **59**: `getppid()` — return parent PID
+   - **60-62**: `setpgid`, `setsid`, `getpgid` — process group management (stubs)
+   - **63**: `fork()` — vfork-style; child shares parent's address space until exec
+   - **64-65**: `clock_gettime`, `clock_getres` — POSIX clocks (REALTIME/MONOTONIC)
+   - **66**: `isatty(fd)` — terminal detection
+   - **67**: `getentropy(buf, len)` — up to 256 bytes of xorshift64 entropy
+   - **68-69**: `setuid`, `setgid` — identity change (root-only)
+   - **70**: `fsync(fd)` — flush to disk (no-op; OnyxFS writes through immediately)
+   - **71**: `truncate2(path, len)` — POSIX truncate with explicit length
+   - **72**: `ftruncate(fd, len)` — same for fd
+   - **73-74**: `readlink`, `symlink` — symbolic links (stubs — OnyxFS has no symlinks yet)
+   - **75-76**: `chmod`, `fchmod` — permission bits (no-op; OnyxFS has no perms yet)
+   - **77**: `getdents` — old-style compat alias for getdents64
 8. **OnyxFS write** — onyxfs_write(), create(), mkdir() с bitmap allocation
 9. **Journal recovery** — write-ahead journal + recovery при mount
 10. **I/O batching** — read_multi/write_multi для multi-sector I/O

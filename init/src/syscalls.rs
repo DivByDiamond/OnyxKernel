@@ -302,3 +302,318 @@ pub unsafe fn gettimeofday(tv: *mut u64) -> i64 {
     asm!("ecall", in("a7") SYS_GETTIMEOFDAY, in("a0") tv as usize, lateout("a0") ret);
     ret
 }
+
+// ── Wrappers that were missing in v0.3 — added in v0.4 ──────────────────
+// (SYS_LSEEK / SYS_STAT / SYS_SBRK were already declared at the top of the file.)
+pub const SYS_KILL: u64 = 22;
+pub const SYS_SIGMASK: u64 = 23;
+pub const SYS_ACCESS2: u64 = 42;
+pub const SYS_FCNTL2: u64 = 44;
+pub const SYS_UTIMENS2: u64 = 47;
+pub const SYS_NANOSLEEP2: u64 = 49;
+pub const SYS_SNAPSHOT_CREATE: u64 = 19;
+pub const SYS_SNAPSHOT_ROLLBACK: u64 = 20;
+pub const SYS_SNAPSHOT_LIST: u64 = 21;
+
+#[inline]
+pub unsafe fn lseek(fd: u64, off: i64, whence: u32) -> i64 {
+    let ret: i64;
+    asm!("ecall", in("a7") SYS_LSEEK, in("a0") fd, in("a1") off, in("a2") whence as usize, lateout("a0") ret);
+    ret
+}
+
+#[inline]
+pub unsafe fn stat(path: *const u8, st_buf: *mut u8) -> i64 {
+    let ret: i64;
+    asm!("ecall", in("a7") SYS_STAT, in("a0") path as usize, in("a1") st_buf as usize, lateout("a0") ret);
+    ret
+}
+
+#[inline]
+pub unsafe fn sbrk(incr: i64) -> i64 {
+    let ret: i64;
+    asm!("ecall", in("a7") SYS_SBRK, in("a0") incr, lateout("a0") ret);
+    ret
+}
+
+#[inline]
+pub unsafe fn kill(pid: u32, sig: u32) -> i64 {
+    let ret: i64;
+    asm!("ecall", in("a7") SYS_KILL, in("a0") pid as usize, in("a1") sig as usize, lateout("a0") ret);
+    ret
+}
+
+#[inline]
+pub unsafe fn sigmask(how: u32, sig: u32) -> i64 {
+    let ret: i64;
+    asm!("ecall", in("a7") SYS_SIGMASK, in("a0") how as usize, in("a1") sig as usize, lateout("a0") ret);
+    ret
+}
+
+#[inline]
+pub unsafe fn access(path: *const u8, mode: u64) -> i64 {
+    let ret: i64;
+    asm!("ecall", in("a7") SYS_ACCESS2, in("a0") path as usize, in("a1") mode, lateout("a0") ret);
+    ret
+}
+
+#[inline]
+pub unsafe fn fcntl(fd: u64, cmd: u32, arg: u64) -> i64 {
+    let ret: i64;
+    asm!("ecall", in("a7") SYS_FCNTL2, in("a0") fd, in("a1") cmd as usize, in("a2") arg, lateout("a0") ret);
+    ret
+}
+
+#[inline]
+pub unsafe fn utimens(path: *const u8, times: *const u64) -> i64 {
+    let ret: i64;
+    asm!("ecall", in("a7") SYS_UTIMENS2, in("a0") path as usize, in("a1") times as usize, lateout("a0") ret);
+    ret
+}
+
+#[inline]
+pub unsafe fn nanosleep(req: *const u64, rem: *mut u64) -> i64 {
+    let ret: i64;
+    asm!("ecall", in("a7") SYS_NANOSLEEP2, in("a0") req as usize, in("a1") rem as usize, lateout("a0") ret);
+    ret
+}
+
+#[inline]
+pub unsafe fn snapshot_create(name: *const u8) -> i64 {
+    let ret: i64;
+    asm!("ecall", in("a7") SYS_SNAPSHOT_CREATE, in("a0") name as usize, lateout("a0") ret);
+    ret
+}
+
+#[inline]
+pub unsafe fn snapshot_rollback(id: u32) -> i64 {
+    let ret: i64;
+    asm!("ecall", in("a7") SYS_SNAPSHOT_ROLLBACK, in("a0") id as usize, lateout("a0") ret);
+    ret
+}
+
+#[inline]
+pub unsafe fn snapshot_list(buf: *mut u8, len: u64) -> i64 {
+    let ret: i64;
+    asm!("ecall", in("a7") SYS_SNAPSHOT_LIST, in("a0") buf as usize, in("a1") len, lateout("a0") ret);
+    ret
+}
+
+// ── New v0.4 syscalls (50–77) ────────────────────────────────────────────
+pub const SYS_FSTAT: u64 = 50;
+pub const SYS_WAITPID: u64 = 51;
+pub const SYS_GETDENTS64: u64 = 52;
+pub const SYS_IOCTL: u64 = 53;
+pub const SYS_MPROTECT: u64 = 54;
+pub const SYS_SIGACTION: u64 = 55;
+pub const SYS_SIGPROCMASK: u64 = 56;
+pub const SYS_SIGRETURN: u64 = 57;
+pub const SYS_EXECVE: u64 = 58;
+pub const SYS_GETPPID: u64 = 59;
+pub const SYS_SETPGID: u64 = 60;
+pub const SYS_SETSID: u64 = 61;
+pub const SYS_GETPGID: u64 = 62;
+pub const SYS_FORK: u64 = 63;
+pub const SYS_CLOCK_GETTIME: u64 = 64;
+pub const SYS_CLOCK_GETRES: u64 = 65;
+pub const SYS_ISATTY: u64 = 66;
+pub const SYS_GETENTROPY: u64 = 67;
+pub const SYS_SETUID: u64 = 68;
+pub const SYS_SETGID: u64 = 69;
+pub const SYS_FSYNC: u64 = 70;
+pub const SYS_TRUNCATE2: u64 = 71;
+pub const SYS_FTRUNCATE: u64 = 72;
+pub const SYS_READLINK: u64 = 73;
+pub const SYS_SYMLINK: u64 = 74;
+pub const SYS_CHMOD: u64 = 75;
+pub const SYS_FCHMOD: u64 = 76;
+pub const SYS_GETDENTS: u64 = 77;
+
+#[inline]
+pub unsafe fn fstat(fd: u64, st_buf: *mut u8) -> i64 {
+    let ret: i64;
+    asm!("ecall", in("a7") SYS_FSTAT, in("a0") fd, in("a1") st_buf as usize, lateout("a0") ret);
+    ret
+}
+
+#[inline]
+pub unsafe fn waitpid(pid: u64, status: *mut i32, options: u32) -> i64 {
+    let ret: i64;
+    asm!("ecall", in("a7") SYS_WAITPID, in("a0") pid, in("a1") status as usize, in("a2") options as usize, lateout("a0") ret);
+    ret
+}
+
+#[inline]
+pub unsafe fn getdents64(fd: u64, buf: *mut u8, len: u64) -> i64 {
+    let ret: i64;
+    asm!("ecall", in("a7") SYS_GETDENTS64, in("a0") fd, in("a1") buf as usize, in("a2") len, lateout("a0") ret);
+    ret
+}
+
+#[inline]
+pub unsafe fn ioctl(fd: u64, request: u64, arg: u64) -> i64 {
+    let ret: i64;
+    asm!("ecall", in("a7") SYS_IOCTL, in("a0") fd, in("a1") request, in("a2") arg, lateout("a0") ret);
+    ret
+}
+
+#[inline]
+pub unsafe fn mprotect(addr: u64, len: u64, prot: u64) -> i64 {
+    let ret: i64;
+    asm!("ecall", in("a7") SYS_MPROTECT, in("a0") addr, in("a1") len, in("a2") prot, lateout("a0") ret);
+    ret
+}
+
+#[inline]
+pub unsafe fn sigaction(signum: u32, act: *const u64, oldact: *mut u64) -> i64 {
+    let ret: i64;
+    asm!("ecall", in("a7") SYS_SIGACTION, in("a0") signum as usize, in("a1") act as usize, in("a2") oldact as usize, lateout("a0") ret);
+    ret
+}
+
+#[inline]
+pub unsafe fn sigprocmask(how: u32, set: *const u64, oldset: *mut u64) -> i64 {
+    let ret: i64;
+    asm!("ecall", in("a7") SYS_SIGPROCMASK, in("a0") how as usize, in("a1") set as usize, in("a2") oldset as usize, lateout("a0") ret);
+    ret
+}
+
+#[inline]
+pub unsafe fn sigreturn() -> i64 {
+    let ret: i64;
+    asm!("ecall", in("a7") SYS_SIGRETURN, lateout("a0") ret);
+    ret
+}
+
+#[inline]
+pub unsafe fn execve(path: *const u8, argv: *const u64, envp: *const u64) -> i64 {
+    let ret: i64;
+    asm!("ecall", in("a7") SYS_EXECVE, in("a0") path as usize, in("a1") argv as usize, in("a2") envp as usize, lateout("a0") ret);
+    ret
+}
+
+#[inline]
+pub unsafe fn getppid() -> i64 {
+    let ret: i64;
+    asm!("ecall", in("a7") SYS_GETPPID, lateout("a0") ret);
+    ret
+}
+
+#[inline]
+pub unsafe fn setpgid(pid: u64, pgid: u64) -> i64 {
+    let ret: i64;
+    asm!("ecall", in("a7") SYS_SETPGID, in("a0") pid, in("a1") pgid, lateout("a0") ret);
+    ret
+}
+
+#[inline]
+pub unsafe fn setsid() -> i64 {
+    let ret: i64;
+    asm!("ecall", in("a7") SYS_SETSID, lateout("a0") ret);
+    ret
+}
+
+#[inline]
+pub unsafe fn getpgid(pid: u64) -> i64 {
+    let ret: i64;
+    asm!("ecall", in("a7") SYS_GETPGID, in("a0") pid, lateout("a0") ret);
+    ret
+}
+
+#[inline]
+pub unsafe fn fork() -> i64 {
+    let ret: i64;
+    asm!("ecall", in("a7") SYS_FORK, lateout("a0") ret);
+    ret
+}
+
+#[inline]
+pub unsafe fn clock_gettime(clk_id: u64, ts: *mut u64) -> i64 {
+    let ret: i64;
+    asm!("ecall", in("a7") SYS_CLOCK_GETTIME, in("a0") clk_id, in("a1") ts as usize, lateout("a0") ret);
+    ret
+}
+
+#[inline]
+pub unsafe fn clock_getres(clk_id: u64, res: *mut u64) -> i64 {
+    let ret: i64;
+    asm!("ecall", in("a7") SYS_CLOCK_GETRES, in("a0") clk_id, in("a1") res as usize, lateout("a0") ret);
+    ret
+}
+
+#[inline]
+pub unsafe fn isatty(fd: u64) -> i64 {
+    let ret: i64;
+    asm!("ecall", in("a7") SYS_ISATTY, in("a0") fd, lateout("a0") ret);
+    ret
+}
+
+#[inline]
+pub unsafe fn getentropy(buf: *mut u8, len: u64) -> i64 {
+    let ret: i64;
+    asm!("ecall", in("a7") SYS_GETENTROPY, in("a0") buf as usize, in("a1") len, lateout("a0") ret);
+    ret
+}
+
+#[inline]
+pub unsafe fn setuid(uid: u64) -> i64 {
+    let ret: i64;
+    asm!("ecall", in("a7") SYS_SETUID, in("a0") uid, lateout("a0") ret);
+    ret
+}
+
+#[inline]
+pub unsafe fn setgid(gid: u64) -> i64 {
+    let ret: i64;
+    asm!("ecall", in("a7") SYS_SETGID, in("a0") gid, lateout("a0") ret);
+    ret
+}
+
+#[inline]
+pub unsafe fn fsync(fd: u64) -> i64 {
+    let ret: i64;
+    asm!("ecall", in("a7") SYS_FSYNC, in("a0") fd, lateout("a0") ret);
+    ret
+}
+
+#[inline]
+pub unsafe fn truncate2(path: *const u8, length: u64) -> i64 {
+    let ret: i64;
+    asm!("ecall", in("a7") SYS_TRUNCATE2, in("a0") path as usize, in("a1") length, lateout("a0") ret);
+    ret
+}
+
+#[inline]
+pub unsafe fn ftruncate(fd: u64, length: u64) -> i64 {
+    let ret: i64;
+    asm!("ecall", in("a7") SYS_FTRUNCATE, in("a0") fd, in("a1") length, lateout("a0") ret);
+    ret
+}
+
+#[inline]
+pub unsafe fn readlink(path: *const u8, buf: *mut u8, bufsiz: u64) -> i64 {
+    let ret: i64;
+    asm!("ecall", in("a7") SYS_READLINK, in("a0") path as usize, in("a1") buf as usize, in("a2") bufsiz, lateout("a0") ret);
+    ret
+}
+
+#[inline]
+pub unsafe fn symlink(target: *const u8, linkpath: *const u8) -> i64 {
+    let ret: i64;
+    asm!("ecall", in("a7") SYS_SYMLINK, in("a0") target as usize, in("a1") linkpath as usize, lateout("a0") ret);
+    ret
+}
+
+#[inline]
+pub unsafe fn chmod(path: *const u8, mode: u64) -> i64 {
+    let ret: i64;
+    asm!("ecall", in("a7") SYS_CHMOD, in("a0") path as usize, in("a1") mode, lateout("a0") ret);
+    ret
+}
+
+#[inline]
+pub unsafe fn fchmod(fd: u64, mode: u64) -> i64 {
+    let ret: i64;
+    asm!("ecall", in("a7") SYS_FCHMOD, in("a0") fd, in("a1") mode, lateout("a0") ret);
+    ret
+}

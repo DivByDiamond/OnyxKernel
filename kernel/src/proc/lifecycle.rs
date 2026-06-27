@@ -29,6 +29,12 @@ pub(super) unsafe fn alloc_proc() -> KResult<*mut Proc> {
     (*p).tf = TrapFrame::zero();
     (*p).pending_signals = 0;
     (*p).signal_mask = 0;
+    // Initialize per-process signal handler table — all defaults (0).
+    for h in (*p).signal_handlers.iter_mut() {
+        *h = 0;
+    }
+    (*p).saved_tf = TrapFrame::zero();
+    (*p).in_signal_handler = false;
     // Initialize per-process FD table — all slots free.
     for fd in (*p).fds.iter_mut() {
         *fd = crate::fs::vfs::VfsFd::default();
@@ -40,7 +46,7 @@ pub(super) unsafe fn alloc_proc() -> KResult<*mut Proc> {
 }
 
 /// Free a Proc node from the list and heap.
-pub(super) unsafe fn free_proc(p: *mut Proc) {
+pub unsafe fn free_proc(p: *mut Proc) {
     // Remove from linked list.
     if G_PROC_LIST == p {
         G_PROC_LIST = (*p).next;
@@ -87,6 +93,15 @@ pub unsafe fn exit(pid: u32, code: i32) {
             onyx_core::fmt::Arg::from(pid),
             onyx_core::fmt::Arg::from(code)
         );
+        // Close all open file descriptors so kernel-internal file resources
+        // (OnyxFS inodes, pipe buffers, etc.) are released. The FD slots
+        // themselves live in the Proc struct and will be freed with it.
+        for i in 0..p.fds.len() {
+            if p.fds[i].used {
+                let token = crate::fs::vfs::fd_token(i, p.fds[i].epoch);
+                let _ = crate::fs::vfs::close(token);
+            }
+        }
         vmm::destroy_root(p.root_pa);
         p.exit_code = code;
         p.state = ProcState::Exited;
@@ -98,6 +113,16 @@ pub unsafe fn exit(pid: u32, code: i32) {
                     pp.state = ProcState::Ready;
                 }
             }
+        }
+        // Re-parent any orphaned children to PID 1 (init). This prevents
+        // zombie leaks when a parent dies before its children. The init
+        // process is expected to call `wait()` periodically to reap them.
+        let mut cur = G_PROC_LIST;
+        while !cur.is_null() {
+            if (*cur).parent_pid == pid && !matches!((*cur).state, ProcState::Free | ProcState::Exited) {
+                (*cur).parent_pid = 1; // init reaps orphans
+            }
+            cur = (*cur).next;
         }
     }
 }

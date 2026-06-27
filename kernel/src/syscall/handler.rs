@@ -44,7 +44,13 @@ fn syscall_allowed(nr: u64, ring: u8) -> bool {
         | SYS_chan_recv | SYS_chan_close | SYS_chan_open
         | SYS_brk | SYS_mmap | SYS_munmap | SYS_dup | SYS_chdir | SYS_getcwd
         | SYS_access | SYS_gettimeofday | SYS_fcntl | SYS_getuid | SYS_getgid
-        | SYS_uname | SYS_nanosleep => true,
+        | SYS_uname | SYS_nanosleep
+        // v0.4 additions — available to all user programs:
+        | SYS_fstat | SYS_getdents64 | SYS_getdents | SYS_ioctl | SYS_mprotect
+        | SYS_sigaction | SYS_sigprocmask | SYS_sigreturn | SYS_execve
+        | SYS_getppid | SYS_clock_gettime | SYS_clock_getres | SYS_isatty
+        | SYS_getentropy | SYS_waitpid | SYS_fork | SYS_ftruncate | SYS_truncate2
+        | SYS_readlink | SYS_setsid | SYS_getpgid | SYS_setpgid => true,
         // Root-only (ring 0 or 1):
         SYS_spawn
         | SYS_wait
@@ -56,7 +62,9 @@ fn syscall_allowed(nr: u64, ring: u8) -> bool {
         | SYS_mkdir
         | SYS_chan_create
         | SYS_chan_create_named
-        | SYS_unlink | SYS_rename | SYS_truncate | SYS_utimens | SYS_pipe => ring <= proc::PROC_RING_ROOT,
+        | SYS_unlink | SYS_rename | SYS_truncate | SYS_utimens | SYS_pipe
+        // v0.4 root-only:
+        | SYS_setuid | SYS_setgid | SYS_fsync | SYS_symlink | SYS_chmod | SYS_fchmod => ring <= proc::PROC_RING_ROOT,
         _ => false,
     }
 }
@@ -74,6 +82,7 @@ pub unsafe fn handle(tf: &mut TrapFrame) -> i64 {
     }
 
     match nr {
+        // ── Original 1–49 syscalls ─────────────────────────────────────────
         SYS_write => fs_sys::sys_write(tf, a0, a1, a2),
         SYS_read => fs_sys::sys_read(tf, a0, a1, a2),
         SYS_exit => proc_sys::sys_exit(a0),
@@ -117,12 +126,55 @@ pub unsafe fn handle(tf: &mut TrapFrame) -> i64 {
         SYS_truncate => fs_sys3::sys_truncate(a0),
         SYS_access => fs_sys3::sys_access(a0, a1),
         SYS_gettimeofday => fs_sys3::sys_gettimeofday(a0),
-        SYS_fcntl => fs_sys3::sys_fcntl(a0, a1, a2),
+        SYS_fcntl => fs_sys::sys_fcntl(a0, a1 as u32, a2),
         SYS_getuid => fs_sys3::sys_getuid(),
         SYS_getgid => fs_sys3::sys_getgid(),
         SYS_utimens => fs_sys3::sys_utimens(a0, a1),
         SYS_uname => fs_sys3::sys_uname(a0),
         SYS_nanosleep => fs_sys3::sys_nanosleep(a0, a1),
+
+        // ── New v0.4 syscalls (50–77) ──────────────────────────────────────
+        SYS_fstat => fs_sys::sys_fstat(a0, a1),
+        SYS_waitpid => fs_sys3::sys_waitpid(tf, a0, a1, a2 as u32),
+        SYS_getdents64 => fs_sys3::sys_getdents64(a0, a1, a2),
+        SYS_ioctl => fs_sys3::sys_ioctl(a0, a1, a2),
+        SYS_mprotect => fs_sys3::sys_mprotect(a0, a1, a2),
+        SYS_sigaction => {
+            match fs_sys3::sys_sigaction_impl(a0 as u32, a1, a2) {
+                Ok(()) => 0,
+                Err(e) => e.as_i64(),
+            }
+        }
+        SYS_sigprocmask => {
+            match fs_sys3::sys_sigprocmask_impl(a0 as u32, a1, a2) {
+                Ok(()) => 0,
+                Err(e) => e.as_i64(),
+            }
+        }
+        SYS_sigreturn => {
+            fs_sys3::sys_sigreturn_impl(tf);
+            0
+        }
+        SYS_execve => fs_sys3::sys_execve(tf, a0, a1, a2),
+        SYS_getppid => fs_sys3::sys_getppid(),
+        SYS_setpgid => fs_sys3::sys_setpgid(a0, a1),
+        SYS_setsid => fs_sys3::sys_setsid(),
+        SYS_getpgid => fs_sys3::sys_getpgid(a0),
+        SYS_fork => fs_sys3::sys_fork(tf),
+        SYS_clock_gettime => fs_sys3::sys_clock_gettime(a0, a1),
+        SYS_clock_getres => fs_sys3::sys_clock_getres(a0, a1),
+        SYS_isatty => fs_sys3::sys_isatty(a0),
+        SYS_getentropy => fs_sys3::sys_getentropy(a0, a1),
+        SYS_setuid => fs_sys3::sys_setuid(a0),
+        SYS_setgid => fs_sys3::sys_setgid(a0),
+        SYS_fsync => fs_sys3::sys_fsync(a0),
+        SYS_truncate2 => fs_sys3::sys_truncate2(a0, a1),
+        SYS_ftruncate => fs_sys3::sys_ftruncate(a0, a1),
+        SYS_readlink => fs_sys3::sys_readlink(a0, a1, a2),
+        SYS_symlink => fs_sys3::sys_symlink(a0, a1),
+        SYS_chmod => fs_sys3::sys_chmod(a0, a1),
+        SYS_fchmod => fs_sys3::sys_fchmod(a0, a1),
+        SYS_getdents => fs_sys3::sys_getdents(a0, a1, a2),
         _ => Errno::NoSys.as_i64(),
     }
 }
