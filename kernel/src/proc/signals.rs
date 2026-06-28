@@ -1,30 +1,16 @@
-//! Signals — supports user-space handlers via `sigaction` / `sigreturn`.
-//!
-//! Per-process state:
-//!   - `pending_signals` (u32 bitmask): bits set by `kill`/`signal_send`
-//!   - `signal_mask`     (u32 bitmask): blocked signals (bit set = blocked)
-//!   - `signal_handlers` ([u64; 32]):   entry-point vaddr per signal, 0 = default
-//!   - `saved_tf`        (TrapFrame):    stashed user tf for `sigreturn`
-//!   - `in_signal_handler` (bool):       guard against nested signal entry
-//!
-//! Signal 9 (KILL) is always honored and cannot be blocked or caught.
-//! Other signals: if a handler is installed, the trap return path is
-//! rewritten to enter the handler with `a0 = signal_number`; the original
-//! trap frame is stashed in `saved_tf` and restored by `sigreturn`.
 use crate::arch::trap_frame::TrapFrame;
+use core::sync::atomic::Ordering;
 use onyx_core::errno::{Errno, KResult};
 
 use super::lifecycle::exit;
-use super::process::{by_pid, current_for_hart, hart_id, ProcState};
+use super::process::{by_pid, current_for_hart, hart_id, G_NEED_RESCHED, Proc, ProcState};
+use crate::proc::scheduler::enqueue;
 
 /// Signal number for KILL (POSIX SIGKILL = 9). Always honored, never blocked.
 pub const SIG_KILL: u32 = 9;
 /// Signal number for STOP (POSIX SIGSTOP = 19). Cannot be caught or blocked.
 pub const SIG_STOP: u32 = 19;
 
-/// Deliver `signal` to process `pid`. Sets the corresponding bit in the
-/// target's `pending_signals`. If the target is `Waiting`, it is woken
-/// (transitioned to `Ready`) so it can run again and observe the signal.
 pub unsafe fn signal_send(pid: u32, signal: u32) -> KResult<()> {
     if signal == 0 || signal >= 32 {
         return Err(Errno::Inval);
@@ -33,18 +19,11 @@ pub unsafe fn signal_send(pid: u32, signal: u32) -> KResult<()> {
     p.pending_signals |= 1u32 << signal;
     if matches!(p.state, ProcState::Waiting) {
         p.state = ProcState::Ready;
+        enqueue(hart_id(), p as *mut Proc);
     }
     Ok(())
 }
 
-/// Install / query a signal handler. POSIX `sigaction(signum, act, oldact)`.
-///
-/// `act` and `oldact` are user pointers to a `struct sigaction`-like record.
-/// We use a minimal 32-byte layout:
-///   - offset 0: sa_handler (u64) — function pointer or SIG_DFL=0 / SIG_IGN=1
-///   - offset 8: sa_mask     (u64) — additional signals to block during handler
-///   - offset 16: sa_flags   (u64) — currently ignored
-///   - offset 24: sa_restorer(u64) — currently ignored (we use SYS_sigreturn)
 pub unsafe fn sigaction(signum: u32, act_ptr: u64, oldact_ptr: u64) -> KResult<()> {
     if signum == 0 || signum >= 32 {
         return Err(Errno::Inval);
@@ -88,9 +67,6 @@ pub unsafe fn sigaction(signum: u32, act_ptr: u64, oldact_ptr: u64) -> KResult<(
     Ok(())
 }
 
-/// Change the signal mask. POSIX `sigprocmask(how, set, oldset)`.
-/// `how` is SIG_BLOCK (0), SIG_UNBLOCK (1), or SIG_SETMASK (2).
-/// `set` and `oldset` are user pointers to a single u64 (the mask).
 pub unsafe fn sigprocmask(how: u32, set_ptr: u64, oldset_ptr: u64) -> KResult<()> {
     let p = crate::proc::current();
     let user_root = p.root_pa;
@@ -121,7 +97,6 @@ pub unsafe fn sigprocmask(how: u32, set_ptr: u64, oldset_ptr: u64) -> KResult<()
     Ok(())
 }
 
-/// Restore the saved trap frame on `sigreturn`.
 pub unsafe fn sigreturn(tf: &mut TrapFrame) {
     let p = crate::proc::current();
     if !p.in_signal_handler {
@@ -135,17 +110,6 @@ pub unsafe fn sigreturn(tf: &mut TrapFrame) {
     *tf = p.saved_tf;
 }
 
-/// Check the current process for pending unblocked signals. Called from the
-/// trap handler after every trap (just before returning to user space).
-///
-/// Behavior:
-///   - SIGKILL: terminate the process (call `exit` with code 128+9).
-///   - SIGSTOP: not yet implemented (would suspend the process).
-///   - Signal with handler installed: rewrite `tf` to enter the handler.
-///     The handler is called as `void handler(int signum)`. We stash the
-///     original tf in `saved_tf` and arrange for the handler to invoke
-///     `SYS_sigreturn` when it returns.
-///   - Signal without handler: default action (terminate for now).
 pub unsafe fn signal_check(tf: &mut TrapFrame) {
     let hartid = hart_id();
     let cur = current_for_hart(hartid);
@@ -158,7 +122,7 @@ pub unsafe fn signal_check(tf: &mut TrapFrame) {
     if (*cur).pending_signals & (1u32 << SIG_KILL) != 0 {
         (*cur).pending_signals &= !(1u32 << SIG_KILL);
         exit(pid, 128 + SIG_KILL as i32);
-        super::scheduler::NEED_RESCHED = true;
+        G_NEED_RESCHED[hartid].store(true, Ordering::Release);
         return;
     }
 
@@ -190,7 +154,7 @@ pub unsafe fn signal_check(tf: &mut TrapFrame) {
     if handler == 0 {
         // Default action: terminate with `128 + signum` (Linux convention).
         exit(pid, 128 + signum as i32);
-        super::scheduler::NEED_RESCHED = true;
+        G_NEED_RESCHED[hartid].store(true, Ordering::Release);
         return;
     }
     if handler == 1 {

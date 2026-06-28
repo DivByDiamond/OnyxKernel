@@ -35,23 +35,33 @@ const MAX_ENVP_BYTES: usize = 8192;
 /// Auxiliary vector types we emit. Subset of the POSIX/ELF `<elf.h>` `AT_*`.
 mod at {
     pub const AT_NULL: u64 = 0;
+    #[expect(dead_code)]
     pub const AT_IGNORE: u64 = 1;
+    #[expect(dead_code)]
     pub const AT_EXECFD: u64 = 2;
+    #[expect(dead_code)]
     pub const AT_PHDR: u64 = 3;
+    #[expect(dead_code)]
     pub const AT_PHENT: u64 = 4;
+    #[expect(dead_code)]
     pub const AT_PHNUM: u64 = 5;
     pub const AT_PAGESZ: u64 = 6;
+    #[expect(dead_code)]
     pub const AT_BASE: u64 = 7;
+    #[expect(dead_code)]
     pub const AT_FLAGS: u64 = 8;
     pub const AT_ENTRY: u64 = 9;
     pub const AT_UID: u64 = 11;
     pub const AT_EUID: u64 = 12;
     pub const AT_GID: u64 = 13;
     pub const AT_EGID: u64 = 14;
+    #[expect(dead_code)]
     pub const AT_PLATFORM: u64 = 15;
+    #[expect(dead_code)]
     pub const AT_HWCAP: u64 = 16;
     pub const AT_CLKTCK: u64 = 17;
     pub const AT_RANDOM: u64 = 25;
+    #[expect(dead_code)]
     pub const AT_EXECFN: u64 = 31;
 }
 

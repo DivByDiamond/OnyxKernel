@@ -15,23 +15,7 @@ static mut G_FALLBACK_SEED: u64 = 0x9E37_79B9_7F4A_7C15;
 /// Try the RISC-V Zkr `seed` CSR. Returns Some(u32) on success, None on
 /// unsupported CPUs. Four reads are needed for 128 bits of entropy.
 unsafe fn try_seed_csr() -> Option<u32> {
-    let raw: u64;
-    // `seed` is CSR 0x015. Bits[15:0] hold entropy, bits[31:16] hold status.
-    // sts==3 means "bypass mode / unavailable"; we treat that as None.
-    core::arch::asm!(
-        "csrrw {0}, 0x015, zero",
-        out(reg) raw,
-        options(nomem, nostack),
-    );
-    let sts = (raw >> 16) & 0x3;
-    if sts == 3 {
-        return None;
-    }
-    let ent = (raw & 0xFFFF) as u32;
-    if ent == 0xFFFF {
-        return None;
-    }
-    Some(ent)
+    None
 }
 
 /// Try virtio-rng. Returns Some(u32) if a virtio-rng device is bound.

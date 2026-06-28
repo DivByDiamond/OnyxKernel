@@ -49,8 +49,11 @@ pub struct Proc {
     /// True if a signal handler is currently executing for this process.
     pub in_signal_handler: bool,
     pub fds: [crate::fs::vfs::VfsFd; PROC_MAX_FDS],
+    pub all_next: *mut Proc,
     pub next: *mut Proc,
     pub wait_next: *mut Proc,
+    pub affinity: i32,
+    pub on_rq: bool,
 }
 
 impl Proc {
@@ -87,8 +90,11 @@ impl Proc {
                 perms: 0,
                 epoch: 0,
             }; PROC_MAX_FDS],
+            all_next: ptr::null_mut(),
             next: ptr::null_mut(),
             wait_next: ptr::null_mut(),
+            affinity: -1,
+            on_rq: false,
         }
     }
 }

@@ -1,6 +1,6 @@
-use super::cmd::*;
-use super::io::*;
 use super::regs::*;
+use super::cmd::*;
+use super::{wait_idle, wait_state, reset, clear_interrupts, set_sdma_addr, wait_transfer_complete};
 
 pub unsafe fn read(lba: u64, buf: &mut [u8; 512]) -> bool {
     let p = &raw const crate::drivers::sdhci::G_SDHCI;

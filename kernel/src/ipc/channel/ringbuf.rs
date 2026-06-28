@@ -55,7 +55,7 @@ pub unsafe fn send(
     if available < len {
         if let Some(tf) = tf {
             wait_enqueue(&mut ch.send_wait);
-            crate::proc::scheduler::set_need_resched(true);
+            crate::proc::scheduler::set_need_resched(crate::proc::hart_id(), true);
             crate::proc::scheduler::sched_yield(tf);
             return Err(Errno::Busy);
         }
@@ -72,7 +72,7 @@ pub unsafe fn send(
 
     if !ch.recv_wait.is_null() {
         wait_wake_all(&mut ch.recv_wait);
-        crate::proc::scheduler::set_need_resched(true);
+        crate::proc::scheduler::set_need_resched(crate::proc::hart_id(), true);
     }
     Ok(written)
 }
@@ -99,7 +99,7 @@ pub unsafe fn recv(
     if available == 0 {
         if let Some(tf) = tf {
             wait_enqueue(&mut ch.recv_wait);
-            crate::proc::scheduler::set_need_resched(true);
+            crate::proc::scheduler::set_need_resched(crate::proc::hart_id(), true);
             crate::proc::scheduler::sched_yield(tf);
             return Ok(0);
         }
@@ -117,7 +117,7 @@ pub unsafe fn recv(
 
     if !ch.send_wait.is_null() {
         wait_wake_all(&mut ch.send_wait);
-        crate::proc::scheduler::set_need_resched(true);
+        crate::proc::scheduler::set_need_resched(crate::proc::hart_id(), true);
     }
     Ok(read)
 }

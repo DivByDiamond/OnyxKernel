@@ -13,7 +13,7 @@ pub(super) unsafe fn sys_exit(code: u64) -> i64 {
 }
 
 pub(super) unsafe fn sys_yield() -> i64 {
-    proc::set_need_resched(true);
+    proc::set_need_resched(proc::hart_id(), true);
     0
 }
 pub(super) unsafe fn sys_getpid() -> i64 {
@@ -92,4 +92,28 @@ pub(super) unsafe fn sys_sigmask(how: u32, sig: u32) -> i64 {
         _ => return Errno::Inval.as_i64(),
     }
     0
+}
+
+pub(super) unsafe fn sys_sched_setaffinity(pid: u64, cpu: i64) -> i64 {
+    if cpu < -1 || cpu >= crate::proc::process::MAX_HARTS as i64 {
+        return Errno::Inval.as_i64();
+    }
+    if let Some(p) = crate::proc::by_pid(pid as u32) {
+        let cur = crate::proc::current();
+        if cur.pid != pid as u32 && cur.ring > crate::proc::PROC_RING_ROOT {
+            return Errno::Perm.as_i64();
+        }
+        p.affinity = cpu as i32;
+        0
+    } else {
+        Errno::NoEnt.as_i64()
+    }
+}
+
+pub(super) unsafe fn sys_sched_getaffinity(pid: u64) -> i64 {
+    if let Some(p) = crate::proc::by_pid(pid as u32) {
+        p.affinity as i64
+    } else {
+        Errno::NoEnt.as_i64()
+    }
 }

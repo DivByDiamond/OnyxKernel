@@ -10,7 +10,7 @@ use crate::proc;
 use crate::syscall::abi::*;
 use onyx_core::errno::Errno;
 
-use super::{fs_sys, fs_sys2, fs_sys3, ipc_sys, proc_sys, ring_sys, snap_sys};
+use super::{fs_sys, fs_sys2, fs_sys3, ipc_sys, net_sys, proc_sys, ring_sys, snap_sys};
 
 const USER_BASE: u64 = 0x10000;
 const USER_TOP: u64 = 0x4000_0000;
@@ -50,7 +50,9 @@ fn syscall_allowed(nr: u64, ring: u8) -> bool {
         | SYS_sigaction | SYS_sigprocmask | SYS_sigreturn | SYS_execve
         | SYS_getppid | SYS_clock_gettime | SYS_clock_getres | SYS_isatty
         | SYS_getentropy | SYS_waitpid | SYS_fork | SYS_ftruncate | SYS_truncate2
-        | SYS_readlink | SYS_setsid | SYS_getpgid | SYS_setpgid => true,
+        | SYS_readlink | SYS_setsid | SYS_getpgid | SYS_setpgid
+        | SYS_sched_setaffinity | SYS_sched_getaffinity
+        | SYS_net_connect | SYS_net_send | SYS_net_recv | SYS_net_close => true,
         // Root-only (ring 0 or 1):
         SYS_spawn
         | SYS_wait
@@ -175,6 +177,12 @@ pub unsafe fn handle(tf: &mut TrapFrame) -> i64 {
         SYS_chmod => fs_sys3::sys_chmod(a0, a1),
         SYS_fchmod => fs_sys3::sys_fchmod(a0, a1),
         SYS_getdents => fs_sys3::sys_getdents(a0, a1, a2),
+        SYS_sched_setaffinity => proc_sys::sys_sched_setaffinity(a0, a1 as i64),
+        SYS_sched_getaffinity => proc_sys::sys_sched_getaffinity(a0),
+        SYS_net_connect => net_sys::sys_net_connect(a0, a1),
+        SYS_net_send => net_sys::sys_net_send(a0, a1, a2),
+        SYS_net_recv => net_sys::sys_net_recv(a0, a1, a2),
+        SYS_net_close => net_sys::sys_net_close(a0),
         _ => Errno::NoSys.as_i64(),
     }
 }

@@ -62,7 +62,7 @@ pub unsafe fn sys_nanosleep(req: u64, _rem: u64) -> i64 {
         }
         // Yield CPU instead of busy-looping. The scheduler will pick another
         // runnable process (or idle) until the next timer tick wakes us.
-        crate::proc::set_need_resched(true);
+        crate::proc::set_need_resched(crate::proc::hart_id(), true);
         // Force a scheduler check by re-reading the jiffies — the trap-return
         // path will switch context if NEED_RESCHED is set.
         core::hint::spin_loop();

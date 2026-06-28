@@ -2,8 +2,8 @@ use crate::arch::csr;
 use crate::arch::regs::SSTATUS_SIE;
 use crate::arch::smp::{G_SEC_STACKS, SEC_STACK_SIZE};
 use crate::srv::timer;
-
-use crate::proc::process::{current_for_hart, hart_id};
+use crate::proc::process::{current_for_hart, hart_id, G_NEED_RESCHED};
+use core::sync::atomic::Ordering;
 
 pub unsafe fn is_idle() -> bool {
     current_for_hart(hart_id()).is_null()
@@ -19,6 +19,7 @@ pub unsafe fn sched_enter_idle() -> ! {
     csr::set_sie((1 << 5) | (1 << 9));
     csr::set_sstatus(SSTATUS_SIE);
     loop {
+        G_NEED_RESCHED[hartid].store(false, Ordering::Release);
         csr::wfi();
     }
 }

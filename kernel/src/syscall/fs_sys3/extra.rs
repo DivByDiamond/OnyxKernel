@@ -202,7 +202,7 @@ pub unsafe fn sys_waitpid(tf: &mut TrapFrame, pid: u64, status_out: u64, options
     }
 
     // Look for an exited child matching the pid filter.
-    let mut cur = proc::G_PROC_LIST;
+    let mut cur = proc::G_ALL_PROCS;
     while !cur.is_null() {
         if (*cur).parent_pid == my_pid && matches!((*cur).state, ProcState::Exited) {
             let matches_pid = if pid == u32::MAX as u64 || pid == 0 {
@@ -225,12 +225,12 @@ pub unsafe fn sys_waitpid(tf: &mut TrapFrame, pid: u64, status_out: u64, options
                 return exited_pid as i64;
             }
         }
-        cur = (*cur).next;
+        cur = (*cur).all_next;
     }
 
     // Check if any matching child exists.
     let mut has_child = false;
-    cur = proc::G_PROC_LIST;
+    cur = proc::G_ALL_PROCS;
     while !cur.is_null() {
         if (*cur).parent_pid == my_pid && !matches!((*cur).state, ProcState::Free) {
             let matches_pid = if pid == u32::MAX as u64 || pid == 0 {
@@ -245,7 +245,7 @@ pub unsafe fn sys_waitpid(tf: &mut TrapFrame, pid: u64, status_out: u64, options
                 break;
             }
         }
-        cur = (*cur).next;
+        cur = (*cur).all_next;
     }
     if !has_child {
         return Errno::NoEnt.as_i64();

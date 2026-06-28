@@ -81,6 +81,12 @@ pub const SYS_symlink: u64 = 74;        // symlink(target, linkpath)
 pub const SYS_chmod: u64 = 75;          // chmod(path, mode)
 pub const SYS_fchmod: u64 = 76;         // fchmod(fd, mode)
 pub const SYS_getdents: u64 = 77;       // getdents(fd, *buf, len)  (compat alias)
+pub const SYS_sched_setaffinity: u64 = 78; // sched_setaffinity(pid, cpu) — pin to CPU
+pub const SYS_sched_getaffinity: u64 = 79; // sched_getaffinity(pid) -> cpu (or -1 for any)
+pub const SYS_net_connect: u64 = 80;  // net_connect(ip_ptr, port) -> conn_id
+pub const SYS_net_send: u64 = 81;     // net_send(conn_id, buf, len) -> bytes
+pub const SYS_net_recv: u64 = 82;     // net_recv(conn_id, buf, len) -> bytes
+pub const SYS_net_close: u64 = 83;    // net_close(conn_id) -> 0
 
 // ── Flags / constants used by syscalls ─────────────────────────────────
 

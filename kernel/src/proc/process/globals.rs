@@ -1,16 +1,19 @@
 use crate::arch::trap_frame::TrapFrame;
 use core::ptr;
+use core::sync::atomic::{AtomicBool, Ordering};
 
 use super::types::{Proc, PROC_PID_INIT};
 use crate::arch::smp;
 
 pub const MAX_HARTS: usize = smp::MAX_HARTS;
 
-pub static mut G_PROC_LIST: *mut Proc = ptr::null_mut();
+pub static mut G_ALL_PROCS: *mut Proc = ptr::null_mut();
 
 pub static mut G_HART_CURRENT: [*mut Proc; MAX_HARTS] = [ptr::null_mut(); MAX_HARTS];
 
 pub static mut G_HART_IDLE_TF: [TrapFrame; MAX_HARTS] = [TrapFrame::zero(); MAX_HARTS];
+
+pub static G_NEED_RESCHED: [AtomicBool; MAX_HARTS] = [const { AtomicBool::new(false) }; MAX_HARTS];
 
 pub static mut G_CURRENT: *mut Proc = ptr::null_mut();
 
@@ -24,10 +27,11 @@ pub fn hart_id() -> usize {
 }
 
 pub unsafe fn init() {
-    G_PROC_LIST = ptr::null_mut();
+    G_ALL_PROCS = ptr::null_mut();
     G_CURRENT = ptr::null_mut();
     for i in 0..MAX_HARTS {
         G_HART_CURRENT[i] = ptr::null_mut();
+        G_NEED_RESCHED[i].store(false, Ordering::Release);
     }
     G_NEXT_PID = PROC_PID_INIT;
 }

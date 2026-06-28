@@ -108,7 +108,8 @@ pub(crate) unsafe fn probe_peripherals() {
         crate::kinf!("wdt", "base=%p timeout=3000ms", Arg::from(wdt_info.base));
     }
     let extra_virtio_bases = [0x1000_1000usize, 0x1000_2000, 0x1000_3000,
-                              0x1000_4000, 0x1000_5000, 0x1000_6000];
+                               0x1000_4000, 0x1000_5000, 0x1000_6000,
+                               0x1000_7000, 0x1000_8000];
     for &b in &extra_virtio_bases {
         if virtio_rng::probe(b) {
             if virtio_rng::init(b).is_ok() {

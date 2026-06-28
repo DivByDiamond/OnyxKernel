@@ -5,9 +5,10 @@
 //! is SYS_wait: it blocks the caller until a child exits, then reaps it.
 use super::lifecycle::{alloc_proc, free_proc};
 use super::process::{
-    alloc_pid, by_pid, current_for_hart, current_pid, hart_id, ProcState, G_PROC_LIST,
+    alloc_pid, by_pid, current_for_hart, current_pid, hart_id, ProcState, G_ALL_PROCS,
     PROC_RING_ROOT, PROC_RING_USER,
 };
+use crate::proc::scheduler::enqueue;
 use crate::arch::regs::*;
 use crate::arch::trap_frame::TrapFrame;
 use crate::mm::heap;
@@ -51,6 +52,7 @@ pub unsafe fn create_user(
     (*p).tf.a1 = if argc > 0 { argv_sp + 8 } else { 0 };
     (*p).tf.sstatus = SSTATUS_SPIE;
     (*p).tf.satp = SATP_MODE_SV39 | (root_pa >> 12);
+    enqueue(hart_id(), p);
     Ok(())
 }
 
@@ -101,7 +103,7 @@ pub unsafe fn spawn(path: &[u8], argv_user: u64, ring_hint: u8, parent_pid: u32)
 pub unsafe fn wait(tf: &mut TrapFrame, status_out: *mut i32) -> KResult<u32> {
     let my_pid = current_pid();
     // Look for exited child.
-    let mut cur = G_PROC_LIST;
+    let mut cur = G_ALL_PROCS;
     while !cur.is_null() {
         if (*cur).parent_pid == my_pid && matches!((*cur).state, ProcState::Exited) {
             let exited_pid = (*cur).pid;
@@ -112,17 +114,17 @@ pub unsafe fn wait(tf: &mut TrapFrame, status_out: *mut i32) -> KResult<u32> {
             free_proc(cur);
             return Ok(exited_pid);
         }
-        cur = (*cur).next;
+        cur = (*cur).all_next;
     }
     // Check if any child exists.
     let mut has_child = false;
-    cur = G_PROC_LIST;
+    cur = G_ALL_PROCS;
     while !cur.is_null() {
         if (*cur).parent_pid == my_pid && !matches!((*cur).state, ProcState::Free) {
             has_child = true;
             break;
         }
-        cur = (*cur).next;
+        cur = (*cur).all_next;
     }
     if !has_child {
         return Err(Errno::NoEnt);

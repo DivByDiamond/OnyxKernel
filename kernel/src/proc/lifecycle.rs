@@ -1,7 +1,7 @@
 //! Process lifecycle — allocation, freeing, `enter_user`, `exit`, and `count`.
 use super::process::Proc;
 use super::process::{
-    by_pid, set_current_for_hart, ProcState, G_PROC_LIST, PROC_RING_KERNEL,
+    by_pid, hart_id, set_current_for_hart, ProcState, G_ALL_PROCS, PROC_RING_KERNEL,
 };
 use crate::arch::trap_frame::TrapFrame;
 use crate::mm::{heap, vmm};
@@ -40,23 +40,23 @@ pub(super) unsafe fn alloc_proc() -> KResult<*mut Proc> {
         *fd = crate::fs::vfs::VfsFd::default();
     }
     (*p).wait_next = ptr::null_mut();
-    (*p).next = G_PROC_LIST;
-    G_PROC_LIST = p;
+    (*p).all_next = G_ALL_PROCS;
+    G_ALL_PROCS = p;
     Ok(p)
 }
 
 /// Free a Proc node from the list and heap.
 pub unsafe fn free_proc(p: *mut Proc) {
-    // Remove from linked list.
-    if G_PROC_LIST == p {
-        G_PROC_LIST = (*p).next;
+    // Remove from process list.
+    if G_ALL_PROCS == p {
+        G_ALL_PROCS = (*p).all_next;
     } else {
-        let mut cur = G_PROC_LIST;
-        while !cur.is_null() && (*cur).next != p {
-            cur = (*cur).next;
+        let mut cur = G_ALL_PROCS;
+        while !cur.is_null() && (*cur).all_next != p {
+            cur = (*cur).all_next;
         }
         if !cur.is_null() {
-            (*cur).next = (*p).next;
+            (*cur).all_next = (*p).all_next;
         }
     }
     heap::kfree(p as *mut u8);
@@ -64,12 +64,12 @@ pub unsafe fn free_proc(p: *mut Proc) {
 
 pub unsafe fn enter_user(pid: u32) -> ! {
     // Find process by pid.
-    let mut p = G_PROC_LIST;
+    let mut p = G_ALL_PROCS;
     while !p.is_null() {
         if (*p).pid == pid && !matches!((*p).state, ProcState::Free) {
             break;
         }
-        p = (*p).next;
+        p = (*p).all_next;
     }
     if p.is_null() {
         crate::srv::klog::puts("proc: enter_user: pid not found, halting\n");
@@ -111,18 +111,19 @@ pub unsafe fn exit(pid: u32, code: i32) {
             if let Some(pp) = by_pid(parent) {
                 if matches!(pp.state, ProcState::Waiting) {
                     pp.state = ProcState::Ready;
+                    crate::proc::scheduler::enqueue(hart_id(), pp as *mut Proc);
                 }
             }
         }
         // Re-parent any orphaned children to PID 1 (init). This prevents
         // zombie leaks when a parent dies before its children. The init
         // process is expected to call `wait()` periodically to reap them.
-        let mut cur = G_PROC_LIST;
+        let mut cur = G_ALL_PROCS;
         while !cur.is_null() {
             if (*cur).parent_pid == pid && !matches!((*cur).state, ProcState::Free | ProcState::Exited) {
                 (*cur).parent_pid = 1; // init reaps orphans
             }
-            cur = (*cur).next;
+            cur = (*cur).all_next;
         }
     }
 }
@@ -131,7 +132,7 @@ pub unsafe fn exit(pid: u32, code: i32) {
 pub fn count() -> usize {
     unsafe {
         let mut n = 0;
-        let mut cur = G_PROC_LIST;
+        let mut cur = G_ALL_PROCS;
         while !cur.is_null() {
             if !matches!((*cur).state, ProcState::Free) {
                 n += 1;

@@ -14,6 +14,7 @@ pub mod fs_sys2;
 pub mod fs_sys3;
 pub mod handler;
 pub mod ipc_sys;
+pub mod net_sys;
 pub mod proc_sys;
 pub mod ring_sys;
 pub mod snap_sys;

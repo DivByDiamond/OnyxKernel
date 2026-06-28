@@ -98,7 +98,7 @@
 - [x] **`/ipc/*` виртуальный путь** в VFS через ipcfs (mount, lookup, readdir)
 
 ### Приоритет 5 — Драйверы:
-- [ ] **SDHCI драйвер** — для Milk-V Duo S
+- [x] **SDHCI драйвер** — для Milk-V Duo S (6→4 файла, ≤200 строк каждый)
 
 ### Приоритет 6 — Инструменты:
 - [x] **elf2onx v2** — v2 формат с compressed_size (RLE сжатие сегментов + флаг ONX_FLAGS_COMPRESSED)
@@ -108,4 +108,6 @@
 - [x] **Panic recovery** — kdump (CSR, backtrace, hartid, dump_all), QEMU reboot
 - [x] **Multi-core (SMP)** — G_HART_CURRENT, G_HART_IDLE_TF, SpinLock, sched_enter_idle()
 - [x] **RLE decompression в загрузчике onx** — распаковка сжатых сегментов при загрузке
-- [ ] **SMP scheduler improvements** — per-CPU run queues, load balancing, CPU affinity
+- [x] **SMP scheduler improvements** — per-CPU run queues, per-CPU need_resched, enqueue/dequeue API
+- [x] **Load balancing** — steal from remote CPU when local queue empty (pull model, try_lock, race-safe)
+- [x] **CPU affinity syscall** — `sched_setaffinity` / `sched_getaffinity` (SYS 78/79) + affinity-aware steal + redirect on dequeue

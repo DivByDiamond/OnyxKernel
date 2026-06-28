@@ -119,7 +119,7 @@ pub unsafe fn handle(tf: &mut TrapFrame) {
             }
         }
     }
-    if proc::NEED_RESCHED {
+    if proc::process::G_NEED_RESCHED[proc::process::hart_id()].load(core::sync::atomic::Ordering::Acquire) {
         proc::sched_yield(tf);
     }
 }

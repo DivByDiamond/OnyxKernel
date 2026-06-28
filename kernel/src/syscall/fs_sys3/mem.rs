@@ -50,6 +50,7 @@ pub unsafe fn sys_brk(addr: u64) -> i64 {
     addr as i64
 }
 
+#[expect(dead_code)]
 pub unsafe fn sys_sbrk(incr: i64) -> i64 {
     let pid = proc::current_pid();
     let p = proc::by_pid(pid).unwrap();

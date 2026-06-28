@@ -125,6 +125,7 @@ pub unsafe fn sys_access(path: u64, _mode: u64) -> i64 {
 
 /// fcntl moved to fs_sys::open_close to share the O_* / F_* constants.
 /// This stub remains for the `fs_sys3` re-export only and is not dispatched.
+#[expect(dead_code)]
 pub unsafe fn sys_fcntl_legacy(fd: u64, cmd: u64, arg: u64) -> i64 {
     match cmd {
         0 => vfs::dup2(fd, arg).map(|t| t as i64).unwrap_or_else(|e| e.as_i64()),
