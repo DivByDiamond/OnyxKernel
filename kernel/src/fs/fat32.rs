@@ -1,7 +1,14 @@
-//! FAT32 read-only driver (simplified).
+//! FAT32 read-only driver.
 use crate::drivers::{virtio, virtio_req};
 use core::ptr;
 use onyx_core::errno::{Errno, KResult};
+
+const ATTR_DIRECTORY: u8 = 0x10;
+const ATTR_LFN: u8 = 0x0F;
+const FAT32_EOC: u32 = 0x0FFFFFF8;
+const DIR_ENTRY_SIZE: usize = 32;
+const ENTRIES_PER_SECTOR: usize = 512 / DIR_ENTRY_SIZE;
+
 static mut G_DEV: usize = 0;
 static mut G_SPC: u32 = 0;
 static mut G_RESVD: u32 = 0;
@@ -13,17 +20,98 @@ static mut G_SEC: [u8; 512] = [0; 512];
 unsafe fn read_sec(lba: u64, buf: &mut [u8; 512]) -> KResult<()> {
     virtio_req::read(G_DEV, lba, buf.as_mut_ptr())
 }
-#[expect(dead_code)]
+
 unsafe fn cluster_to_lba(cluster: u32) -> u64 {
     (G_DATA_LBA as u64) + ((cluster - 2) as u64) * (G_SPC as u64)
 }
-#[expect(dead_code)]
-unsafe fn fat_next(cluster: u32) -> u32 {
-    let fat_offset = (cluster as u64) * 4;
-    let fat_lba = (G_RESVD as u64) + (fat_offset / 512);
-    let _ = read_sec(fat_lba, &mut G_SEC);
-    let off = (fat_offset % 512) as usize;
+
+unsafe fn fat_entry(cluster: u32) -> u32 {
+    let fat_off = cluster as u64 * 4;
+    let fat_lba = G_RESVD as u64 + fat_off / 512;
+    if read_sec(fat_lba, &mut G_SEC).is_err() {
+        return FAT32_EOC;
+    }
+    let off = (fat_off % 512) as usize;
     u32::from_le_bytes([G_SEC[off], G_SEC[off + 1], G_SEC[off + 2], G_SEC[off + 3]]) & 0x0FFF_FFFF
+}
+
+unsafe fn is_eoc(v: u32) -> bool {
+    v >= FAT32_EOC
+}
+
+unsafe fn read_cluster_sector(cluster: u32, sector_in_cluster: u32, buf: &mut [u8; 512]) -> KResult<()> {
+    let lba = cluster_to_lba(cluster) + sector_in_cluster as u64;
+    read_sec(lba, buf)
+}
+
+fn fat32_name_8_3(name: &[u8]) -> [u8; 11] {
+    let mut out = [0x20u8; 11]; // space-padded
+    if name.is_empty() || name == b"." || name == b".." {
+        return out;
+    }
+    let dot = name.iter().position(|&b| b == b'.');
+    let (base, ext) = match dot {
+        Some(i) => (&name[..i], &name[i + 1..]),
+        None => (name, &[][..]),
+    };
+    for i in 0..base.len().min(8) {
+        let b = base[i];
+        out[i] = if b >= b'a' && b <= b'z' { b - 32 } else { b };
+    }
+    for i in 0..ext.len().min(3) {
+        let b = ext[i];
+        out[8 + i] = if b >= b'a' && b <= b'z' { b - 32 } else { b };
+    }
+    out
+}
+
+unsafe fn scan_dir_entries(
+    dir_cluster: u32,
+    needle: &[u8; 11],
+    out_cluster: &mut u32,
+    out_size: &mut u32,
+    is_dir: &mut bool,
+) -> KResult<()> {
+    let mut cluster = dir_cluster;
+    if cluster == 0 {
+        return Err(Errno::NoEnt);
+    }
+    loop {
+        for si in 0..G_SPC {
+            read_cluster_sector(cluster, si, &mut G_SEC)?;
+            for ei in 0..ENTRIES_PER_SECTOR {
+                let off = ei * DIR_ENTRY_SIZE;
+                let attr = G_SEC[off + 11];
+                if attr == ATTR_LFN {
+                    continue;
+                }
+                if G_SEC[off] == 0 {
+                    return Err(Errno::NoEnt);
+                }
+                if G_SEC[off] == 0xE5 {
+                    continue;
+                }
+                let mut entry = [0u8; 11];
+                entry.copy_from_slice(&G_SEC[off..off + 11]);
+                if &entry == needle {
+                    let cluster_lo = u16::from_le_bytes([G_SEC[off + 26], G_SEC[off + 27]]);
+                    let cluster_hi = u16::from_le_bytes([G_SEC[off + 20], G_SEC[off + 21]]);
+                    *out_cluster = ((cluster_hi as u32) << 16) | cluster_lo as u32;
+                    *out_size = u32::from_le_bytes([
+                        G_SEC[off + 28], G_SEC[off + 29],
+                        G_SEC[off + 30], G_SEC[off + 31],
+                    ]);
+                    *is_dir = (attr & ATTR_DIRECTORY) != 0;
+                    return Ok(());
+                }
+            }
+        }
+        let next = fat_entry(cluster);
+        if is_eoc(next) {
+            return Err(Errno::NoEnt);
+        }
+        cluster = next;
+    }
 }
 
 pub unsafe fn mount(dev: usize) -> KResult<()> {
@@ -48,9 +136,64 @@ pub unsafe fn mount(dev: usize) -> KResult<()> {
     Ok(())
 }
 
-pub unsafe fn lookup(_path: &[u8], _out_cluster: &mut u32, _out_size: &mut u32) -> KResult<()> {
-    Err(Errno::NoEnt)
+pub unsafe fn lookup(path: &[u8], out_cluster: &mut u32, out_size: &mut u32) -> KResult<()> {
+    let needle = fat32_name_8_3(path);
+    let mut is_dir = false;
+    scan_dir_entries(G_ROOT_CLUSTER, &needle, out_cluster, out_size, &mut is_dir)
 }
-pub unsafe fn read(_cluster: u32, _buf: *mut u8, _off: u32, _len: u32) -> KResult<u32> {
-    Ok(0)
+
+pub unsafe fn read(cluster: u32, buf: *mut u8, off: u32, len: u32) -> KResult<u32> {
+    if len == 0 || cluster == 0 {
+        return Ok(0);
+    }
+    let sector_size = 512u32;
+    let cluster_bytes = G_SPC * sector_size;
+    let start_byte = off as u64;
+    let end_byte = (off as u64 + len as u64).min(u32::MAX as u64);
+
+    let mut cluster = cluster;
+    let mut skipped = 0u64;
+    loop {
+        let csize = cluster_bytes as u64;
+        let cstart = skipped;
+        let cend = skipped + csize;
+        if start_byte < cend {
+            let rel_start = (start_byte - cstart) as u32;
+            let rel_end = (end_byte - cstart).min(csize) as u32;
+            let to_copy = rel_end - rel_start;
+            if to_copy > 0 {
+                let copy_off = rel_start;
+                let copy_to = buf;
+                let mut remain = to_copy;
+                let mut copy_pos = 0u32;
+                while remain > 0 {
+                    let si = copy_off / sector_size;
+                    let sec_off = copy_off % sector_size;
+                    let in_sec = sector_size - sec_off;
+                    let chunk = remain.min(in_sec);
+                    read_cluster_sector(
+                        cluster,
+                        si,
+                        &mut *(&raw mut G_SEC),
+                    )?;
+                    ptr::copy_nonoverlapping(
+                        G_SEC.as_ptr().add(sec_off as usize),
+                        copy_to.add(copy_pos as usize),
+                        chunk as usize,
+                    );
+                    copy_pos += chunk;
+                    remain -= chunk;
+                }
+            }
+            if end_byte <= cend {
+                return Ok(to_copy);
+            }
+        }
+        skipped += csize;
+        let next = fat_entry(cluster);
+        if is_eoc(next) {
+            return Ok((end_byte - start_byte) as u32);
+        }
+        cluster = next;
+    }
 }

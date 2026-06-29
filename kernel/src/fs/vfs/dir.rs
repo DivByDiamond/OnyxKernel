@@ -87,3 +87,26 @@ pub unsafe fn readdir(dir_path: &[u8], name_out: *mut u8, name_len: usize) -> KR
         }
     }
 }
+
+/// Read a single directory entry by inode and cursor index.
+/// Used by getdents64 for fd-based directory iteration.
+pub unsafe fn readdir_entry_by_ino(
+    fs: Fs,
+    ino: u32,
+    idx: u32,
+    name_out: *mut u8,
+    name_len: usize,
+) -> KResult<Option<u32>> {
+    match fs {
+        Fs::Onyx => onyxfs::readdir_entry(ino, idx, name_out, name_len),
+        Fs::Proc => match procfs::readdir_entry(idx, name_out, name_len) {
+            Some(d_ino) => Ok(Some(d_ino)),
+            None => Ok(None),
+        },
+        Fs::Ipc => match ipcfs::readdir_entry(idx, name_out, name_len) {
+            Some(d_ino) => Ok(Some(d_ino)),
+            None => Ok(None),
+        },
+        _ => Err(Errno::NoSys),
+    }
+}

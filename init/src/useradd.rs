@@ -4,8 +4,8 @@
 
 use core::arch::asm;
 
-mod syscalls;
 mod auth;
+mod syscalls;
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn _start() -> ! {
@@ -39,7 +39,10 @@ pub unsafe extern "C" fn _start() -> ! {
     // Check if user already exists
     let mut users = [auth::PasswdEntry {
         name: [0; 32],
-        uid: 0, gid: 0, home: [0; 64], shell: [0; 32],
+        uid: 0,
+        gid: 0,
+        home: [0; 64],
+        shell: [0; 32],
     }; auth::MAX_USERS];
     let nusers = auth::read_passwd(&mut users).unwrap_or(0);
 
@@ -108,5 +111,9 @@ fn parse_dec(s: &[u8]) -> u32 {
 
 #[panic_handler]
 fn panic(_info: &core::panic::PanicInfo) -> ! {
-    loop { unsafe { asm!("wfi"); } }
+    loop {
+        unsafe {
+            asm!("wfi");
+        }
+    }
 }

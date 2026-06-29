@@ -6,10 +6,11 @@
 //! `struct stat` (128 bytes) so libc `stat(3)` wrappers can copy it verbatim.
 use crate::fs::vfs;
 use crate::proc;
-use crate::syscall::abi::{
+    use crate::syscall::abi::{
     F_DUPFD, F_GETFD, F_GETFL, F_SETFD, F_SETFL, FD_CLOEXEC, O_ACCMODE, O_APPEND, O_CREAT,
     O_DIRECTORY, O_EXCL, O_NONBLOCK, O_RDONLY, O_RDWR, O_TRUNC, O_WRONLY,
 };
+use onyx_core::fmt::Arg;
 use onyx_core::errno::Errno;
 
 use super::super::handler::{parse_user_path, user_ptr_ok};
@@ -103,10 +104,17 @@ unsafe fn fill_user_stat(out_va: u64, ino: u32, size: u64, mode: u32, mtime: u64
 }
 
 pub(in super::super) unsafe fn sys_open(path: u64, flags: u64, mode: u64) -> i64 {
+    crate::kinf!("sys_open", "called path=%x flags=%x mode=%x", Arg::from(path), Arg::from(flags as u32), Arg::from(mode as u32));
+
     let path_bytes = match parse_user_path(path) {
         Some(s) => s,
-        None => return Errno::Inval.as_i64(),
+        None => {
+            crate::kerr!("sys_open", "parse_user_path failed for path=%x", Arg::from(path));
+            return Errno::Inval.as_i64();
+        }
     };
+
+    crate::kinf!("sys_open", "path_bytes=%s ring=%d", Arg::from(core::str::from_utf8(path_bytes).unwrap_or("<bad>")), Arg::from(proc::current_ring() as u32));
 
     let ring = proc::current_ring();
     if ring == proc::PROC_RING_USER && path_bytes.starts_with(b"/service/") {

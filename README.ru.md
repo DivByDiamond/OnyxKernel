@@ -268,16 +268,41 @@ osh> _
 
 ## Дорожная карта
 
-- [ ] Поддержка Unicode-таблицы в шрифтах PSF1/PSF2
-- [ ] Именованные IPC-каналы через `/ipc/*` VFS
-- [ ] Обнаружение оборудования через FDT (замена захардкоженных адресов)
-- [ ] Диспетчеризация прерываний PLIC (сейчас только лог)
-- [ ] Улучшения драйвера фреймбуфера
-- [ ] Драйвер SDHCI (для Milk-V Duo S)
-- [ ] Вывод `elf2onx` v2 (поле compressed_size)
-- [ ] `mkimage` v2 (область снэпшотов + журнал в образе)
-- [ ] Восстановление после паники / kdump
-- [ ] Многоядерность (SMP)
+### ✅ Сделано в v0.3–v0.4
+- Поддержка Unicode-таблицы в шрифтах PSF1/PSF2
+- Именованные IPC-каналы через `/ipc/*` VFS
+- Обнаружение оборудования через FDT
+- Диспетчеризация прерываний PLIC (до 64 обработчиков)
+- Драйвер фреймбуфера с PSF1/PSF2 и скроллингом
+- Драйвер SDHCI (для Milk-V Duo S)
+- `elf2onx` v2 (compressed_size + RLE-сжатие)
+- `mkimage` v2 (снэпшоты + журнал в образе)
+- Panic recovery / kdump (stack trace, дамп процессов, QEMU reboot)
+- SMP (до 8 ядер, per-CPU очереди, load balancing, CPU affinity)
+- Полный юзерленд: init, login, osh, passwd, useradd, userdel
+- Аутентификация: /etc/passwd + /etc/shadow, первый запуск
+- /proc: version, cpuinfo, meminfo, uptime, load, stat
+- Per-process FD таблицы (16 слотов, capability токены)
+- Сетевой стек (Ethernet/IP/TCP) с syscall интерфейсом
+- Write-ahead журнал + восстановление при монтировании
+- Flashback снэпшоты с RLE + COW
+- Динамические процессы (без PROC_MAX)
+- Preemptive multitasking (100 Hz)
+- Сигналы с user-space обработчиками
+- 83 системных вызова
+
+### ❌ Осталось сделать:
+- **FAT32** — чтение файлов (сейчас заглушки)
+- **getdents64** — работал, требуется для `ls`
+- **USB** — URB-передача (сейчас только probe/init)
+- **truncate/ftruncate** — обрезание до ненулевого размера
+- **symlink/readlink** — символические ссылки в OnyxFS
+- **O_EXCL** — проверка при создании
+- **fork** — передача argv/envp родителя
+- **chmod/fchmod** — права доступа в OnyxFS
+- **fsync** — реальный flush на диск
+- **UDP/DHCP/DNS** — сетевой стек
+- **Юнит-тесты ядра**
 
 ----
 

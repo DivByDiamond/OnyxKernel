@@ -4,8 +4,8 @@
 
 use core::arch::asm;
 
-mod syscalls;
 mod auth;
+mod syscalls;
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn _start() -> ! {
@@ -47,8 +47,12 @@ unsafe fn do_user_passwd() {
     }
 
     match auth::update_shadow_password(b"root", n1) {
-        Ok(()) => { syscalls::write(1, b"passwd: password updated\n".as_ptr(), 25); }
-        Err(_) => { syscalls::write(1, b"passwd: Failed to update password\n".as_ptr(), 34); }
+        Ok(()) => {
+            syscalls::write(1, b"passwd: password updated\n".as_ptr(), 25);
+        }
+        Err(_) => {
+            syscalls::write(1, b"passwd: Failed to update password\n".as_ptr(), 34);
+        }
     }
 }
 
@@ -76,8 +80,12 @@ unsafe fn do_root_passwd() {
     }
 
     match auth::update_shadow_password(uname, n1) {
-        Ok(()) => { syscalls::write(1, b"passwd: password updated\n".as_ptr(), 25); }
-        Err(_) => { syscalls::write(1, b"passwd: Failed to update password\n".as_ptr(), 34); }
+        Ok(()) => {
+            syscalls::write(1, b"passwd: password updated\n".as_ptr(), 25);
+        }
+        Err(_) => {
+            syscalls::write(1, b"passwd: Failed to update password\n".as_ptr(), 34);
+        }
     }
 }
 
@@ -95,5 +103,9 @@ unsafe fn read_line(buf: &mut [u8]) -> &[u8] {
 
 #[panic_handler]
 fn panic(_info: &core::panic::PanicInfo) -> ! {
-    loop { unsafe { asm!("wfi"); } }
+    loop {
+        unsafe {
+            asm!("wfi");
+        }
+    }
 }

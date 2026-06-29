@@ -1,15 +1,11 @@
 #![no_std]
 #![no_main]
-#![allow(
-    unsafe_op_in_unsafe_fn,
-    non_snake_case,
-    clippy::missing_safety_doc
-)]
+#![allow(unsafe_op_in_unsafe_fn, non_snake_case, clippy::missing_safety_doc)]
 
 use core::arch::asm;
 
-mod syscalls;
 mod auth;
+mod syscalls;
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn _start() -> ! {
@@ -37,7 +33,11 @@ pub unsafe extern "C" fn _start() -> ! {
             continue;
         }
         let n = n as usize;
-        let n = if n > 0 && user_buf[n - 1] == b'\n' { n - 1 } else { n };
+        let n = if n > 0 && user_buf[n - 1] == b'\n' {
+            n - 1
+        } else {
+            n
+        };
         let username = &user_buf[..n];
 
         syscalls::write(1, b"password: ".as_ptr(), 10);
@@ -47,7 +47,11 @@ pub unsafe extern "C" fn _start() -> ! {
             continue;
         }
         let pn = pn as usize;
-        let pn = if pn > 0 && pass_buf[pn - 1] == b'\n' { pn - 1 } else { pn };
+        let pn = if pn > 0 && pass_buf[pn - 1] == b'\n' {
+            pn - 1
+        } else {
+            pn
+        };
         let password = &pass_buf[..pn];
 
         if username.is_empty() || password.is_empty() {
@@ -83,7 +87,11 @@ pub unsafe extern "C" fn _start() -> ! {
 
 unsafe fn first_boot_setup() {
     syscalls::write(1, b"\n=== First Boot Setup ===\n".as_ptr(), 27);
-    syscalls::write(1, b"No root user found. Create root password.\n".as_ptr(), 43);
+    syscalls::write(
+        1,
+        b"No root user found. Create root password.\n".as_ptr(),
+        43,
+    );
 
     loop {
         let mut pass1 = [0u8; 64];
@@ -136,7 +144,11 @@ unsafe fn first_boot_setup() {
         mkdir_buf[..11].copy_from_slice(b"/users/root");
         let _ = syscalls::mkdir(mkdir_buf.as_ptr());
 
-        syscalls::write(1, b"Root password set. You can now log in.\n\n".as_ptr(), 41);
+        syscalls::write(
+            1,
+            b"Root password set. You can now log in.\n\n".as_ptr(),
+            41,
+        );
         return;
     }
 }

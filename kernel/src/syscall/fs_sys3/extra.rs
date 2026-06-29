@@ -21,32 +21,60 @@ use super::super::handler::{parse_user_path, user_ptr_ok};
 
 /// getdents64(fd, buf, count) — read directory entries into `buf`.
 ///
-/// We use the Linux `struct linux_dirent64` layout:
+/// Uses the Linux `struct linux_dirent64` layout:
 ///   u64 d_ino; u64 d_off; u16 d_reclen; u8 d_type; char d_name[];
 ///
-/// `d_reclen` is padded to 8-byte alignment. The current implementation
-/// returns at most ONE entry per call (matching the existing readdir
-/// semantics); the offset advances implicitly. Returns the number of bytes
+/// `d_reclen` is padded to 8-byte alignment. Returns the number of bytes
 /// written, or 0 at end-of-directory.
 pub unsafe fn sys_getdents64(fd: u64, buf: u64, count: u64) -> i64 {
     if !user_ptr_ok(buf, count) || count < 19 {
         return Errno::Inval.as_i64();
     }
-    // Look up the file's inode from the token. We need its path or ino to
-    // iterate — but our VFS readdir takes a path. The simplest correct
-    // approach is to use the directory cursor (G_DIR_CURSOR_INO), which
-    // is already stateful per-process. We invoke vfs::readdir with the
-    // path of the open directory.
-    //
-    // Limitation: we can't recover the path from a token with the current
-    // VFS API. As a workaround, the caller is expected to use the legacy
-    // `SYS_readdir(path, ...)` instead. For now, getdents64 returns ENOSYS
-    // for tokens that don't map to a known directory cursor.
-    //
-    // TODO: extend VfsFd to record a path or ino+fs pair for directory fds,
-    // then implement this properly.
-    let _ = (fd, buf, count);
-    Errno::NoSys.as_i64()
+
+    let idx = match vfs::fd_check(fd) {
+        Ok(i) => i,
+        Err(e) => return e.as_i64(),
+    };
+    let f = vfs::fd_get(idx);
+
+    let pa = match crate::mm::vmm::translate(proc::current().root_pa, buf) {
+        0 => return Errno::Inval.as_i64(),
+        p => p,
+    };
+
+    let mut cursor = f.pos;
+    let mut written = 0u64;
+    let dst = pa as *mut u8;
+
+    loop {
+        let mut entry_buf = [0u8; 256];
+        match vfs::readdir_entry_by_ino(f.fs, f.ino, cursor, entry_buf.as_mut_ptr(), 256) {
+            Ok(Some(d_ino)) => {
+                let name_len = entry_buf.iter().position(|&b| b == 0).unwrap_or(0);
+                let reclen = 19 + name_len as u16;
+                let reclen_aligned = (reclen + 7) & !7;
+                if written + reclen_aligned as u64 > count {
+                    break;
+                }
+                let p = dst.add(written as usize);
+                *(p as *mut u64) = d_ino as u64;
+                *(p.add(8) as *mut u64) = 0;
+                *(p.add(16) as *mut u16) = reclen_aligned;
+                p.add(18).write(0);
+                core::ptr::copy_nonoverlapping(entry_buf.as_ptr(), p.add(19), name_len);
+                if reclen_aligned > reclen {
+                    core::ptr::write_bytes(p.add(19 + name_len as usize), 0, (reclen_aligned - reclen) as usize);
+                }
+                written += reclen_aligned as u64;
+                cursor += 1;
+            }
+            Ok(None) => break,
+            Err(e) => return e.as_i64(),
+        }
+    }
+
+    vfs::fd_update_pos(idx, cursor);
+    written as i64
 }
 
 /// getdents — old-style dirent (compat). Same semantics as getdents64.

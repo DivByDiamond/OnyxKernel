@@ -11,17 +11,14 @@ pub const MAX_LINE: usize = 256;
 // ============================================================================
 
 const K: [u32; 64] = [
-    0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1,
-    0x923f82a4, 0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3,
-    0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174, 0xe49b69c1, 0xefbe4786,
-    0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
-    0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147,
-    0x06ca6351, 0x14292967, 0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13,
-    0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85, 0xa2bfe8a1, 0xa81a664b,
-    0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
-    0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a,
-    0x5b9cca4f, 0x682e6ff3, 0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208,
-    0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
+    0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+    0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+    0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+    0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+    0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+    0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+    0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+    0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
 ];
 
 fn rotr(x: u32, n: u32) -> u32 {
@@ -72,7 +69,10 @@ fn sha256_compress(state: &mut [u32; 8], block: &[u8; 64]) {
     for t in 16..64 {
         let s0 = sigma0(w[t - 15]);
         let s1 = sigma1(w[t - 2]);
-        w[t] = s1.wrapping_add(w[t - 7]).wrapping_add(s0).wrapping_add(w[t - 16]);
+        w[t] = s1
+            .wrapping_add(w[t - 7])
+            .wrapping_add(s0)
+            .wrapping_add(w[t - 16]);
     }
 
     let mut a = state[0];
@@ -114,8 +114,8 @@ fn sha256_compress(state: &mut [u32; 8], block: &[u8; 64]) {
 pub fn sha256_init() -> Sha256State {
     Sha256State {
         state: [
-            0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f,
-            0x9b05688c, 0x1f83d9ab, 0x5be0cd19,
+            0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab,
+            0x5be0cd19,
         ],
         buf: [0u8; 64],
         buf_len: 0,
@@ -276,10 +276,10 @@ pub fn parse_passwd(data: &[u8], users: &mut [PasswdEntry; MAX_USERS]) -> usize 
             continue;
         }
 
-        let name = &line[fields[0]..fields[1]];
-        let uid_str = &line[fields[1]..fields[2]];
-        let gid_str = &line[fields[2]..fields[3]];
-        let home = &line[fields[3]..fields[4]];
+        let name = &line[fields[0]..fields[1] - 1];
+        let uid_str = &line[fields[1]..fields[2] - 1];
+        let gid_str = &line[fields[2]..fields[3] - 1];
+        let home = &line[fields[3]..fields[4] - 1];
         let shell = &line[fields[4]..];
 
         let uid = parse_dec(uid_str);
@@ -304,8 +304,7 @@ pub fn parse_passwd(data: &[u8], users: &mut [PasswdEntry; MAX_USERS]) -> usize 
 pub fn find_user(users: &[PasswdEntry; MAX_USERS], count: usize, name: &[u8]) -> Option<usize> {
     users[..count].iter().position(|entry| {
         let mut match_len = 0;
-        while match_len < entry.name.len() && entry.name[match_len] != 0 && match_len < name.len()
-        {
+        while match_len < entry.name.len() && entry.name[match_len] != 0 && match_len < name.len() {
             if entry.name[match_len] != name[match_len] {
                 break;
             }
@@ -327,10 +326,17 @@ pub fn read_passwd(users: &mut [PasswdEntry; MAX_USERS]) -> Result<usize, i64> {
     if fd < 0 {
         return Err(fd);
     }
+
     let mut buf = [0u8; 4096];
     let mut total = 0usize;
     loop {
-        let n = unsafe { syscalls::read(fd as u64, buf[total..].as_mut_ptr(), (buf.len() - total) as u64) };
+        let n = unsafe {
+            syscalls::read(
+                fd as u64,
+                buf[total..].as_mut_ptr(),
+                (buf.len() - total) as u64,
+            )
+        };
         if n <= 0 {
             break;
         }
@@ -340,6 +346,7 @@ pub fn read_passwd(users: &mut [PasswdEntry; MAX_USERS]) -> Result<usize, i64> {
         }
     }
     unsafe { syscalls::close(fd as u64) };
+
     Ok(parse_passwd(&buf[..total], users))
 }
 
@@ -358,7 +365,13 @@ pub fn read_shadow_password(username: &[u8]) -> Result<[u8; 128], i64> {
     let mut buf = [0u8; 4096];
     let mut total = 0usize;
     loop {
-        let n = unsafe { syscalls::read(fd as u64, buf[total..].as_mut_ptr(), (buf.len() - total) as u64) };
+        let n = unsafe {
+            syscalls::read(
+                fd as u64,
+                buf[total..].as_mut_ptr(),
+                (buf.len() - total) as u64,
+            )
+        };
         if n <= 0 {
             break;
         }
@@ -458,7 +471,13 @@ pub fn update_shadow_password(username: &[u8], new_password: &[u8]) -> Result<()
     let fd = unsafe { syscalls::open(path_buf.as_ptr(), 0, 0) };
     if fd >= 0 {
         loop {
-            let n = unsafe { syscalls::read(fd as u64, buf[total..].as_mut_ptr(), (buf.len() - total) as u64) };
+            let n = unsafe {
+                syscalls::read(
+                    fd as u64,
+                    buf[total..].as_mut_ptr(),
+                    (buf.len() - total) as u64,
+                )
+            };
             if n <= 0 {
                 break;
             }
@@ -620,7 +639,13 @@ fn format_shadow_entry(username: &[u8], password: &[u8]) -> [u8; 128] {
     buf
 }
 
-pub fn update_passwd_entry(username: &[u8], uid: u32, gid: u32, home: &[u8], shell: &[u8]) -> Result<(), i64> {
+pub fn update_passwd_entry(
+    username: &[u8],
+    uid: u32,
+    gid: u32,
+    home: &[u8],
+    shell: &[u8],
+) -> Result<(), i64> {
     let mut path_buf = [0u8; 64];
     let n = PASSWD_PATH.len().min(63);
     path_buf[..n].copy_from_slice(&PASSWD_PATH[..n]);
@@ -631,7 +656,13 @@ pub fn update_passwd_entry(username: &[u8], uid: u32, gid: u32, home: &[u8], she
     let fd = unsafe { syscalls::open(path_buf.as_ptr(), 0, 0) };
     if fd >= 0 {
         loop {
-            let n = unsafe { syscalls::read(fd as u64, buf[total..].as_mut_ptr(), (buf.len() - total) as u64) };
+            let n = unsafe {
+                syscalls::read(
+                    fd as u64,
+                    buf[total..].as_mut_ptr(),
+                    (buf.len() - total) as u64,
+                )
+            };
             if n <= 0 {
                 break;
             }
@@ -720,7 +751,13 @@ pub fn delete_passwd_entry(username: &[u8]) -> Result<(), i64> {
         return Err(fd);
     }
     loop {
-        let n = unsafe { syscalls::read(fd as u64, buf[total..].as_mut_ptr(), (buf.len() - total) as u64) };
+        let n = unsafe {
+            syscalls::read(
+                fd as u64,
+                buf[total..].as_mut_ptr(),
+                (buf.len() - total) as u64,
+            )
+        };
         if n <= 0 {
             break;
         }
@@ -786,7 +823,13 @@ pub fn delete_shadow_entry(username: &[u8]) -> Result<(), i64> {
         return Err(fd);
     }
     loop {
-        let n = unsafe { syscalls::read(fd as u64, buf[total..].as_mut_ptr(), (buf.len() - total) as u64) };
+        let n = unsafe {
+            syscalls::read(
+                fd as u64,
+                buf[total..].as_mut_ptr(),
+                (buf.len() - total) as u64,
+            )
+        };
         if n <= 0 {
             break;
         }
@@ -839,43 +882,73 @@ pub fn delete_shadow_entry(username: &[u8]) -> Result<(), i64> {
     Ok(())
 }
 
-fn format_passwd_entry(username: &[u8], uid: u32, gid: u32, home: &[u8], shell: &[u8]) -> [u8; 256] {
+fn format_passwd_entry(
+    username: &[u8],
+    uid: u32,
+    gid: u32,
+    home: &[u8],
+    shell: &[u8],
+) -> [u8; 256] {
     let mut buf = [0u8; 256];
     let mut pos = 0;
 
     for &b in username.iter() {
-        if pos >= buf.len() { break; }
+        if pos >= buf.len() {
+            break;
+        }
         buf[pos] = b;
         pos += 1;
     }
-    if pos < buf.len() { buf[pos] = b':'; pos += 1; }
+    if pos < buf.len() {
+        buf[pos] = b':';
+        pos += 1;
+    }
 
     let uid_str = format_dec(uid);
     for &b in uid_str.iter() {
-        if pos >= buf.len() || b == 0 { break; }
-        if b == 0 { break; }
+        if pos >= buf.len() || b == 0 {
+            break;
+        }
+        if b == 0 {
+            break;
+        }
         buf[pos] = b;
         pos += 1;
     }
-    if pos < buf.len() { buf[pos] = b':'; pos += 1; }
+    if pos < buf.len() {
+        buf[pos] = b':';
+        pos += 1;
+    }
 
     let gid_str = format_dec(gid);
     for &b in gid_str.iter() {
-        if pos >= buf.len() || b == 0 { break; }
+        if pos >= buf.len() || b == 0 {
+            break;
+        }
         buf[pos] = b;
         pos += 1;
     }
-    if pos < buf.len() { buf[pos] = b':'; pos += 1; }
+    if pos < buf.len() {
+        buf[pos] = b':';
+        pos += 1;
+    }
 
     for &b in home.iter() {
-        if pos >= buf.len() { break; }
+        if pos >= buf.len() {
+            break;
+        }
         buf[pos] = b;
         pos += 1;
     }
-    if pos < buf.len() { buf[pos] = b':'; pos += 1; }
+    if pos < buf.len() {
+        buf[pos] = b':';
+        pos += 1;
+    }
 
     for &b in shell.iter() {
-        if pos >= buf.len() { break; }
+        if pos >= buf.len() {
+            break;
+        }
         buf[pos] = b;
         pos += 1;
     }

@@ -28,7 +28,12 @@ echo "==> Converting userland ELFs → .onx (v2 default, --compress)"
 "$ROOT/target/release/elf2onx" --ring=1 --compress "$ROOT/target/riscv64gc-unknown-none-elf/release/onyx-userdel" "$BUILD/userdel.onx"
 "$ROOT/target/release/elf2onx" --compress "$ROOT/target/riscv64gc-unknown-none-elf/release/onyx-argv-test" "$BUILD/argv_test.onx"
 
-# No default passwd/shadow — first boot creates them interactively.
+# Pre-create passwd and shadow so login works without first-boot setup.
+# root password is "root" with SHA-256.
+echo -n 'root:0:0:/users/root:/bin/osh
+' > "$BUILD/passwd.txt"
+echo -n 'root:$5$3132333435363738$1c9c6bef25512438b9ede5f8494269152d0959d8d062b4a098cb9e530f4fa0bd
+' > "$BUILD/shadow.txt"
 
 # Build OnyxCC .onx
 echo "==> Building OnyxCC"
@@ -61,6 +66,8 @@ file $BUILD/default.psf /font/default.psf
 file $BUILD/onyxcc.onx /bin/onyxcc --ring=1
 file $BUILD/argv_test.onx /bin/argv_test
 file /home/loki/Projects/Onyx/OnyxCompiller/tests/hello_full.c /tmp/test.c
+file $BUILD/passwd.txt /etc/passwd
+file $BUILD/shadow.txt /etc/shadow
 EOF
 
 # Create OnyxFS v2 disk image using manifest (v2 is now the default)

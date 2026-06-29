@@ -273,16 +273,42 @@ osh> _
 
 ## Roadmap
 
-- [ ] Unicode table support in PSF1/PSF2 fonts
-- [ ] IPC named channels via `/ipc/*` VFS
-- [ ] FDT-driven hardware discovery (replace hardcoded addresses)
-- [ ] PLIC IRQ dispatch (currently log-only)
-- [ ] Framebuffer driver improvements
-- [ ] SDHCI driver (for Milk-V Duo S)
-- [ ] `elf2onx` v2 output (compressed_size field)
-- [ ] `mkimage` v2 (snapshot area + journal in image)
-- [ ] Panic recovery / kdump
-- [ ] Multi-core (SMP) support
+### ✅ Done in v0.3–v0.4
+- Unicode table support in PSF1/PSF2 fonts
+- IPC named channels via `/ipc/*` VFS
+- FDT-driven hardware discovery (replace hardcoded addresses)
+- PLIC IRQ dispatch (up to 64 IRQ handlers)
+- Framebuffer driver with PSF1/PSF2 and scrolling
+- SDHCI driver (for Milk-V Duo S)
+- `elf2onx` v2 output (compressed_size + RLE compression)
+- `mkimage` v2 (snapshot area + journal in image)
+- Panic recovery / kdump (stack trace, process dump, QEMU reboot)
+- Multi-core (SMP) support (up to 8 harts, per-CPU queues, load balancing, CPU affinity)
+- Full userland: init, login, osh, passwd, useradd, userdel
+- Authentication: /etc/passwd + /etc/shadow, first-boot root password setup
+- /proc filesystem: version, cpuinfo, meminfo, uptime, load, stat
+- Per-process FD tables (16 slots with capability tokens)
+- Network stack (Ethernet/IP/TCP) with syscall interface
+- Write-ahead journal + crash recovery on mount
+- Flashback snapshots with RLE compression + COW
+- Dynamic processes (no PROC_MAX limit)
+- Preemptive multitasking (100 Hz timer)
+- Signal delivery with user-space handlers
+- 83 syscalls total
+
+### ❌ Осталось:
+- **FAT32** — реализовать чтение файлов (сейчас lookup/read — заглушки)
+- **getdents64** — заработал (был ENOSYS), требуется для `ls`
+- **USB** — реализовать URB-передачу (сейчас только probe/init)
+- **truncate/ftruncate** — обрезание до ненулевого размера
+- **symlink/readlink** — символические ссылки в OnyxFS
+- **O_EXCL** — проверка при создании файлов
+- **fork** — передача argv/envp родителя
+- **chmod/fchmod** — права доступа в OnyxFS
+- **fsync** — реальный flush на диск
+- **getdents64** — batched directory reading
+- **UDP/DHCP/DNS** — сетевой стек
+- **Юнит-тесты ядра**
 
 ----
 

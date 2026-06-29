@@ -35,7 +35,11 @@ pub(crate) unsafe fn alloc_fd(perms: u32) -> KResult<usize> {
         return Err(Errno::NoMem);
     }
     let p = crate::proc::current();
-    for i in 0..VFS_MAX_FDS {
+    // Skip fds 0-2 (stdin/stdout/stderr) which are handled by UART directly
+    // for user-space processes (all rings). Kernel boot uses ring 0 but there
+    // is no UART redirection for kernel fds, so we skip unconditionally here
+    // and kernel-boot fds come from G_KERNEL_FDS above.
+    for i in 3..VFS_MAX_FDS {
         if !p.fds[i].used {
             p.fds[i].used = true;
             p.fds[i].perms = perms;

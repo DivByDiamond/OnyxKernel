@@ -7,11 +7,7 @@
 #![no_std]
 #![no_main]
 #![warn(clippy::all)]
-#![allow(
-    clippy::missing_safety_doc,
-    unsafe_op_in_unsafe_fn,
-    non_snake_case
-)]
+#![allow(clippy::missing_safety_doc, unsafe_op_in_unsafe_fn, non_snake_case)]
 
 use core::arch::asm;
 

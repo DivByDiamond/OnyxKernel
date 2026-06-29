@@ -1,10 +1,6 @@
 #![no_std]
 #![no_main]
-#![allow(
-    unsafe_op_in_unsafe_fn,
-    non_snake_case,
-    clippy::missing_safety_doc
-)]
+#![allow(unsafe_op_in_unsafe_fn, non_snake_case, clippy::missing_safety_doc)]
 
 use core::arch::asm;
 
@@ -25,12 +21,10 @@ pub unsafe extern "C" fn _start() -> ! {
             continue;
         }
         let n = n as usize;
-        // Strip trailing newline
-        let n = if n > 0 && buf[n - 1] == b'\n' {
-            n - 1
-        } else {
-            n
-        };
+        let mut n = n;
+        while n > 0 && (buf[n - 1] == b'\n' || buf[n - 1] == b'\r') {
+            n -= 1;
+        }
         let line = &buf[..n];
         if line.is_empty() {
             continue;
@@ -38,20 +32,20 @@ pub unsafe extern "C" fn _start() -> ! {
 
         let (cmd, rest) = split_first_word(line);
         match cmd {
-            b"help" => do_help(),
-            b"echo" => {
+            x if x == b"help" => do_help(),
+            x if x == b"echo" => {
                 syscalls::write(1, rest.as_ptr(), rest.len());
                 syscalls::write(1, b"\n".as_ptr(), 1);
             }
-            b"cat" => do_cat(rest),
-            b"ls" => do_ls(rest),
-            b"exec" => do_exec(rest),
-            b"clear" => {
+            x if x == b"cat" => do_cat(rest),
+            x if x == b"ls" => do_ls(rest),
+            x if x == b"exec" => do_exec(rest),
+            x if x == b"clear" => {
                 syscalls::write(1, b"\x1b[2J\x1b[H".as_ptr(), 7);
             }
-            b"exit" => syscalls::exit(0),
-            b"whoami" => do_whoami(),
-            b"pwd" => {
+            x if x == b"exit" => syscalls::exit(0),
+            x if x == b"whoami" => do_whoami(),
+            x if x == b"pwd" => {
                 syscalls::write(1, b"/\n".as_ptr(), 2);
             }
             _ => {
@@ -137,8 +131,12 @@ unsafe fn do_ls(path: &[u8]) {
 unsafe fn do_exec(cmdline: &[u8]) {
     let mut path_buf = [0u8; 64];
     let path = split_first_word(cmdline).0;
-    if path.len() >= path_buf.len() { return; }
-    for (i, &b) in path.iter().enumerate() { path_buf[i] = b; }
+    if path.len() >= path_buf.len() {
+        return;
+    }
+    for (i, &b) in path.iter().enumerate() {
+        path_buf[i] = b;
+    }
 
     // Build argv array on stack: argv[0]=path, argv[1..]=rest tokens, NULL
     let mut argv = [core::ptr::null::<u8>(); 16];
@@ -146,12 +144,16 @@ unsafe fn do_exec(cmdline: &[u8]) {
     let mut rest = cmdline;
     while argc < argv.len() - 1 {
         let (tok, tail) = split_first_word(rest);
-        if tok.is_empty() { break; }
+        if tok.is_empty() {
+            break;
+        }
         // Store token pointer (points into cmdline which lives in buf)
         argv[argc] = tok.as_ptr();
         argc += 1;
         rest = tail;
-        if tok.as_ptr() == cmdline.as_ptr() { continue; } // skip first token
+        if tok.as_ptr() == cmdline.as_ptr() {
+            continue;
+        } // skip first token
     }
 
     // Build argv_ptr array for syscall (array of pointers, NULL-terminated)
