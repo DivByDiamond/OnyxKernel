@@ -5,12 +5,97 @@
 //! The periodic schedule (interrupt/isochronous) is not implemented.
 use crate::arch::mmio::Mmio;
 use onyx_core::errno::{Errno, KResult};
+use crate::mm::pmm;
+
+#[derive(PartialEq, Clone, Copy)]
+enum ControllerType {
+    None,
+    Ehci,
+    Ohci,
+}
+static mut G_ACTIVE: ControllerType = ControllerType::None;
 
 pub const EHCI_BASE: usize = 0x04C0_0000;
 pub const OHCI_BASE: usize = 0x04C1_0000;
 
-// OHCI register offsets (for probe only — no OHCI driver implementation).
+// OHCI register offsets.
 const OHCI_HC_REV: u32 = 0x00;
+const OHCI_HC_CONTROL: u32 = 0x04;
+const OHCI_HC_COMMAND_STATUS: u32 = 0x08;
+const OHCI_HC_INTERRUPT_STATUS: u32 = 0x0C;
+const OHCI_HC_INTERRUPT_ENABLE: u32 = 0x10;
+const OHCI_HC_INTERRUPT_DISABLE: u32 = 0x14;
+const OHCI_HC_HCCA: u32 = 0x18;
+const OHCI_HC_PERIOD_CURRENT_ED: u32 = 0x1C;
+const OHCI_HC_CONTROL_HEAD_ED: u32 = 0x20;
+const OHCI_HC_CONTROL_CURRENT_ED: u32 = 0x24;
+const OHCI_HC_BULK_HEAD_ED: u32 = 0x28;
+const OHCI_HC_BULK_CURRENT_ED: u32 = 0x2C;
+const OHCI_HC_DONE_HEAD: u32 = 0x30;
+const OHCI_HC_FM_INTERVAL: u32 = 0x34;
+const OHCI_HC_FM_REMAINING: u32 = 0x38;
+const OHCI_HC_FM_NUMBER: u32 = 0x3C;
+const OHCI_HC_PERIODIC_START: u32 = 0x40;
+const OHCI_HC_LS_THRESHOLD: u32 = 0x44;
+const OHCI_HC_RH_DESC_A: u32 = 0x48;
+const OHCI_HC_RH_DESC_B: u32 = 0x4C;
+const OHCI_HC_RH_STATUS: u32 = 0x50;
+const OHCI_HC_RH_PORT_STATUS: u32 = 0x54;
+
+// OHCI HcControl bits.
+const OHCI_CTRL_CLE: u32 = 1 << 4;
+const OHCI_CTRL_BLE: u32 = 1 << 5;
+const OHCI_CTRL_HCFS_MASK: u32 = 3 << 6;
+const OHCI_CTRL_HCFS_RESET: u32 = 0 << 6;
+const OHCI_CTRL_HCFS_RESUME: u32 = 1 << 6;
+const OHCI_CTRL_HCFS_OPER: u32 = 2 << 6;
+const OHCI_CTRL_HCFS_SUSPEND: u32 = 3 << 6;
+const OHCI_CTRL_RWE: u32 = 1 << 9;
+
+// OHCI HcCommandStatus bits.
+const OHCI_CMD_HCR: u32 = 1 << 0;
+const OHCI_CMD_CLF: u32 = 1 << 1;
+const OHCI_CMD_BLF: u32 = 1 << 2;
+
+// OHCI interrupt bits.
+const OHCI_INTR_WDH: u32 = 1 << 1;
+const OHCI_INTR_UE: u32 = 1 << 4;
+const OHCI_INTR_RHSC: u32 = 1 << 6;
+const OHCI_INTR_MI: u32 = 1 << 30;
+
+// OHCI Root Hub port status bits.
+const RH_PS_CCS: u32 = 1 << 0;
+const RH_PS_PES: u32 = 1 << 1;
+const RH_PS_PRS: u32 = 1 << 4;
+const RH_PS_PPS: u32 = 1 << 8;
+const RH_PS_LSDA: u32 = 1 << 9;
+const RH_PS_CSC: u32 = 1 << 16;
+const RH_PS_PRSC: u32 = 1 << 20;
+
+// OHCI ED/TD bit fields.
+const ED_FA_SHIFT: u32 = 0;
+const ED_EN_SHIFT: u32 = 8;
+const ED_SPEED_SHIFT: u32 = 12;
+const ED_SPEED_FULL: u32 = 0 << 12;
+const ED_SPEED_LOW: u32 = 1 << 12;
+const ED_K_SKIP: u32 = 1 << 14;
+const ED_MPS_SHIFT: u32 = 16;
+const ED_T_TOGGLE: u32 = 1 << 27;
+const ED_TERMINATE: u32 = 1;
+
+const TD_CC_MASK: u32 = 0xF;
+const TD_CC_NOT_ACCESSED: u32 = 0x0F;
+const TD_T_DATA0: u32 = 0 << 10;
+const TD_T_DATA1: u32 = 1 << 10;
+const TD_DI_NO_INTR: u32 = 3 << 11;
+const TD_DP_SETUP: u32 = 0 << 13;
+const TD_DP_OUT: u32 = 1 << 13;
+const TD_DP_IN: u32 = 2 << 13;
+const TD_R_3: u32 = 1 << 15;
+const TD_TERMINATE: u32 = 1;
+
+const OHCI_ED_SIZE: usize = 16;
+const OHCI_TD_SIZE: usize = 16;
 
 // EHCI capability register offsets.
 const EHCI_CAP_LENGTH: u32 = 0x00;
@@ -91,6 +176,54 @@ struct DmaPool {
 }
 static mut G_DMA: DmaPool = DmaPool { data: [0; DMA_POOL_SIZE] };
 static mut G_DMA_USED: usize = 0;
+
+// OHCI data structures.
+#[repr(C, align(16))]
+struct OhciED {
+    control: u32,
+    tail_td: u32,
+    head_td: u32,
+    next_ed: u32,
+}
+
+#[repr(C, align(16))]
+struct OhciTD {
+    control: u32,
+    cbp: u32,
+    next_td: u32,
+    be: u32,
+}
+
+#[repr(C, align(256))]
+struct OhciHcca {
+    interrupt_table: [u32; 32],
+    frame_number: u16,
+    pad: u16,
+    done_head: u32,
+    reserved: [u8; 112],
+}
+
+// OHCI global state.
+static mut G_OHCI_BASE: usize = 0;
+static mut G_OHCI_N_PORTS: u8 = 0;
+static mut G_OHCI_HCCA_PA: u32 = 0;
+static mut G_OHCI_HCCA_READY: bool = false;
+
+// OHCI DMA pool — separate static pool matching the EHCI pattern.
+const OHCI_DMA_POOL_SIZE: usize = 4096;
+const MAX_OHCI_ED: usize = 32;
+const MAX_OHCI_TD: usize = 64;
+
+#[repr(C, align(4096))]
+struct OhciDmaPool {
+    data: [u8; OHCI_DMA_POOL_SIZE],
+}
+static mut G_OHCI_DMA: OhciDmaPool = OhciDmaPool { data: [0; OHCI_DMA_POOL_SIZE] };
+static mut G_OHCI_DMA_USED: usize = 0;
+static mut G_OHCI_ED_COUNT: usize = 0;
+static mut G_OHCI_TD_COUNT: usize = 0;
+static mut G_OHCI_ED_OFFSETS: [usize; MAX_OHCI_ED] = [0; MAX_OHCI_ED];
+static mut G_OHCI_TD_OFFSETS: [usize; MAX_OHCI_TD] = [0; MAX_OHCI_TD];
 
 // QH and qTD structures at known offsets in the DMA pool.
 // We embed a fixed number statically so the physical offset is known.
@@ -186,6 +319,74 @@ unsafe fn qh_phys(idx: usize) -> u32 {
 
 unsafe fn qtd_phys(idx: usize) -> u32 {
     pool_offset_to_phys(G_QTD_OFFSETS[idx])
+}
+
+// ─── OHCI MMIO accessors ───────────────────────────────────────────────────
+
+#[inline]
+unsafe fn ohci_rd(reg: u32) -> u32 {
+    Mmio::<u32>::at(G_OHCI_BASE + reg as usize).read()
+}
+
+#[inline]
+unsafe fn ohci_wr(reg: u32, v: u32) {
+    Mmio::<u32>::at(G_OHCI_BASE + reg as usize).write(v);
+}
+
+// ─── OHCI DMA pool helpers ─────────────────────────────────────────────────
+
+unsafe fn ohci_pool_phys(off: usize) -> u32 {
+    let pool_va = &raw const G_OHCI_DMA as usize;
+    (pool_va + off) as u32
+}
+
+unsafe fn ohci_alloc_dma(size: usize) -> KResult<usize> {
+    let aligned = (size + 15) & !15;
+    let off = G_OHCI_DMA_USED;
+    if off + aligned > OHCI_DMA_POOL_SIZE {
+        return Err(Errno::NoMem);
+    }
+    G_OHCI_DMA_USED = off + aligned;
+    core::ptr::write_bytes(G_OHCI_DMA.data.as_mut_ptr().add(off), 0, aligned);
+    Ok(off)
+}
+
+unsafe fn ohci_alloc_ed() -> KResult<usize> {
+    if G_OHCI_ED_COUNT >= MAX_OHCI_ED {
+        return Err(Errno::NoMem);
+    }
+    let off = ohci_alloc_dma(OHCI_ED_SIZE)?;
+    let idx = G_OHCI_ED_COUNT;
+    G_OHCI_ED_OFFSETS[idx] = off;
+    G_OHCI_ED_COUNT += 1;
+    Ok(idx)
+}
+
+unsafe fn ohci_alloc_td() -> KResult<usize> {
+    if G_OHCI_TD_COUNT >= MAX_OHCI_TD {
+        return Err(Errno::NoMem);
+    }
+    let off = ohci_alloc_dma(OHCI_TD_SIZE)?;
+    let idx = G_OHCI_TD_COUNT;
+    G_OHCI_TD_OFFSETS[idx] = off;
+    G_OHCI_TD_COUNT += 1;
+    Ok(idx)
+}
+
+unsafe fn ohci_ed_ptr(idx: usize) -> *mut OhciED {
+    G_OHCI_DMA.data.as_mut_ptr().add(G_OHCI_ED_OFFSETS[idx]) as *mut OhciED
+}
+
+unsafe fn ohci_td_ptr(idx: usize) -> *mut OhciTD {
+    G_OHCI_DMA.data.as_mut_ptr().add(G_OHCI_TD_OFFSETS[idx]) as *mut OhciTD
+}
+
+unsafe fn ohci_ed_phys(idx: usize) -> u32 {
+    ohci_pool_phys(G_OHCI_ED_OFFSETS[idx])
+}
+
+unsafe fn ohci_td_phys(idx: usize) -> u32 {
+    ohci_pool_phys(G_OHCI_TD_OFFSETS[idx])
 }
 
 /// Initialise the async list with a dummy QH (reclamation head).
@@ -286,7 +487,7 @@ unsafe fn qh_remove(idx: usize) {
 /// `data_in`: true = IN (device to host), false = OUT (host to device).
 /// `max_pkt`: max packet size for endpoint 0.
 /// Returns the number of bytes transferred.
-pub unsafe fn control_transfer(
+unsafe fn ehci_control_transfer(
     dev_addr: u8,
     setup_pkt: &[u8; 8],
     mut data: Option<&mut [u8]>,
@@ -485,54 +686,389 @@ pub unsafe fn init_ehci(base: usize) -> KResult<()> {
     // Init async list (allocates QH head + enables async schedule).
     init_async_list()?;
 
+    G_ACTIVE = ControllerType::Ehci;
     Ok(())
 }
 
-/// Initialise OHCI (stub — not yet implemented).
+/// ─── OHCI driver ──────────────────────────────────────────────────────────
+
+/// Initialise OHCI: reset, set operational, configure root hub ports.
 pub unsafe fn init_ohci(base: usize) -> KResult<()> {
     if !probe_ohci(base) {
         return Err(Errno::NoEnt);
     }
-    Err(Errno::NoSys)
-}
 
-/// Number of root-hub ports on the active controller.
-pub fn n_ports() -> u8 {
-    unsafe { G_N_PORTS }
-}
+    G_OHCI_BASE = base;
 
-/// Read the status of root-hub port `idx` (0-based).
-pub unsafe fn port_status(idx: u8) -> KResult<u32> {
-    if idx >= G_N_PORTS {
-        return Err(Errno::Range);
-    }
-    Ok(op_rd(OP_PORTSC + 4 * idx as u32))
-}
+    // Read port count from HcRhDescriptorA (bits 7:0 = NDP).
+    let desc_a = ohci_rd(OHCI_HC_RH_DESC_A);
+    G_OHCI_N_PORTS = (desc_a & 0xFF) as u8;
 
-/// Reset a root-hub port.
-pub unsafe fn port_reset(idx: u8) -> KResult<()> {
-    if idx >= G_N_PORTS {
-        return Err(Errno::Range);
-    }
-    let reg = OP_PORTSC + 4 * idx as u32;
-    // Set reset bit (bit 8).
-    op_wr(reg, op_rd(reg) | (1 << 8));
+    // Allocate HCCA via PMM (4KB page, identity-mapped, 256-byte aligned).
+    let hcca_pa = pmm::alloc_zero()? as u32;
+    G_OHCI_HCCA_PA = hcca_pa;
+    G_OHCI_HCCA_READY = true;
+
+    // Write HCCA physical address.
+    ohci_wr(OHCI_HC_HCCA, hcca_pa);
+
+    // Reset the controller: set HCR in HcCommandStatus, wait for self-clear.
+    ohci_wr(OHCI_HC_COMMAND_STATUS, OHCI_CMD_HCR);
     let mut timeout = 100_000u32;
-    while timeout > 0 && (op_rd(reg) & (1 << 8)) != 0 {
+    while timeout > 0 && (ohci_rd(OHCI_HC_COMMAND_STATUS) & OHCI_CMD_HCR) != 0 {
+        timeout -= 1;
+    }
+    if timeout == 0 {
+        G_OHCI_HCCA_READY = false;
+        return Err(Errno::Io);
+    }
+
+    // Read default FmInterval from hardware and write it back.
+    let fi = ohci_rd(OHCI_HC_FM_INTERVAL);
+    // Ensure FSMPS (bits 31:16) is set correctly: FSMPS = FI * 90%.
+    let fi_fit = fi & 0x3FFF;        // bits 13:0 = FrameInterval
+    let fsmps = ((fi_fit * 9) / 10) << 16;
+    ohci_wr(OHCI_HC_FM_INTERVAL, (fi & 0xFFFF) | fsmps);
+
+    // Write PeriodicStart = FmInterval * 90%.
+    let periodic_start = (fi_fit * 9) / 10;
+    ohci_wr(OHCI_HC_PERIODIC_START, periodic_start);
+
+    // Write LSThreshold = 0x628.
+    ohci_wr(OHCI_HC_LS_THRESHOLD, 0x628);
+
+    // Clear control/bulk head ED and current ED pointers.
+    ohci_wr(OHCI_HC_CONTROL_HEAD_ED, 0);
+    ohci_wr(OHCI_HC_CONTROL_CURRENT_ED, 0);
+    ohci_wr(OHCI_HC_BULK_HEAD_ED, 0);
+    ohci_wr(OHCI_HC_BULK_CURRENT_ED, 0);
+
+    // Clear all interrupt status by writing all 1s.
+    ohci_wr(OHCI_HC_INTERRUPT_STATUS, 0xFFFF_FFFF);
+
+    // Set HCFS to Operational with CLE|BLE and RWE.
+    ohci_wr(OHCI_HC_CONTROL, OHCI_CTRL_HCFS_OPER | OHCI_CTRL_CLE | OHCI_CTRL_BLE | OHCI_CTRL_RWE);
+
+    // Wait for controller to become operational.
+    timeout = 100_000u32;
+    while timeout > 0 && (ohci_rd(OHCI_HC_CONTROL) & OHCI_CTRL_HCFS_MASK) != OHCI_CTRL_HCFS_OPER {
+        timeout -= 1;
+    }
+    if timeout == 0 {
+        G_OHCI_HCCA_READY = false;
+        return Err(Errno::Io);
+    }
+
+    // Set global power on root hub ports.
+    ohci_wr(OHCI_HC_RH_STATUS, 1 << 16);  // LPSC (Set Global Power)
+
+    // Enable power on each port individually.
+    for i in 0..G_OHCI_N_PORTS {
+        let port_reg = OHCI_HC_RH_PORT_STATUS + 4 * i as u32;
+        let ps = ohci_rd(port_reg);
+        ohci_wr(port_reg, ps | RH_PS_PPS);
+    }
+
+    // Clear port status changes.
+    for i in 0..G_OHCI_N_PORTS {
+        let port_reg = OHCI_HC_RH_PORT_STATUS + 4 * i as u32;
+        ohci_wr(port_reg, RH_PS_CSC | RH_PS_PRSC);
+    }
+
+    G_ACTIVE = ControllerType::Ohci;
+    Ok(())
+}
+
+/// Perform an OHCI control transfer (setup + optional data + status phase).
+/// `speed`: 0 = Full Speed, 1 = Low Speed.
+pub unsafe fn ohci_control_transfer(
+    dev_addr: u8,
+    setup_pkt: &[u8; 8],
+    mut data: Option<&mut [u8]>,
+    data_in: bool,
+    max_pkt: u32,
+    speed: u8,
+) -> KResult<u32> {
+    let data_len = data.as_ref().map(|d| d.len() as u32).unwrap_or(0);
+    let total_tds = 1 + 1; // setup + status (+ merged data TD)
+    // Use a single data TD that can span the full buffer (OHCI has no 4KB limit per TD).
+
+    if total_tds + if data_len > 0 { 1 } else { 0 } > MAX_OHCI_TD as u32 {
+        return Err(Errno::NoMem);
+    }
+
+    // Allocate ED.
+    let ed_idx = ohci_alloc_ed()?;
+    let setup_td_idx = ohci_alloc_td()?;
+    let data_td_idx = if data_len > 0 { Some(ohci_alloc_td()?) } else { None };
+    let status_td_idx = ohci_alloc_td()?;
+
+    let ed = ohci_ed_ptr(ed_idx);
+    let setup_td = ohci_td_ptr(setup_td_idx);
+    let status_td = ohci_td_ptr(status_td_idx);
+
+    // Setup TD: SETUP, DATA0, 8 bytes.
+    let setup_phys = setup_pkt.as_ptr() as u32;
+    let data_td_phys = data_td_idx.map(|i| ohci_td_phys(i));
+    let status_td_phys = ohci_td_phys(status_td_idx);
+
+    let next_after_setup = if data_len > 0 {
+        data_td_phys.unwrap()
+    } else {
+        status_td_phys
+    };
+
+    (*setup_td).control = TD_CC_NOT_ACCESSED | TD_T_DATA0 | TD_DI_NO_INTR | TD_DP_SETUP | TD_R_3;
+    (*setup_td).cbp = setup_phys;
+    (*setup_td).next_td = next_after_setup;
+    (*setup_td).be = setup_phys + 7;
+
+    // Data TD(s) — merge all data into one TD (OHCI has no per-TD limit).
+    if data_len > 0 {
+        let dt_idx = data_td_idx.unwrap();
+        let dt = ohci_td_ptr(dt_idx);
+        let buf_phys = if let Some(ref mut db) = data {
+            db.as_mut_ptr() as u32
+        } else { 0 };
+
+        let dp = if data_in { TD_DP_IN } else { TD_DP_OUT };
+        (*dt).control = TD_CC_NOT_ACCESSED | TD_T_DATA1 | TD_DI_NO_INTR | dp | TD_R_3;
+        (*dt).cbp = buf_phys;
+        (*dt).next_td = status_td_phys;
+        (*dt).be = buf_phys + data_len - 1;
+    }
+
+    // Status TD: opposite direction, DATA1, 0 bytes.
+    let status_dp = if data_len > 0 && data_in {
+        TD_DP_OUT
+    } else {
+        TD_DP_IN
+    };
+    (*status_td).control = TD_CC_NOT_ACCESSED | TD_T_DATA1 | TD_DI_NO_INTR | status_dp | TD_R_3;
+    (*status_td).cbp = 0;
+    (*status_td).next_td = TD_TERMINATE;
+    (*status_td).be = 0;
+
+    // Configure the ED.
+    let speed_bits = if speed != 0 { ED_SPEED_LOW } else { ED_SPEED_FULL };
+    let mps = max_pkt.min(255) << ED_MPS_SHIFT;  // OHCI MPS is 10 bits
+    let fa = (dev_addr as u32) << ED_FA_SHIFT;
+    (*ed).control = fa | speed_bits | mps;
+    (*ed).tail_td = status_td_phys;  // last TD (stop when head reaches this)
+    (*ed).head_td = ohci_td_phys(setup_td_idx);
+    (*ed).next_ed = ED_TERMINATE;    // single ED in control list
+
+    // Link ED into control list.
+    ohci_wr(OHCI_HC_CONTROL_HEAD_ED, ohci_ed_phys(ed_idx));
+    ohci_wr(OHCI_HC_CONTROL_CURRENT_ED, ohci_ed_phys(ed_idx));
+
+    // Ensure control list is enabled.
+    ohci_wr(OHCI_HC_CONTROL, ohci_rd(OHCI_HC_CONTROL) | OHCI_CTRL_CLE);
+
+    // Doorbell: set Control List Filled.
+    ohci_wr(OHCI_HC_COMMAND_STATUS, OHCI_CMD_CLF);
+
+    // Poll for completion.
+    let mut timeout = 500_000u32;
+    loop {
+        // Check if controller is still operational.
+        let ctrl = ohci_rd(OHCI_HC_CONTROL);
+        if (ctrl & OHCI_CTRL_HCFS_MASK) != OHCI_CTRL_HCFS_OPER {
+            ohci_wr(OHCI_HC_CONTROL_HEAD_ED, 0);
+            ohci_wr(OHCI_HC_CONTROL_CURRENT_ED, 0);
+            return Err(Errno::Io);
+        }
+
+        // Check if ED is halted (head_td bit 0 set by HC).
+        if (*ed).head_td & 1 != 0 {
+            ohci_wr(OHCI_HC_CONTROL_HEAD_ED, 0);
+            ohci_wr(OHCI_HC_CONTROL_CURRENT_ED, 0);
+            return Err(Errno::Io);
+        }
+
+        // Check if all TDs are processed: head == tail.
+        let head_p = (*ed).head_td & !1;
+        let tail_p = (*ed).tail_td & !0xF;
+        if head_p == tail_p {
+            // All TDs processed. Verify condition codes.
+            let setup_cc = (*setup_td).control & TD_CC_MASK;
+            if setup_cc != 0 {
+                ohci_wr(OHCI_HC_CONTROL_HEAD_ED, 0);
+                ohci_wr(OHCI_HC_CONTROL_CURRENT_ED, 0);
+                return Err(Errno::Io);
+            }
+            if data_len > 0 {
+                let dt = ohci_td_ptr(data_td_idx.unwrap());
+                let data_cc = (*dt).control & TD_CC_MASK;
+                if data_cc != 0 {
+                    ohci_wr(OHCI_HC_CONTROL_HEAD_ED, 0);
+                    ohci_wr(OHCI_HC_CONTROL_CURRENT_ED, 0);
+                    return Err(Errno::Io);
+                }
+            }
+            let status_cc = (*status_td).control & TD_CC_MASK;
+            if status_cc != 0 {
+                ohci_wr(OHCI_HC_CONTROL_HEAD_ED, 0);
+                ohci_wr(OHCI_HC_CONTROL_CURRENT_ED, 0);
+                return Err(Errno::Io);
+            }
+
+            // Success — clear control list pointers.
+            ohci_wr(OHCI_HC_CONTROL_HEAD_ED, 0);
+            ohci_wr(OHCI_HC_CONTROL_CURRENT_ED, 0);
+            return Ok(data_len);
+        }
+
+        if timeout == 0 {
+            ohci_wr(OHCI_HC_CONTROL_HEAD_ED, 0);
+            ohci_wr(OHCI_HC_CONTROL_CURRENT_ED, 0);
+            return Err(Errno::Io);
+        }
+        timeout -= 1;
+    }
+}
+
+/// Number of OHCI root-hub ports.
+pub unsafe fn ohci_n_ports() -> u8 {
+    G_OHCI_N_PORTS
+}
+
+/// Read OHCI root-hub port status.
+pub unsafe fn ohci_port_status(idx: u8) -> KResult<u32> {
+    if idx >= G_OHCI_N_PORTS {
+        return Err(Errno::Range);
+    }
+    let reg = OHCI_HC_RH_PORT_STATUS + 4 * idx as u32;
+    Ok(ohci_rd(reg))
+}
+
+/// Reset an OHCI root-hub port (set PRS, wait for self-clear).
+pub unsafe fn ohci_port_reset(idx: u8) -> KResult<()> {
+    if idx >= G_OHCI_N_PORTS {
+        return Err(Errno::Range);
+    }
+    let reg = OHCI_HC_RH_PORT_STATUS + 4 * idx as u32;
+    // Ensure port power is on.
+    ohci_wr(reg, ohci_rd(reg) | RH_PS_PPS);
+    // Set port reset.
+    ohci_wr(reg, ohci_rd(reg) | RH_PS_PRS);
+    // Wait for PRS to self-clear.
+    let mut timeout = 100_000u32;
+    while timeout > 0 && (ohci_rd(reg) & RH_PS_PRS) != 0 {
         timeout -= 1;
     }
     if timeout == 0 {
         return Err(Errno::Io);
     }
+    // Enable the port.
+    ohci_wr(reg, ohci_rd(reg) | RH_PS_PES);
     Ok(())
 }
 
-/// Enable a root-hub port (port enable bit, bit 2).
-pub unsafe fn port_enable(idx: u8) -> KResult<()> {
-    if idx >= G_N_PORTS {
+/// Enable an OHCI root-hub port.
+pub unsafe fn ohci_port_enable(idx: u8) -> KResult<()> {
+    if idx >= G_OHCI_N_PORTS {
         return Err(Errno::Range);
     }
-    let reg = OP_PORTSC + 4 * idx as u32;
-    op_wr(reg, op_rd(reg) | (1 << 2));
+    let reg = OHCI_HC_RH_PORT_STATUS + 4 * idx as u32;
+    ohci_wr(reg, ohci_rd(reg) | RH_PS_PES);
     Ok(())
+}
+
+/// Get the speed of a device attached to an OHCI port (0 = Full, 1 = Low).
+pub unsafe fn ohci_port_speed(idx: u8) -> KResult<u8> {
+    let ps = ohci_port_status(idx)?;
+    Ok(if (ps & RH_PS_LSDA) != 0 { 1 } else { 0 })
+}
+
+/// Submit a control transfer on the active controller.
+pub unsafe fn control_transfer(
+    dev_addr: u8,
+    setup_pkt: &[u8; 8],
+    data: Option<&mut [u8]>,
+    data_in: bool,
+    max_pkt: u32,
+) -> KResult<u32> {
+    match G_ACTIVE {
+        ControllerType::Ehci => ehci_control_transfer(dev_addr, setup_pkt, data, data_in, max_pkt),
+        ControllerType::Ohci => {
+            ohci_control_transfer(dev_addr, setup_pkt, data, data_in, max_pkt, 0)
+        }
+        ControllerType::None => Err(Errno::NoSys),
+    }
+}
+
+/// Number of root-hub ports on the active controller.
+pub fn n_ports() -> u8 {
+    unsafe {
+        match G_ACTIVE {
+            ControllerType::Ehci => G_N_PORTS,
+            ControllerType::Ohci => G_OHCI_N_PORTS,
+            ControllerType::None => 0,
+        }
+    }
+}
+
+/// Read the status of root-hub port `idx` (0-based).
+pub unsafe fn port_status(idx: u8) -> KResult<u32> {
+    match G_ACTIVE {
+        ControllerType::Ehci => {
+            if idx >= G_N_PORTS {
+                return Err(Errno::Range);
+            }
+            Ok(op_rd(OP_PORTSC + 4 * idx as u32))
+        }
+        ControllerType::Ohci => ohci_port_status(idx),
+        ControllerType::None => Err(Errno::NoSys),
+    }
+}
+
+/// Reset a root-hub port.
+pub unsafe fn port_reset(idx: u8) -> KResult<()> {
+    match G_ACTIVE {
+        ControllerType::Ehci => {
+            if idx >= G_N_PORTS {
+                return Err(Errno::Range);
+            }
+            let reg = OP_PORTSC + 4 * idx as u32;
+            op_wr(reg, op_rd(reg) | (1 << 8));
+            let mut timeout = 100_000u32;
+            while timeout > 0 && (op_rd(reg) & (1 << 8)) != 0 {
+                timeout -= 1;
+            }
+            if timeout == 0 {
+                return Err(Errno::Io);
+            }
+            Ok(())
+        }
+        ControllerType::Ohci => ohci_port_reset(idx),
+        ControllerType::None => Err(Errno::NoSys),
+    }
+}
+
+/// Enable a root-hub port.
+pub unsafe fn port_enable(idx: u8) -> KResult<()> {
+    match G_ACTIVE {
+        ControllerType::Ehci => {
+            if idx >= G_N_PORTS {
+                return Err(Errno::Range);
+            }
+            let reg = OP_PORTSC + 4 * idx as u32;
+            op_wr(reg, op_rd(reg) | (1 << 2));
+            Ok(())
+        }
+        ControllerType::Ohci => ohci_port_enable(idx),
+        ControllerType::None => Err(Errno::NoSys),
+    }
+}
+
+/// Probe for and initialise the first available USB controller (EHCI or OHCI).
+pub unsafe fn init_usb() -> KResult<()> {
+    if probe_ehci(EHCI_BASE) {
+        init_ehci(EHCI_BASE)
+    } else if probe_ohci(OHCI_BASE) {
+        init_ohci(OHCI_BASE)
+    } else {
+        Err(Errno::NoEnt)
+    }
 }
