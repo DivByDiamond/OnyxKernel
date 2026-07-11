@@ -1,5 +1,5 @@
 pub const VFS_MAX_FDS: usize = 16;
-pub const MAX_MOUNTS: usize = 5;
+pub const MAX_MOUNTS: usize = 6;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Fs {
@@ -8,6 +8,7 @@ pub enum Fs {
     Fat32 = 2,
     Proc = 3,
     Ipc = 4,
+    Devfs = 5,
 }
 
 pub const PERM_READ: u32 = 1;

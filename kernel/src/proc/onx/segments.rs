@@ -1,10 +1,15 @@
+use crate::arch::regs::*;
 use crate::mm::{pmm, vmm};
 use core::ptr;
 use onyx_core::errno::{Errno, KResult};
 use onyx_core::formats::OnxSegment;
-use crate::arch::regs::*;
 
-pub unsafe fn map_segment_data(root_pa: u64, s: &OnxSegment, image: *const u8, compressed: bool) -> KResult<()> {
+pub unsafe fn map_segment_data(
+    root_pa: u64,
+    s: &OnxSegment,
+    image: *const u8,
+    compressed: bool,
+) -> KResult<()> {
     let seg_flags = (s.flags as u64) | PTE_U | PTE_A | PTE_D;
     let mut va = s.vaddr;
     let end = s.vaddr + s.memsz;
@@ -35,7 +40,9 @@ unsafe fn decompress_to_pages(root_pa: u64, s: &OnxSegment, image: *const u8) ->
         in_off += 1;
         if tag & 0x80 != 0 {
             let count = ((tag & 0x7F) as usize) + 1;
-            if in_off >= comp_end { return Err(Errno::Inval); }
+            if in_off >= comp_end {
+                return Err(Errno::Inval);
+            }
             let val = *src.add(in_off);
             in_off += 1;
             let mut left = count.min((file_end - out_va) as usize);
@@ -51,7 +58,9 @@ unsafe fn decompress_to_pages(root_pa: u64, s: &OnxSegment, image: *const u8) ->
         } else {
             let count = (tag as usize) + 1;
             let mut left = count.min((file_end - out_va) as usize);
-            if in_off + left > comp_end { return Err(Errno::Inval); }
+            if in_off + left > comp_end {
+                return Err(Errno::Inval);
+            }
             while left > 0 {
                 let pb = out_va & !0xFFF;
                 let paddr = vmm::translate(root_pa, pb);

@@ -6,12 +6,12 @@
 //! `struct stat` (128 bytes) so libc `stat(3)` wrappers can copy it verbatim.
 use crate::fs::vfs;
 use crate::proc;
-    use crate::syscall::abi::{
+use crate::syscall::abi::{
     F_DUPFD, F_GETFD, F_GETFL, F_SETFD, F_SETFL, FD_CLOEXEC, O_ACCMODE, O_APPEND, O_CREAT,
     O_DIRECTORY, O_EXCL, O_NONBLOCK, O_RDONLY, O_RDWR, O_TRUNC, O_WRONLY,
 };
-use onyx_core::fmt::Arg;
 use onyx_core::errno::Errno;
+use onyx_core::fmt::Arg;
 
 use super::super::handler::{parse_user_path, user_ptr_ok};
 
@@ -66,7 +66,15 @@ impl UserStat {
 
 /// Translate a kernel-side `OnyfsStat` into the user-visible `struct stat`.
 /// We fill the standard S_IFMT bits in `st_mode` based on the OnyxFS dtype.
-unsafe fn fill_user_stat(out_va: u64, ino: u32, size: u64, mode: u32, mtime: u64, atime: u64, ctime: u64) {
+unsafe fn fill_user_stat(
+    out_va: u64,
+    ino: u32,
+    size: u64,
+    mode: u32,
+    mtime: u64,
+    atime: u64,
+    ctime: u64,
+) {
     if !user_ptr_ok(out_va, core::mem::size_of::<UserStat>() as u64) {
         return;
     }
@@ -78,7 +86,11 @@ unsafe fn fill_user_stat(out_va: u64, ino: u32, size: u64, mode: u32, mtime: u64
     // Compose a Linux-style st_mode: S_IFREG (0o100000) for regular files,
     // S_IFDIR (0o040000) for directories. Lower 9 bits = rwxrwxrwx (always
     // 0o777 for now — OnyxFS does not yet enforce permissions).
-    let ifmt = if mode & 0o170000 == 0o040000 { 0o040000 } else { 0o100000 };
+    let ifmt = if mode & 0o170000 == 0o040000 {
+        0o040000
+    } else {
+        0o100000
+    };
     let st_mode: u32 = ifmt | 0o755;
     let stat = UserStat {
         st_dev: 0,
@@ -104,17 +116,32 @@ unsafe fn fill_user_stat(out_va: u64, ino: u32, size: u64, mode: u32, mtime: u64
 }
 
 pub(in super::super) unsafe fn sys_open(path: u64, flags: u64, mode: u64) -> i64 {
-    crate::kinf!("sys_open", "called path=%x flags=%x mode=%x", Arg::from(path), Arg::from(flags as u32), Arg::from(mode as u32));
+    crate::kinf!(
+        "sys_open",
+        "called path=%x flags=%x mode=%x",
+        Arg::from(path),
+        Arg::from(flags as u32),
+        Arg::from(mode as u32)
+    );
 
     let path_bytes = match parse_user_path(path) {
         Some(s) => s,
         None => {
-            crate::kerr!("sys_open", "parse_user_path failed for path=%x", Arg::from(path));
+            crate::kerr!(
+                "sys_open",
+                "parse_user_path failed for path=%x",
+                Arg::from(path)
+            );
             return Errno::Inval.as_i64();
         }
     };
 
-    crate::kinf!("sys_open", "path_bytes=%s ring=%d", Arg::from(core::str::from_utf8(path_bytes).unwrap_or("<bad>")), Arg::from(proc::current_ring() as u32));
+    crate::kinf!(
+        "sys_open",
+        "path_bytes=%s ring=%d",
+        Arg::from(core::str::from_utf8(path_bytes).unwrap_or("<bad>")),
+        Arg::from(proc::current_ring() as u32)
+    );
 
     let ring = proc::current_ring();
     if ring == proc::PROC_RING_USER && path_bytes.starts_with(b"/service/") {
@@ -228,13 +255,14 @@ pub(in super::super) unsafe fn sys_stat(path: u64, st_buf: u64) -> i64 {
             // Try to get richer metadata from onyxfs if the root fs is OnyxFS.
             // (Lookup will fail for FAT32/procfs/ipcfs — that's fine.)
             let mut st = crate::fs::onyxfs::OnyfsStat::default();
-            let (mtime, atime, ctime, ino, mode) = match crate::fs::onyxfs::lookup(path_bytes, &mut st) {
-                Ok(_) => (st.mtime, st.atime, st.ctime, st.ino, st.mode),
-                Err(_) => {
-                    let now = crate::srv::timer::uptime_us() / 1_000_000;
-                    (now, now, now, 0u32, 0u32)
-                }
-            };
+            let (mtime, atime, ctime, ino, mode) =
+                match crate::fs::onyxfs::lookup(path_bytes, &mut st) {
+                    Ok(_) => (st.mtime, st.atime, st.ctime, st.ino, st.mode),
+                    Err(_) => {
+                        let now = crate::srv::timer::uptime_us() / 1_000_000;
+                        (now, now, now, 0u32, 0u32)
+                    }
+                };
             fill_user_stat(st_buf, ino, size as u64, mode, mtime, atime, ctime);
             0
         }
@@ -269,7 +297,9 @@ pub(in super::super) unsafe fn sys_fstat(token: u64, st_buf: u64) -> i64 {
 ///   - `F_SETFL` (cmd=4): set open flags (O_NONBLOCK accepted as no-op).
 pub(in super::super) unsafe fn sys_fcntl(fd: u64, cmd: u32, arg: u64) -> i64 {
     match cmd {
-        F_DUPFD => vfs::dup(fd).map(|t| t as i64).unwrap_or_else(|e| e.as_i64()),
+        F_DUPFD => vfs::dup(fd)
+            .map(|t| t as i64)
+            .unwrap_or_else(|e| e.as_i64()),
         F_GETFD => 0,
         F_SETFD => {
             // FD_CLOEXEC bit is stored but not honored (no execve-with-fd-
@@ -292,6 +322,5 @@ pub(in super::super) unsafe fn sys_fcntl(fd: u64, cmd: u32, arg: u64) -> i64 {
 pub use crate::syscall::abi::{
     O_ACCMODE as _O_ACCMODE, O_APPEND as _O_APPEND, O_CREAT as _O_CREAT,
     O_DIRECTORY as _O_DIRECTORY, O_EXCL as _O_EXCL, O_NONBLOCK as _O_NONBLOCK,
-    O_RDONLY as _O_RDONLY, O_RDWR as _O_RDWR, O_TRUNC as _O_TRUNC,
-    O_WRONLY as _O_WRONLY,
+    O_RDONLY as _O_RDONLY, O_RDWR as _O_RDWR, O_TRUNC as _O_TRUNC, O_WRONLY as _O_WRONLY,
 };

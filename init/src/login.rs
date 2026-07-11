@@ -50,7 +50,11 @@ pub unsafe extern "C" fn _start() -> ! {
         seed_root_account();
         // Exec /bin/osh directly as root (ring 1).
         let shell = b"/bin/osh\0";
-        syscalls::write(1, b"[login] launching /bin/osh (root, ring 1)\n".as_ptr(), 41);
+        syscalls::write(
+            1,
+            b"[login] launching /bin/osh (root, ring 1)\n".as_ptr(),
+            41,
+        );
         syscalls::exec(shell.as_ptr(), core::ptr::null());
         syscalls::write(1, b"login: exec failed\n".as_ptr(), 19);
         syscalls::exit(1);
@@ -60,14 +64,14 @@ pub unsafe extern "C" fn _start() -> ! {
     loop {
         // Print user list so the user knows what to type.
         syscalls::write(1, b"\nUsers:\n".as_ptr(), 8);
-        for i in 0..nusers {
+        for u in users[..nusers].iter() {
             let mut nl = 0;
-            while nl < users[i].name.len() && users[i].name[nl] != 0 {
+            while nl < u.name.len() && u.name[nl] != 0 {
                 nl += 1;
             }
             if nl > 0 {
                 syscalls::write(1, b"  ".as_ptr(), 2);
-                syscalls::write(1, users[i].name.as_ptr(), nl);
+                syscalls::write(1, u.name.as_ptr(), nl);
                 syscalls::write(1, b"\n".as_ptr(), 1);
             }
         }
@@ -189,7 +193,11 @@ unsafe fn verify_plaintext_password(username: &[u8], password: &[u8]) -> bool {
     let mut buf = [0u8; 4096];
     let mut total = 0usize;
     loop {
-        let n = syscalls::read(fd as u64, buf[total..].as_mut_ptr(), (buf.len() - total) as u64);
+        let n = syscalls::read(
+            fd as u64,
+            buf[total..].as_mut_ptr(),
+            (buf.len() - total) as u64,
+        );
         if n <= 0 {
             break;
         }
@@ -204,7 +212,11 @@ unsafe fn verify_plaintext_password(username: &[u8], password: &[u8]) -> bool {
     let data = &buf[..total];
     let mut pos = 0;
     while pos < data.len() {
-        let line_end = data[pos..].iter().position(|&b| b == b'\n').map(|n| pos + n).unwrap_or(data.len());
+        let line_end = data[pos..]
+            .iter()
+            .position(|&b| b == b'\n')
+            .map(|n| pos + n)
+            .unwrap_or(data.len());
         let line = &data[pos..line_end];
         pos = line_end + 1;
 

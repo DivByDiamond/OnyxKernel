@@ -1,4 +1,6 @@
-use super::{alloc_fd, fd_check, fd_get, fd_set, fd_token, FdToken, Fs, PERM_READ, PERM_WRITE, VFS_MAX_FDS};
+use super::{
+    FdToken, Fs, PERM_READ, PERM_WRITE, VFS_MAX_FDS, alloc_fd, fd_check, fd_get, fd_set, fd_token,
+};
 use onyx_core::errno::{Errno, KResult};
 
 pub unsafe fn dup(token: FdToken) -> KResult<FdToken> {
@@ -23,7 +25,9 @@ pub unsafe fn dup2(old_token: FdToken, new_fd: u64) -> KResult<FdToken> {
         (*p)[new_idx].used = true;
         (*p)[new_idx].perms = fd.perms;
         (*p)[new_idx].epoch = (*p)[new_idx].epoch.wrapping_add(1);
-        if (*p)[new_idx].epoch == 0 { (*p)[new_idx].epoch = 1; }
+        if (*p)[new_idx].epoch == 0 {
+            (*p)[new_idx].epoch = 1;
+        }
         (*p)[new_idx].ino = fd.ino;
         (*p)[new_idx].size = fd.size;
         (*p)[new_idx].fs = fd.fs;
@@ -34,7 +38,9 @@ pub unsafe fn dup2(old_token: FdToken, new_fd: u64) -> KResult<FdToken> {
         p.fds[new_idx].used = true;
         p.fds[new_idx].perms = fd.perms;
         p.fds[new_idx].epoch = p.fds[new_idx].epoch.wrapping_add(1);
-        if p.fds[new_idx].epoch == 0 { p.fds[new_idx].epoch = 1; }
+        if p.fds[new_idx].epoch == 0 {
+            p.fds[new_idx].epoch = 1;
+        }
         p.fds[new_idx].ino = fd.ino;
         p.fds[new_idx].size = fd.size;
         p.fds[new_idx].fs = fd.fs;

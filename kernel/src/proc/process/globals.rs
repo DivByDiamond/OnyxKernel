@@ -2,7 +2,7 @@ use crate::arch::trap_frame::TrapFrame;
 use core::ptr;
 use core::sync::atomic::{AtomicBool, Ordering};
 
-use super::types::{Proc, PROC_PID_INIT};
+use super::types::{PROC_PID_INIT, Proc};
 use crate::arch::smp;
 
 pub const MAX_HARTS: usize = smp::MAX_HARTS;

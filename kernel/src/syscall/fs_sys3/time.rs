@@ -100,7 +100,7 @@ pub unsafe fn sys_clock_getres(clk_id: u64, res: u64) -> i64 {
     match clk_id {
         CLOCK_REALTIME | CLOCK_MONOTONIC => {
             let out = res as *mut u64;
-            *out = 0;            // tv_sec = 0
+            *out = 0; // tv_sec = 0
             *out.add(1) = 10_000_000; // tv_nsec = 10 ms
             0
         }

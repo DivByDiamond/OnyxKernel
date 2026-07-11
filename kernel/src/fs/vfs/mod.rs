@@ -24,5 +24,8 @@ pub use unlink::*;
 pub use utimens::*;
 pub use vnode::*;
 
-pub(crate) use mount::{resolve_mount, G_MOUNTS, G_ROOT_FS};
-pub(crate) use ops::{alloc_fd, fd_check, fd_check_perm, fd_clear, fd_get, fd_set, fd_update_pos, is_kernel_boot, G_KERNEL_FDS};
+pub(crate) use mount::{G_MOUNTS, G_ROOT_FS, resolve_mount};
+pub(crate) use ops::{
+    G_KERNEL_FDS, alloc_fd, fd_check, fd_check_perm, fd_clear, fd_get, fd_set, fd_update_pos,
+    is_kernel_boot,
+};

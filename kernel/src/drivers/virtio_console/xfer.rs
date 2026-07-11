@@ -1,5 +1,5 @@
 //! virtio-console RX/TX — polled receive, synchronous transmit.
-use super::{push, G_CON};
+use super::{G_CON, push};
 use crate::drivers::virtio::{R_QUEUE_NOTIFY, VqDesc};
 use crate::mm::pmm;
 use core::ptr;

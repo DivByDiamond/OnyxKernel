@@ -37,7 +37,9 @@ pub(crate) unsafe fn launch() -> ! {
     };
     heap::kfree(img);
 
-    crate::kinf!("onx", "entry=%p root=%p ustack=%p ring=%d",
+    crate::kinf!(
+        "onx",
+        "entry=%p root=%p ustack=%p ring=%d",
         Arg::from(r.entry),
         Arg::from(r.root_pa),
         Arg::from(r.ustack),
@@ -66,7 +68,9 @@ pub(crate) unsafe fn launch() -> ! {
     }
 
     csr::set_sstatus(SSTATUS_SIE);
-    crate::kinf!("proc", "entering user pid=1 entry=%p ring=%d",
+    crate::kinf!(
+        "proc",
+        "entering user pid=1 entry=%p ring=%d",
         Arg::from(r.entry),
         Arg::from(ring as u32)
     );

@@ -5,8 +5,7 @@
 //! (LEDs, buttons, SD-card-CD) can register for edge interrupts without
 //! touching PLIC directly. Pin I/O API lives in `ops.rs`.
 pub use self::ops::{
-    dispatch, on_edge, read, set_invert, set_input, set_output, toggle, write, PinHandler,
-    PinSlot,
+    PinHandler, PinSlot, dispatch, on_edge, read, set_input, set_invert, set_output, toggle, write,
 };
 use crate::arch::mmio::Mmio;
 

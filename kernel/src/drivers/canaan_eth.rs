@@ -54,13 +54,19 @@ pub unsafe fn init(base: usize, mdio_base: usize, mac: [u8; 6]) -> KResult<()> {
         t -= 1;
     }
     // Program station address.
-    wr(R_MAC_ADDR_LO,
-        (mac[4] as u32) | ((mac[5] as u32) << 8));
-    wr(R_MAC_ADDR_HI,
-        (mac[0] as u32) | ((mac[1] as u32) << 8)
-        | ((mac[2] as u32) << 16) | ((mac[3] as u32) << 24));
+    wr(R_MAC_ADDR_LO, (mac[4] as u32) | ((mac[5] as u32) << 8));
+    wr(
+        R_MAC_ADDR_HI,
+        (mac[0] as u32)
+            | ((mac[1] as u32) << 8)
+            | ((mac[2] as u32) << 16)
+            | ((mac[3] as u32) << 24),
+    );
     // Enable TX/RX, 100Mbps, full-duplex.
-    wr(R_MAC_CFG, (1 << 1) | (1 << 2) | (1 << 3) | (1 << 8) | (1 << 14));
+    wr(
+        R_MAC_CFG,
+        (1 << 1) | (1 << 2) | (1 << 3) | (1 << 8) | (1 << 14),
+    );
     Ok(())
 }
 
@@ -68,9 +74,7 @@ pub unsafe fn init(base: usize, mdio_base: usize, mac: [u8; 6]) -> KResult<()> {
 /// `reg` is the 5-bit register index. Returns 16-bit data.
 pub fn mdio_read(phy_addr: u8, reg: u8) -> KResult<u16> {
     unsafe {
-        let v = ((phy_addr as u32 & 0x1F) << 11)
-            | ((reg as u32 & 0x1F) << 6)
-            | (0b100 << 2); // CSR clock divisor
+        let v = ((phy_addr as u32 & 0x1F) << 11) | ((reg as u32 & 0x1F) << 6) | (0b100 << 2); // CSR clock divisor
         wr(R_MAC_MII_ADDR, v);
         wr(R_MAC_MII_ADDR, v | MII_BUSY);
         let mut t = 100_000u32;
@@ -87,9 +91,7 @@ pub fn mdio_read(phy_addr: u8, reg: u8) -> KResult<u16> {
 /// Write a PHY register via MDIO.
 pub fn mdio_write(phy_addr: u8, reg: u8, data: u16) -> KResult<()> {
     unsafe {
-        let v = ((phy_addr as u32 & 0x1F) << 11)
-            | ((reg as u32 & 0x1F) << 6)
-            | (0b100 << 2);
+        let v = ((phy_addr as u32 & 0x1F) << 11) | ((reg as u32 & 0x1F) << 6) | (0b100 << 2);
         wr(R_MAC_MII_ADDR, v);
         wr(R_MAC_MII_DATA, data as u32);
         wr(R_MAC_MII_ADDR, v | MII_BUSY | MII_WRITE);

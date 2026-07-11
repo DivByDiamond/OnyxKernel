@@ -1,12 +1,11 @@
-use super::super::journal::journal_log;
 use super::super::inode;
+use super::super::journal::journal_log;
 use super::super::{
-    dirents_per_block, read_block, write_block, G_BUF, G_VERSION, ONYFS_V1,
-    ONYFS_V1_DIRENT_SIZE,
+    G_BUF, G_VERSION, ONYFS_V1, ONYFS_V1_DIRENT_SIZE, dirents_per_block, read_block, write_block,
 };
 use onyx_core::errno::{Errno, KResult};
 use onyx_core::formats::{
-    OnyfsDirent, OnyfsInode, ONYFS_BLOCK_SIZE, ONYFS_DIRECT_BLKS, ONYFS_NAME_MAX,
+    ONYFS_BLOCK_SIZE, ONYFS_DIRECT_BLKS, ONYFS_NAME_MAX, OnyfsDirent, OnyfsInode,
 };
 
 pub unsafe fn remove_dirent(dir_ino: u32, name: &[u8]) -> KResult<()> {
@@ -62,7 +61,8 @@ pub unsafe fn remove_dirent(dir_ino: u32, name: &[u8]) -> KResult<()> {
             }
             match_len += 1;
         }
-        if match_len == name.len() && (match_len >= ONYFS_NAME_MAX || existing_name[match_len] == 0) {
+        if match_len == name.len() && (match_len >= ONYFS_NAME_MAX || existing_name[match_len] == 0)
+        {
             (*pb)[inode_off] = 0;
             (*pb)[inode_off + 1] = 0;
             (*pb)[inode_off + 2] = 0;

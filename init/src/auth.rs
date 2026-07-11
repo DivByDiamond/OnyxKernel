@@ -1,4 +1,6 @@
-#![allow(dead_code)]
+// Shared across several /bin/ binaries — each uses a different subset.
+#![expect(dead_code)]
+
 use crate::syscalls;
 
 pub const PASSWD_PATH: &[u8] = b"/etc/passwd";
@@ -209,8 +211,8 @@ pub fn const_time_eq(a: &[u8], b: &[u8]) -> bool {
         return false;
     }
     let mut r = 0u8;
-    for i in 0..a.len() {
-        r |= a[i] ^ b[i];
+    for (ai, bi) in a.iter().zip(b.iter()) {
+        r |= ai ^ bi;
     }
     r == 0
 }
@@ -223,9 +225,9 @@ fn generate_salt() -> [u8; 8] {
     let pid = unsafe { syscalls::getpid() } as u64;
     let mut seed = pid.wrapping_mul(1103515245).wrapping_add(12345);
     let mut salt = [0u8; 8];
-    for i in 0..8 {
+    for s in &mut salt {
         seed = seed.wrapping_mul(1103515245).wrapping_add(12345);
-        salt[i] = (seed >> 16) as u8;
+        *s = (seed >> 16) as u8;
     }
     salt
 }

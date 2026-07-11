@@ -16,7 +16,9 @@ pub fn select(cs: u8) -> KResult<()> {
 
 /// Release the chip-select line (deasserts CS).
 pub fn release() {
-    unsafe { wr(R_CSMODE, CSMODE_AUTO); }
+    unsafe {
+        wr(R_CSMODE, CSMODE_AUTO);
+    }
 }
 
 /// Perform a full-duplex transfer of `len` bytes. `tx` and `rx` must be

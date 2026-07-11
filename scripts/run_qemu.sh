@@ -27,6 +27,8 @@ echo "==> Converting userland ELFs → .onx (v2 default, --compress)"
 "$ROOT/target/release/elf2onx" --ring=1 --compress "$ROOT/target/riscv64gc-unknown-none-elf/release/onyx-useradd" "$BUILD/useradd.onx"
 "$ROOT/target/release/elf2onx" --ring=1 --compress "$ROOT/target/riscv64gc-unknown-none-elf/release/onyx-userdel" "$BUILD/userdel.onx"
 "$ROOT/target/release/elf2onx" --compress "$ROOT/target/riscv64gc-unknown-none-elf/release/onyx-argv-test" "$BUILD/argv_test.onx"
+"$ROOT/target/release/elf2onx" --compress "$ROOT/target/riscv64gc-unknown-none-elf/release/onyx-fb-draw" "$BUILD/fb_draw.onx"
+"$ROOT/target/release/elf2onx" --ring=1 --compress "$ROOT/target/riscv64gc-unknown-none-elf/release/onyx-lsblk" "$BUILD/lsblk.onx"
 
 # NOTE: /etc/passwd and /etc/shadow are NOT pre-baked into the image.
 # On first boot, /bin/login detects that no root user exists and calls
@@ -46,6 +48,9 @@ fi
 # Generate PSF1 font
 echo "==> Generating font"
 "$ROOT/target/release/psfgen" "$BUILD/default.psf"
+
+# Create enable-flag for the lsblk boot-time service.
+echo "1" > "$BUILD/lsblk.enabled" 2>/dev/null || true
 
 # Create manifest. Optional files (onyxcc, test.c) are added only if
 # they exist — otherwise mkimage would fail trying to read them.
@@ -69,6 +74,10 @@ MANIFEST="$BUILD/manifest.txt"
         echo "file $BUILD/onyxcc.onx /bin/onyxcc --ring=1"
     fi
     echo "file $BUILD/argv_test.onx /bin/argv_test"
+    echo "file $BUILD/fb_draw.onx /bin/fb_draw --ring=1"
+    echo "file $BUILD/lsblk.onx /bin/lsblk --ring=1"
+    echo "file $BUILD/lsblk.onx /service/lsblk --ring=1"
+    echo "file $BUILD/lsblk.enabled /etc/init/lsblk.enabled"
     ONYXCC_TEST_C="$ROOT/../OnyxCompiller/tests/hello_full.c"
     if [ -f "$ONYXCC_TEST_C" ]; then
         echo "file $ONYXCC_TEST_C /tmp/test.c"
@@ -97,4 +106,5 @@ qemu-system-riscv64 \
     -bios "$BOOT_DIR/bootloader.bin" \
     -drive file="$BUILD/boot.img",format=raw,if=none,id=drive0 \
     -device virtio-blk-device,drive=drive0 \
-    -nographic -no-reboot
+    -serial stdio \
+    -display "$QEMU_DISPLAY" -no-reboot

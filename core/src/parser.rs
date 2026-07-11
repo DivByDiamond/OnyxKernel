@@ -1,4 +1,3 @@
-
 #[inline]
 pub fn be32(p: &[u8]) -> u32 {
     u32::from_be_bytes([p[0], p[1], p[2], p[3]])

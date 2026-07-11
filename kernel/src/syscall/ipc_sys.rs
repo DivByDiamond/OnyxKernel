@@ -62,12 +62,7 @@ pub(super) unsafe fn sys_chan_connect(chan_id: u32) -> i64 {
 /// SYS_chan_send(tf, chan_id, buf, len): write `len` bytes from user buffer
 /// `buf` to the channel. Blocks if the channel is full. Returns the number of
 /// bytes sent.
-pub(super) unsafe fn sys_chan_send(
-    tf: &mut TrapFrame,
-    chan_id: u32,
-    buf: u64,
-    len: u64,
-) -> i64 {
+pub(super) unsafe fn sys_chan_send(tf: &mut TrapFrame, chan_id: u32, buf: u64, len: u64) -> i64 {
     if !user_ptr_ok(buf, len) {
         return Errno::Inval.as_i64();
     }
@@ -80,12 +75,7 @@ pub(super) unsafe fn sys_chan_send(
 /// SYS_chan_recv(tf, chan_id, buf, len): read up to `len` bytes into user
 /// buffer `buf` from the channel. Blocks if the channel is empty. Returns the
 /// number of bytes read.
-pub(super) unsafe fn sys_chan_recv(
-    tf: &mut TrapFrame,
-    chan_id: u32,
-    buf: u64,
-    len: u64,
-) -> i64 {
+pub(super) unsafe fn sys_chan_recv(tf: &mut TrapFrame, chan_id: u32, buf: u64, len: u64) -> i64 {
     if !user_ptr_ok(buf, len) {
         return Errno::Inval.as_i64();
     }

@@ -3,7 +3,7 @@
 use crate::parser::{le32, le64};
 use alloc::vec::Vec;
 
-use super::segment::{OnxSegment, ONX_MAX_SEGS};
+use super::segment::{ONX_MAX_SEGS, OnxSegment};
 
 // ════════════════════════════════════════════════════════════════════════════
 // OnyxExec v2 — расширенный формат бинарников

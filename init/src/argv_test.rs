@@ -1,5 +1,6 @@
 #![no_std]
 #![no_main]
+#![allow(clippy::missing_safety_doc, non_snake_case, unsafe_op_in_unsafe_fn)]
 
 mod syscalls;
 

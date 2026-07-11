@@ -66,13 +66,7 @@ impl FbWriter {
             self.putc(cp as u8);
             return;
         }
-        fb::draw_unicode_char(
-            self.col * fw,
-            self.row * fh,
-            cp,
-            self.fg,
-            self.bg,
-        );
+        fb::draw_unicode_char(self.col * fw, self.row * fh, cp, self.fg, self.bg);
         self.col += 1;
         if self.col >= max_col {
             self.col = 0;
@@ -96,17 +90,23 @@ impl FbWriter {
             }
             let cp;
             if b < 0xE0 {
-                if i + 1 >= bytes.len() { break; }
+                if i + 1 >= bytes.len() {
+                    break;
+                }
                 cp = ((b & 0x1F) as u32) << 6 | ((bytes[i + 1] & 0x3F) as u32);
                 i += 2;
             } else if b < 0xF0 {
-                if i + 2 >= bytes.len() { break; }
+                if i + 2 >= bytes.len() {
+                    break;
+                }
                 cp = ((b & 0x0F) as u32) << 12
                     | ((bytes[i + 1] & 0x3F) as u32) << 6
                     | ((bytes[i + 2] & 0x3F) as u32);
                 i += 3;
             } else {
-                if i + 3 >= bytes.len() { break; }
+                if i + 3 >= bytes.len() {
+                    break;
+                }
                 cp = ((b & 0x07) as u32) << 18
                     | ((bytes[i + 1] & 0x3F) as u32) << 12
                     | ((bytes[i + 2] & 0x3F) as u32) << 6

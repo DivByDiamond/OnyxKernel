@@ -1,5 +1,5 @@
-use super::shared::{G_FONT, G_UNI_MAP, G_UNI_MAP_LEN};
 use super::shared::FONT_GLYPH_BYTES;
+use super::shared::{G_FONT, G_UNI_MAP, G_UNI_MAP_LEN};
 
 #[derive(Clone, Copy)]
 pub struct GlyphData {
@@ -97,9 +97,7 @@ pub fn glyph_for_cp(cp: u32) -> Option<u8> {
 }
 
 pub fn glyph_or_default(cp: u32) -> u8 {
-    glyph_for_cp(cp).unwrap_or_else(|| {
-        if cp < 256 { cp as u8 } else { b'?' }
-    })
+    glyph_for_cp(cp).unwrap_or_else(|| if cp < 256 { cp as u8 } else { b'?' })
 }
 
 static BLANK_GLYPH: [u8; FONT_GLYPH_BYTES] = [0u8; FONT_GLYPH_BYTES];

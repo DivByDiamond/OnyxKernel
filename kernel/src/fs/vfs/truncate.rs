@@ -1,4 +1,4 @@
-use super::{fd_check, fd_get, FdToken};
+use super::{FdToken, fd_check, fd_get};
 use crate::fs::onyxfs;
 use onyx_core::errno::KResult;
 

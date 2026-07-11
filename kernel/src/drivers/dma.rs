@@ -94,8 +94,7 @@ pub fn copy(dst: usize, src: usize, len: usize) -> KResult<()> {
         wr(chan, R_NEXT_SRC, src as u32);
         wr(chan, R_NEXT_DEST, dst as u32);
         wr(chan, R_NEXT_BYTES, len as u32);
-        wr(chan, R_NEXT_CONFIG,
-            CFG_MEM_TO_MEM | CFG_DONE_IE | CFG_RUN);
+        wr(chan, R_NEXT_CONFIG, CFG_MEM_TO_MEM | CFG_DONE_IE | CFG_RUN);
         // Wait for RUN bit to clear.
         let mut t = 10_000_000u32;
         while t > 0 && rd(chan, R_NEXT_CONFIG) & CFG_RUN != 0 {

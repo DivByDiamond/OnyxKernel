@@ -1,12 +1,12 @@
-pub mod regs;
-pub mod cmd;
 pub mod block;
+pub mod cmd;
+pub mod regs;
 
-use self::regs::*;
 use self::cmd::*;
+use self::regs::*;
 use crate::drivers::plic;
 
-pub use self::block::{read, write, read_multi, write_multi};
+pub use self::block::{read, read_multi, write, write_multi};
 pub use self::regs::PLIC_PRIO_SDHCI;
 
 #[derive(Clone, Copy)]

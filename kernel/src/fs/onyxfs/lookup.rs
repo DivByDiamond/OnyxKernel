@@ -9,12 +9,12 @@
 //! `readdir_entry` (stateful directory iteration) lives in `readdir.rs`.
 use super::inode::{read_inode, stat};
 use super::{
-    dirents_per_block, read_block, OnyfsStat, G_BUF, G_VERSION, ONYFS_V1, ONYFS_V1_DIRENT_SIZE,
+    G_BUF, G_VERSION, ONYFS_V1, ONYFS_V1_DIRENT_SIZE, OnyfsStat, dirents_per_block, read_block,
 };
 use onyx_core::errno::{Errno, KResult};
 use onyx_core::formats::{
-    OnyfsDirent, OnyfsInode, ONYFS_BLOCK_SIZE, ONYFS_DIRECT_BLKS, ONYFS_DT_DIR, ONYFS_NAME_MAX,
-    ONYFS_ROOT_INO,
+    ONYFS_BLOCK_SIZE, ONYFS_DIRECT_BLKS, ONYFS_DT_DIR, ONYFS_NAME_MAX, ONYFS_ROOT_INO, OnyfsDirent,
+    OnyfsInode,
 };
 
 /// Parse a dirent from the current `G_BUF` contents at the given slot index.

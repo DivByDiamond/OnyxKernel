@@ -1,6 +1,5 @@
 //! Arg enum + From impls.
 
-
 #[derive(Clone, Copy)]
 pub enum Arg<'a> {
     Str(&'a str),
@@ -55,7 +54,7 @@ impl From<u8> for Arg<'_> {
 
 #[cfg(all(test, not(target_os = "none")))]
 mod tests {
-    use super::super::writer::{vformat, Write};
+    use super::super::writer::{Write, vformat};
     use super::*;
 
     struct Buf {

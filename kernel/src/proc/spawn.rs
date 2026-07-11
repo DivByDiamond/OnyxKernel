@@ -5,14 +5,14 @@
 //! is SYS_wait: it blocks the caller until a child exits, then reaps it.
 use super::lifecycle::{alloc_proc, free_proc};
 use super::process::{
-    alloc_pid, by_pid, current_for_hart, current_pid, hart_id, ProcState, G_ALL_PROCS,
-    PROC_RING_ROOT, PROC_RING_USER,
+    G_ALL_PROCS, PROC_RING_ROOT, PROC_RING_USER, ProcState, alloc_pid, by_pid, current_for_hart,
+    current_pid, hart_id,
 };
-use crate::proc::scheduler::enqueue;
 use crate::arch::regs::*;
 use crate::arch::trap_frame::TrapFrame;
 use crate::mm::heap;
 use crate::proc::onx;
+use crate::proc::scheduler::enqueue;
 use onyx_core::errno::{Errno, KResult};
 
 /// Create a user-mode process (ring 1 or 2). Dynamic allocation — no limit.
@@ -24,7 +24,7 @@ pub unsafe fn create_user(
     parent_pid: u32,
     heap_brk: u64,
     ring: u8,
-    argc: usize, 
+    argc: usize,
     argv_sp: u64,
 ) -> KResult<()> {
     if entry == 0 {

@@ -1,10 +1,10 @@
-use core::ptr;
+use super::runqueue::{G_RQ, dequeue, enqueue, rq_lock, rq_unlock};
 use crate::arch::trap_frame::TrapFrame;
 use crate::proc::process::{
-    current_for_hart, hart_id, set_current_for_hart, Proc, ProcState,
-    G_HART_IDLE_TF, G_NEED_RESCHED, KSTACK_SIZE, MAX_HARTS,
+    G_HART_IDLE_TF, G_NEED_RESCHED, KSTACK_SIZE, MAX_HARTS, Proc, ProcState, current_for_hart,
+    hart_id, set_current_for_hart,
 };
-use super::runqueue::{rq_lock, rq_unlock, dequeue, enqueue, G_RQ};
+use core::ptr;
 use core::sync::atomic::Ordering;
 
 pub unsafe fn sched_tick() {
@@ -105,8 +105,7 @@ pub unsafe fn sched_yield(tf: &mut TrapFrame) {
             G_NEED_RESCHED[hartid].store(false, Ordering::Release);
             let stack_top = crate::arch::smp::G_SEC_STACKS.as_ptr() as usize
                 + (hartid + 1) * crate::arch::smp::SEC_STACK_SIZE;
-            let dst =
-                (stack_top - core::mem::size_of::<TrapFrame>()) as *mut TrapFrame;
+            let dst = (stack_top - core::mem::size_of::<TrapFrame>()) as *mut TrapFrame;
             ptr::write_volatile(dst, G_HART_IDLE_TF[hartid]);
             crate::arch::asm::sched_switch(dst as usize);
         }

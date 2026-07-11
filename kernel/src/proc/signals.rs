@@ -3,7 +3,7 @@ use core::sync::atomic::Ordering;
 use onyx_core::errno::{Errno, KResult};
 
 use super::lifecycle::exit;
-use super::process::{by_pid, current_for_hart, hart_id, G_NEED_RESCHED, Proc, ProcState};
+use super::process::{G_NEED_RESCHED, Proc, ProcState, by_pid, current_for_hart, hart_id};
 use crate::proc::scheduler::enqueue;
 
 /// Signal number for KILL (POSIX SIGKILL = 9). Always honored, never blocked.

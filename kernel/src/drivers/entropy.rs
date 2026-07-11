@@ -24,8 +24,12 @@ pub fn seed() {
         }
         // xoshiro cannot start from all-zero state.
         if G_STATE == [0, 0, 0, 0] {
-            G_STATE = [0x9E37_79B9_7F4A_7C15, 0xD1B5_4A5D_6C8A_E963,
-                       0xA409_3822_299F_31D0, 0x6550_0212_2AAA_C4F1];
+            G_STATE = [
+                0x9E37_79B9_7F4A_7C15,
+                0xD1B5_4A5D_6C8A_E963,
+                0xA409_3822_299F_31D0,
+                0x6550_0212_2AAA_C4F1,
+            ];
         }
         G_SEEDED = true;
     }

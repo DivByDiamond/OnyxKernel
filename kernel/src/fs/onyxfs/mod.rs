@@ -40,7 +40,7 @@ pub use write::*;
 
 use crate::drivers::virtio_req;
 use onyx_core::errno::KResult;
-use onyx_core::formats::{OnyfsSuper, ONYFS_BLOCK_SIZE};
+use onyx_core::formats::{ONYFS_BLOCK_SIZE, OnyfsSuper};
 
 /// VFS-facing stat structure. Kept local (kernel-internal) because the VFS
 /// layer expects a fixed ABI independent of the on-disk inode format.

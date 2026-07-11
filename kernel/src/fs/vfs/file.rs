@@ -1,8 +1,8 @@
 use super::{
-    alloc_fd, fd_check, fd_clear, fd_get, fd_set, fd_token, fd_update_pos, FdToken,
-    Fs, G_ROOT_FS, PERM_READ, PERM_SEEK, PERM_WRITE, VFS_MAX_FDS,
+    FdToken, Fs, G_ROOT_FS, PERM_READ, PERM_SEEK, PERM_WRITE, VFS_MAX_FDS, alloc_fd, fd_check,
+    fd_clear, fd_get, fd_set, fd_token, fd_update_pos,
 };
-use crate::fs::{fat32, ipcfs, onyxfs, procfs};
+use crate::fs::{devfs, fat32, ipcfs, onyxfs, procfs};
 use onyx_core::errno::{Errno, KResult};
 
 pub unsafe fn open(path: &[u8], perms: u32) -> KResult<FdToken> {
@@ -23,6 +23,11 @@ pub unsafe fn open(path: &[u8], perms: u32) -> KResult<FdToken> {
         Fs::Ipc => {
             let ino = ipcfs::lookup(subpath)?;
             let st = ipcfs::stat(ino)?;
+            (ino, st.size)
+        }
+        Fs::Devfs => {
+            let ino = devfs::lookup(subpath)?;
+            let st = devfs::stat(ino)?;
             (ino, st.size)
         }
         _ => {
@@ -53,5 +58,3 @@ pub unsafe fn close(token: FdToken) -> KResult<()> {
     fd_clear(idx);
     Ok(())
 }
-
-

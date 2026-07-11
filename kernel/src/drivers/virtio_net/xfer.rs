@@ -1,5 +1,5 @@
 //! virtio-net frame I/O — polling receive and blocking send.
-use super::{push_avail, G_NET, HDR_LEN, NET_MTU, RX_DESCS};
+use super::{G_NET, HDR_LEN, NET_MTU, RX_DESCS, push_avail};
 use crate::drivers::virtio::{R_QUEUE_NOTIFY, VQ_DESC_F_NEXT};
 use crate::mm::pmm;
 use core::ptr;
@@ -17,9 +17,7 @@ pub fn recv_into(out: &mut [u8]) -> KResult<usize> {
         G_NET.last_used = used_idx;
         let elem = ptr::read_volatile(ptr::addr_of!((*G_NET.used).ring[slot]));
         let buf_idx = (elem.idx as usize) % RX_DESCS;
-        let frame_len = (elem.len as usize)
-            .saturating_sub(HDR_LEN)
-            .min(out.len());
+        let frame_len = (elem.len as usize).saturating_sub(HDR_LEN).min(out.len());
         let src = G_NET.rx_bufs[buf_idx].add(HDR_LEN);
         ptr::copy_nonoverlapping(src, out.as_mut_ptr(), frame_len);
         push_avail(buf_idx);

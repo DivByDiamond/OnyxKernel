@@ -2,7 +2,13 @@ const ONYFS_MAGIC_V2: u32 = 0x32594E4F;
 const ONYFS_MAGIC_V1: u32 = 0x31594E4F;
 const V2_SUPERBLOCK_SIZE: usize = 128;
 
-pub fn write_v1(img: &mut [u8], total_blocks: u32, inode_count: u32, inode_table_start: u32, data_blocks_start: u32) {
+pub fn write_v1(
+    img: &mut [u8],
+    total_blocks: u32,
+    inode_count: u32,
+    inode_table_start: u32,
+    data_blocks_start: u32,
+) {
     let sb = [
         ONYFS_MAGIC_V1.to_le_bytes(),
         1u32.to_le_bytes(),
@@ -15,13 +21,21 @@ pub fn write_v1(img: &mut [u8], total_blocks: u32, inode_count: u32, inode_table
         1u32.to_le_bytes(),
     ];
     let mut off = 0;
-    for chunk in &sb { img[off..off + 4].copy_from_slice(chunk); off += 4; }
+    for chunk in &sb {
+        img[off..off + 4].copy_from_slice(chunk);
+        off += 4;
+    }
 }
 
 pub fn write_v2(
-    img: &mut [u8], total_blocks: u32, inode_count: u32,
-    inode_table_start: u32, data_blocks_start: u32,
-    snapshot_area_start: u32, journal_start: u32, journal_size: u32,
+    img: &mut [u8],
+    total_blocks: u32,
+    inode_count: u32,
+    inode_table_start: u32,
+    data_blocks_start: u32,
+    snapshot_area_start: u32,
+    journal_start: u32,
+    journal_size: u32,
 ) {
     let feature_flags: u32 = 0x1 | 0x2 | 0x8;
     let mut sb = [0u8; V2_SUPERBLOCK_SIZE];
@@ -40,7 +54,9 @@ pub fn write_v2(
     sb[48..52].copy_from_slice(&journal_size.to_le_bytes());
     sb[52..56].copy_from_slice(&feature_flags.to_le_bytes());
     let ts = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos() as u64;
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos() as u64;
     sb[56..64].copy_from_slice(&ts.to_le_bytes());
     img[0..V2_SUPERBLOCK_SIZE].copy_from_slice(&sb);
 }

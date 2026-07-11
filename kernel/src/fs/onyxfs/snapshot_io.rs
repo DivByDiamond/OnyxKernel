@@ -10,10 +10,10 @@
 //! separated) into `names_out` and returns the number listed.
 use super::compress::rle_decompress;
 use super::{
-    read_block, write_block, G_BUF, G_SB, SNAPSHOT_BLOCKS_EACH, SNAPSHOT_SLOTS, SNAPSHOT_SLOT_BLKS,
+    G_BUF, G_SB, SNAPSHOT_BLOCKS_EACH, SNAPSHOT_SLOT_BLKS, SNAPSHOT_SLOTS, read_block, write_block,
 };
 use onyx_core::errno::{Errno, KResult};
-use onyx_core::formats::{SnapshotMeta, ONYFS_BLOCK_SIZE};
+use onyx_core::formats::{ONYFS_BLOCK_SIZE, SnapshotMeta};
 
 pub unsafe fn snapshot_rollback(snapshot_id: u32) -> KResult<()> {
     let sb_ptr = &raw const G_SB;

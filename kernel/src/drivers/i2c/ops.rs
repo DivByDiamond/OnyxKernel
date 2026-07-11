@@ -50,7 +50,9 @@ pub fn scan(out: &mut [u8]) -> usize {
         }
         let ok = unsafe { start(addr, false).is_ok() };
         if ok {
-            unsafe { wr(R_CMD_STATUS, STO); }
+            unsafe {
+                wr(R_CMD_STATUS, STO);
+            }
             out[n] = addr;
             n += 1;
         }

@@ -1,6 +1,6 @@
-use core::sync::atomic::{AtomicBool, Ordering};
+use crate::proc::process::{MAX_HARTS, Proc};
 use core::hint::spin_loop;
-use crate::proc::process::{Proc, MAX_HARTS};
+use core::sync::atomic::{AtomicBool, Ordering};
 
 pub struct RunQueue {
     pub lock: AtomicBool,
@@ -11,9 +11,8 @@ pub struct RunQueue {
 
 unsafe impl Sync for RunQueue {}
 
-pub static mut G_RQ: [RunQueue; MAX_HARTS] = const {
-    unsafe { core::mem::transmute([0u8; core::mem::size_of::<RunQueue>() * MAX_HARTS]) }
-};
+pub static mut G_RQ: [RunQueue; MAX_HARTS] =
+    const { unsafe { core::mem::transmute([0u8; core::mem::size_of::<RunQueue>() * MAX_HARTS]) } };
 
 pub unsafe fn rq_lock(hart: usize) {
     while G_RQ[hart].lock.swap(true, Ordering::Acquire) {
@@ -28,7 +27,9 @@ pub unsafe fn rq_unlock(hart: usize) {
 }
 
 pub unsafe fn enqueue(hart: usize, p: *mut Proc) {
-    if (*p).on_rq { return; }
+    if (*p).on_rq {
+        return;
+    }
     (*p).on_rq = true;
     (*p).next = core::ptr::null_mut();
     if G_RQ[hart].tail.is_null() {
@@ -65,7 +66,9 @@ pub unsafe fn dequeue(hart: usize) -> *mut Proc {
 }
 
 pub unsafe fn remove(hart: usize, p: *mut Proc) -> bool {
-    if !(*p).on_rq { return false; }
+    if !(*p).on_rq {
+        return false;
+    }
     let mut prev: *mut Proc = core::ptr::null_mut();
     let mut cur = G_RQ[hart].head;
     while !cur.is_null() {

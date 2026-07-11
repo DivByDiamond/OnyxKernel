@@ -71,7 +71,9 @@ unsafe fn argv_ptr_ok(p: u64) -> bool {
 
 unsafe fn write_val(root_pa: u64, va: u64, val: u64) {
     let pa = crate::mm::vmm::translate(root_pa, va);
-    if pa != 0 { *(pa as *mut u64) = val; }
+    if pa != 0 {
+        *(pa as *mut u64) = val;
+    }
 }
 
 /// Copy a NUL-terminated string from user space into `buf` starting at `off`.
@@ -79,8 +81,12 @@ unsafe fn write_val(root_pa: u64, va: u64, val: u64) {
 /// or is invalid.
 unsafe fn copy_user_str(p: u64, buf: &mut [u8], off: &mut usize, max_len: usize) -> Option<usize> {
     let mut slen = 0usize;
-    while slen < max_len && *((p + slen as u64) as *const u8) != 0 { slen += 1; }
-    if *off + slen + 1 > buf.len() { return None; }
+    while slen < max_len && *((p + slen as u64) as *const u8) != 0 {
+        slen += 1;
+    }
+    if *off + slen + 1 > buf.len() {
+        return None;
+    }
     buf[*off..*off + slen].copy_from_slice(core::slice::from_raw_parts(p as *const u8, slen));
     *off += slen;
     buf[*off] = 0;
@@ -103,10 +109,16 @@ unsafe fn collect_strings(
     let mut count = 0usize;
     for i in 0..max_count {
         let p = *ptrs.add(i);
-        if p == 0 { break; }
-        if !argv_ptr_ok(p) { break; }
+        if p == 0 {
+            break;
+        }
+        if !argv_ptr_ok(p) {
+            break;
+        }
         let start = *off;
-        if copy_user_str(p, buf, off, max_str_len).is_none() { break; }
+        if copy_user_str(p, buf, off, max_str_len).is_none() {
+            break;
+        }
         if count < offsets.len() {
             offsets[count] = start as u64;
         }
@@ -124,7 +136,11 @@ unsafe fn collect_strings(
 ///
 /// Returns `(argc, sp)`. The trap-return code sets `a0 = argc` and
 /// `a1 = sp + 8` (pointer to `argv[0]`).
-pub(crate) unsafe fn copy_argv_to_stack(root_pa: u64, ustack_top: u64, argv_user: u64) -> (usize, u64) {
+pub(crate) unsafe fn copy_argv_to_stack(
+    root_pa: u64,
+    ustack_top: u64,
+    argv_user: u64,
+) -> (usize, u64) {
     copy_argv_envp_to_stack(root_pa, ustack_top, argv_user, 0, 0, 0)
 }
 
@@ -152,7 +168,9 @@ pub(crate) unsafe fn copy_argv_envp_to_stack(
             &mut argv_offs,
             &mut argv_off,
         )
-    } else { 0 };
+    } else {
+        0
+    };
 
     // Guarantee argv[0] exists — Linux always provides at least the program
     // name. If the caller passed NULL, synthesize a placeholder so libc
@@ -186,7 +204,9 @@ pub(crate) unsafe fn copy_argv_envp_to_stack(
             envp_offs[i] = wide[i];
         }
         n
-    } else { 0 };
+    } else {
+        0
+    };
     let envp_str_size = envp_off;
 
     // ── Build auxv ─────────────────────────────────────────────────────────
@@ -197,7 +217,9 @@ pub(crate) unsafe fn copy_argv_envp_to_stack(
     // secure, but sufficient for stack-canary / ASLR seeding.
     let tick = crate::srv::timer::uptime_us() as u64;
     for i in 0..AT_RANDOM_BYTES {
-        random_buf[i] = (tick.wrapping_mul(0x9E37_79B9_7F4A_7C15).wrapping_add(i as u64)) as u8;
+        random_buf[i] = (tick
+            .wrapping_mul(0x9E37_79B9_7F4A_7C15)
+            .wrapping_add(i as u64)) as u8;
     }
 
     // We'll emit these auxv entries (each is 16 bytes — type + val):
@@ -222,30 +244,39 @@ pub(crate) unsafe fn copy_argv_envp_to_stack(
     let mut va = sp;
 
     // argc
-    write_val(root_pa, va, argc_eff as u64); va += 8;
+    write_val(root_pa, va, argc_eff as u64);
+    va += 8;
 
     // argv[] pointers
     let argv_str_base = sp + 8 + argv_ptr_size as u64 + envp_ptr_size as u64 + auxv_size as u64;
     let mut di = 0usize;
     for i in 0..argc_eff {
         let str_off = if i < argc { argv_offs[i] } else { 0 };
-        write_val(root_pa, va, argv_str_base + str_off); va += 8;
+        write_val(root_pa, va, argv_str_base + str_off);
+        va += 8;
         // advance `di` past this string in the blob
-        while di < argv_str_size && argv_buf[di] != 0 { di += 1; }
+        while di < argv_str_size && argv_buf[di] != 0 {
+            di += 1;
+        }
         di += 1;
     }
-    write_val(root_pa, va, 0); va += 8; // argv NULL terminator
+    write_val(root_pa, va, 0);
+    va += 8; // argv NULL terminator
 
     // envp[] pointers
     let envp_str_base = argv_str_base + argv_str_size as u64;
     let mut ei = 0usize;
     for i in 0..envc {
         let str_off = if i < envp_offs.len() { envp_offs[i] } else { 0 };
-        write_val(root_pa, va, envp_str_base + str_off); va += 8;
-        while ei < envp_str_size && envp_buf[ei] != 0 { ei += 1; }
+        write_val(root_pa, va, envp_str_base + str_off);
+        va += 8;
+        while ei < envp_str_size && envp_buf[ei] != 0 {
+            ei += 1;
+        }
         ei += 1;
     }
-    write_val(root_pa, va, 0); va += 8; // envp NULL terminator
+    write_val(root_pa, va, 0);
+    va += 8; // envp NULL terminator
 
     // auxv
     let random_va = envp_str_base + envp_str_size as u64;
@@ -261,42 +292,34 @@ pub(crate) unsafe fn copy_argv_envp_to_stack(
         (at::AT_NULL, 0u64),
     ];
     for (a_type, a_val) in auxv.iter() {
-        write_val(root_pa, va, *a_type); va += 8;
-        write_val(root_pa, va, *a_val);  va += 8;
+        write_val(root_pa, va, *a_type);
+        va += 8;
+        write_val(root_pa, va, *a_val);
+        va += 8;
     }
 
     // ── Copy the string blobs and randomness into user memory ──────────────
     if argv_str_size > 0 {
         let dst_pa = vmm::translate(root_pa, argv_str_base);
         if dst_pa != 0 {
-            core::ptr::copy_nonoverlapping(
-                argv_buf.as_ptr(),
-                dst_pa as *mut u8,
-                argv_str_size,
-            );
+            core::ptr::copy_nonoverlapping(argv_buf.as_ptr(), dst_pa as *mut u8, argv_str_size);
         }
     } else {
         // argc==0 case: write a single NUL so argv[0] is a valid "".
         let dst_pa = vmm::translate(root_pa, argv_str_base);
-        if dst_pa != 0 { *(dst_pa as *mut u8) = 0; }
+        if dst_pa != 0 {
+            *(dst_pa as *mut u8) = 0;
+        }
     }
     if envp_str_size > 0 {
         let dst_pa = vmm::translate(root_pa, envp_str_base);
         if dst_pa != 0 {
-            core::ptr::copy_nonoverlapping(
-                envp_buf.as_ptr(),
-                dst_pa as *mut u8,
-                envp_str_size,
-            );
+            core::ptr::copy_nonoverlapping(envp_buf.as_ptr(), dst_pa as *mut u8, envp_str_size);
         }
     }
     let rdst_pa = vmm::translate(root_pa, random_va);
     if rdst_pa != 0 {
-        core::ptr::copy_nonoverlapping(
-            random_buf.as_ptr(),
-            rdst_pa as *mut u8,
-            AT_RANDOM_BYTES,
-        );
+        core::ptr::copy_nonoverlapping(random_buf.as_ptr(), rdst_pa as *mut u8, AT_RANDOM_BYTES);
     }
 
     (argc_eff, sp)

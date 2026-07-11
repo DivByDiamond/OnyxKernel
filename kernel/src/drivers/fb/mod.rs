@@ -31,6 +31,14 @@ pub fn enabled() -> bool {
     unsafe { G_FB.enabled }
 }
 
+pub fn fb_base_ptr() -> *mut u8 {
+    unsafe { G_FB.base }
+}
+
+pub fn fb_base_pa() -> usize {
+    unsafe { G_FB.base as usize }
+}
+
 pub unsafe fn init(paddr: usize) -> KResult<()> {
     G_FB = Fb {
         base: paddr as *mut u8,

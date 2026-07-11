@@ -1,11 +1,9 @@
 use super::super::journal::journal_log;
-use super::super::{
-    inodes_per_block, read_block, write_block, G_BUF, G_SB, G_VERSION, ONYFS_V1,
-};
+use super::super::{G_BUF, G_SB, G_VERSION, ONYFS_V1, inodes_per_block, read_block, write_block};
 use super::read::read_inode;
 use crate::srv::timer;
 use onyx_core::errno::{Errno, KResult};
-use onyx_core::formats::{OnyfsInode, ONYFS_DIRECT_BLKS};
+use onyx_core::formats::{ONYFS_DIRECT_BLKS, OnyfsInode};
 
 pub unsafe fn write_inode(ino: u32, inode: &OnyfsInode) -> KResult<()> {
     if *(&raw const G_VERSION) == ONYFS_V1 {

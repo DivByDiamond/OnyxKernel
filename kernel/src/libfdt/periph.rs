@@ -4,7 +4,7 @@
 //! controllers via the `compatible` property. Returns the same
 //! `FdtMmio` shape used by the existing virtio/sdhci discovery, so
 //! drivers can be probed uniformly from `kmain`.
-use super::fdt::{walk, FdtMmio};
+use super::fdt::{FdtMmio, walk};
 use onyx_core::parser::be32;
 
 /// Match a `compatible` string list against any of `candidates`.
@@ -47,7 +47,11 @@ unsafe fn find_mmio(candidates: &[&[u8]], default_irq: u32) -> Option<FdtMmio> {
             }
         }
         if matched && base != 0 {
-            result = Some(FdtMmio { base, irq, reg_shift: 0 });
+            result = Some(FdtMmio {
+                base,
+                irq,
+                reg_shift: 0,
+            });
             return true;
         }
         false
@@ -115,11 +119,7 @@ pub unsafe fn find_spi() -> Option<FdtMmio> {
 /// Find the first watchdog.
 pub unsafe fn find_watchdog() -> Option<FdtMmio> {
     find_mmio(
-        &[
-            b"sifive,fu540-c000-wdt",
-            b"sifive,wdt",
-            b"snps,dw-wdt",
-        ],
+        &[b"sifive,fu540-c000-wdt", b"sifive,wdt", b"snps,dw-wdt"],
         6,
     )
 }

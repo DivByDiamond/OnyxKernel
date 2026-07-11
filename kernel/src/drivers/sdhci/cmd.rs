@@ -1,5 +1,5 @@
 use super::regs::*;
-use super::{wait_idle, clear_interrupts, reset};
+use super::{clear_interrupts, reset, wait_idle};
 
 pub(super) unsafe fn send_command(
     base: usize,

@@ -1,5 +1,5 @@
-use super::{fd_check, fd_check_perm, fd_get, fd_update_pos, FdToken, Fs, PERM_READ, PERM_WRITE};
-use crate::fs::{fat32, ipcfs, onyxfs, procfs};
+use super::{FdToken, Fs, PERM_READ, PERM_WRITE, fd_check, fd_check_perm, fd_get, fd_update_pos};
+use crate::fs::{devfs, fat32, ipcfs, onyxfs, procfs};
 use onyx_core::errno::{Errno, KResult};
 
 pub unsafe fn read(token: FdToken, buf: *mut u8, len: u32) -> KResult<u32> {
@@ -15,6 +15,7 @@ pub unsafe fn read(token: FdToken, buf: *mut u8, len: u32) -> KResult<u32> {
         Fs::Fat32 => fat32::read(fd.ino, buf, fd.pos, to_read)?,
         Fs::Proc => procfs::read(fd.ino, buf, fd.pos, to_read)?,
         Fs::Ipc => ipcfs::read(fd.ino, buf, fd.pos, to_read)?,
+        Fs::Devfs => devfs::read(fd.ino, buf, fd.pos, to_read)?,
         Fs::None => return Err(Errno::Inval),
     };
     fd_update_pos(idx, fd.pos + read_n);

@@ -35,17 +35,9 @@ pub const fn is_aligned(x: usize) -> bool {
 }
 #[inline]
 pub const fn min(a: usize, b: usize) -> usize {
-    if a < b {
-        a
-    } else {
-        b
-    }
+    if a < b { a } else { b }
 }
 #[inline]
 pub const fn max(a: usize, b: usize) -> usize {
-    if a > b {
-        a
-    } else {
-        b
-    }
+    if a > b { a } else { b }
 }

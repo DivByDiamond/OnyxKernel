@@ -1,7 +1,7 @@
-use onyx_core::errno::{Errno, KResult};
 use crate::mm::{heap, pmm};
 use crate::proc;
 use crate::srv::timer;
+use onyx_core::errno::{Errno, KResult};
 
 use super::consts::*;
 use super::fmt;
@@ -28,7 +28,9 @@ unsafe fn generate_content(ino: u32) -> KResult<&'static [u8]> {
             pos += fmt::format_line(b"harts\t\t: ", harts, b"\n", buf, pos);
             for h in 0..harts {
                 pos += fmt::format_line(b"processor\t: ", h, b"\n", buf, pos);
-                if pos >= buf.len() { break; }
+                if pos >= buf.len() {
+                    break;
+                }
             }
             pos += fmt::format_line_raw(b"model name\t: rv64gc\n", buf, pos);
             pos += fmt::format_line_raw(b"model\t\t: rv64gc\n", buf, pos);
@@ -50,7 +52,13 @@ unsafe fn generate_content(ino: u32) -> KResult<&'static [u8]> {
             pos += fmt::format_line(b"MemFree\t\t: ", free_kb, b" kB\n", buf, pos);
             pos += fmt::format_line(b"MemUsed\t\t: ", used_kb, b" kB\n", buf, pos);
             pos += fmt::format_line(b"HeapTotal\t: 4096 kB\n", 0, b"", buf, pos);
-            pos += fmt::format_line(b"HeapUsed\t: ", (heap_used / 1024) as u64, b" kB\n", buf, pos);
+            pos += fmt::format_line(
+                b"HeapUsed\t: ",
+                (heap_used / 1024) as u64,
+                b" kB\n",
+                buf,
+                pos,
+            );
             let heap_free_kb = 4096u64.saturating_sub(heap_used as u64 / 1024);
             pos += fmt::format_line(b"HeapFree\t: ", heap_free_kb, b" kB\n", buf, pos);
             core::str::from_utf8_unchecked(&buf[..pos.min(buf.len())])

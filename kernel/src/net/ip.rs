@@ -1,6 +1,6 @@
 use crate::drivers::virtio_net::NET_MTU;
-use crate::net::eth;
 use crate::net::G_IP;
+use crate::net::eth;
 use onyx_core::errno::{Errno, KResult};
 
 pub const IP_HLEN: usize = 20;
@@ -47,7 +47,11 @@ pub unsafe fn send_packet(dst_ip: [u8; 4], protocol: u8, payload: &[u8]) -> KRes
 
     let total_len = IP_HLEN + payload.len();
     let mut pkt = alloc::vec![0u8; total_len];
-    let id = { let id = IP_ID; IP_ID = id.wrapping_add(1); id };
+    let id = {
+        let id = IP_ID;
+        IP_ID = id.wrapping_add(1);
+        id
+    };
     pkt[0] = 0x45;
     pkt[1] = 0;
     pkt[2..4].copy_from_slice(&(total_len as u16).to_be_bytes());
@@ -68,7 +72,9 @@ pub unsafe fn send_packet(dst_ip: [u8; 4], protocol: u8, payload: &[u8]) -> KRes
 }
 
 pub unsafe fn handle_ip(frame: &[u8]) {
-    if frame.len() < eth::ETH_HLEN + IP_HLEN { return; }
+    if frame.len() < eth::ETH_HLEN + IP_HLEN {
+        return;
+    }
     let ip_start = eth::ETH_HLEN;
     let ihl = (frame[ip_start] & 0x0F) as usize * 4;
     let total_len = u16::from_be_bytes([frame[ip_start + 2], frame[ip_start + 3]]) as usize;
@@ -82,8 +88,12 @@ pub unsafe fn handle_ip(frame: &[u8]) {
 
 unsafe fn handle_icmp(frame: &[u8], ip_start: usize, _ihl: usize, _total_len: usize) {
     let icmp_start = ip_start + IP_HLEN;
-    if frame.len() < icmp_start + 8 { return; }
-    if frame[icmp_start] != 8 { return; }
+    if frame.len() < icmp_start + 8 {
+        return;
+    }
+    if frame[icmp_start] != 8 {
+        return;
+    }
     let mut reply = alloc::vec![0u8; frame.len() - ip_start];
     reply[0] = 0;
     reply[1] = 0;
@@ -99,7 +109,12 @@ unsafe fn handle_icmp(frame: &[u8], ip_start: usize, _ihl: usize, _total_len: us
     ip_pkt[2..4].copy_from_slice(&(total as u16).to_be_bytes());
     ip_pkt[8] = 64;
     ip_pkt[9] = IP_PROTO_ICMP;
-    let src: [u8; 4] = [frame[ip_start + 16], frame[ip_start + 17], frame[ip_start + 18], frame[ip_start + 19]];
+    let src: [u8; 4] = [
+        frame[ip_start + 16],
+        frame[ip_start + 17],
+        frame[ip_start + 18],
+        frame[ip_start + 19],
+    ];
     ip_pkt[12..16].copy_from_slice(&src);
     ip_pkt[16..20].copy_from_slice(&G_IP);
     let ck = checksum(&ip_pkt[..IP_HLEN]);

@@ -1,7 +1,9 @@
 use crate::arch::csr;
 use crate::arch::regs::*;
-use crate::drivers::{gpio, hwrand, i2c, led, plic, rtc, sdhci, spi, uart, virtio,
-                     virtio_console, virtio_input, virtio_net, virtio_rng, watchdog};
+use crate::drivers::{
+    gpio, hwrand, i2c, led, plic, rtc, sdhci, spi, uart, virtio, virtio_console, virtio_input,
+    virtio_net, virtio_rng, watchdog,
+};
 use crate::libfdt::fdt;
 use crate::libfdt::periph;
 use crate::mm::{heap, pmm, vmm};
@@ -24,7 +26,11 @@ pub(crate) unsafe fn early_init(fdt_addr: usize) {
     pmm::init(mem.base, mem.size);
 
     let _ = vmm::init();
-    crate::kinf!("vmm", "Sv39 on, kernel root @%p", Arg::from(vmm::kernel_root()));
+    crate::kinf!(
+        "vmm",
+        "Sv39 on, kernel root @%p",
+        Arg::from(vmm::kernel_root())
+    );
 
     heap::init();
     crate::kinf!("heap", "ready");
@@ -45,7 +51,11 @@ pub(crate) unsafe fn early_init(fdt_addr: usize) {
 
 pub(crate) unsafe fn probe_devices() -> usize {
     let mut ndevs = 0;
-    let mut virtio_devs = [fdt::FdtMmio { base: 0, irq: 0, reg_shift: 0 }; 8];
+    let mut virtio_devs = [fdt::FdtMmio {
+        base: 0,
+        irq: 0,
+        reg_shift: 0,
+    }; 8];
     let nfound = fdt::find_virtio(&mut virtio_devs, 8);
     for dev in virtio_devs.iter().take(nfound) {
         let b = dev.base as usize;
@@ -54,8 +64,16 @@ pub(crate) unsafe fn probe_devices() -> usize {
         }
     }
     if nfound == 0 {
-        let bases = [0x1000_1000usize, 0x1000_2000, 0x1000_3000, 0x1000_4000,
-                     0x1000_5000, 0x1000_6000, 0x1000_7000, 0x1000_8000];
+        let bases = [
+            0x1000_1000usize,
+            0x1000_2000,
+            0x1000_3000,
+            0x1000_4000,
+            0x1000_5000,
+            0x1000_6000,
+            0x1000_7000,
+            0x1000_8000,
+        ];
         for &b in &bases {
             if virtio::probe(b) && virtio::init(b).is_ok() {
                 ndevs += 1;
@@ -68,7 +86,12 @@ pub(crate) unsafe fn probe_devices() -> usize {
         let sdhci_base = sdhci_info.base as usize;
         let sdhci_irq = sdhci_info.irq;
         if sdhci::probe(sdhci_base) {
-            crate::kinf!("sdhci", "found at %p irq=%d", Arg::from(sdhci_base), Arg::from(sdhci_irq));
+            crate::kinf!(
+                "sdhci",
+                "found at %p irq=%d",
+                Arg::from(sdhci_base),
+                Arg::from(sdhci_irq)
+            );
             if sdhci::init(sdhci_base, sdhci_irq) {
                 crate::kinf!("sdhci", "SD card initialized");
             } else {
@@ -85,9 +108,12 @@ pub(crate) unsafe fn probe_devices() -> usize {
 pub(crate) unsafe fn probe_peripherals() {
     if let Some(rtc_info) = periph::find_rtc() {
         rtc::probe();
-        crate::kinf!("rtc", "base=%p src=%s",
+        crate::kinf!(
+            "rtc",
+            "base=%p src=%s",
             Arg::from(rtc_info.base),
-            Arg::from(hwrand::source_name()));
+            Arg::from(hwrand::source_name())
+        );
     }
     if let Some(gpio_info) = periph::find_gpio() {
         gpio::init(gpio_info.base as usize);
@@ -107,9 +133,16 @@ pub(crate) unsafe fn probe_peripherals() {
         let _ = watchdog::arm(3000);
         crate::kinf!("wdt", "base=%p timeout=3000ms", Arg::from(wdt_info.base));
     }
-    let extra_virtio_bases = [0x1000_1000usize, 0x1000_2000, 0x1000_3000,
-                               0x1000_4000, 0x1000_5000, 0x1000_6000,
-                               0x1000_7000, 0x1000_8000];
+    let extra_virtio_bases = [
+        0x1000_1000usize,
+        0x1000_2000,
+        0x1000_3000,
+        0x1000_4000,
+        0x1000_5000,
+        0x1000_6000,
+        0x1000_7000,
+        0x1000_8000,
+    ];
     for &b in &extra_virtio_bases {
         if virtio_rng::probe(b) {
             if virtio_rng::init(b).is_ok() {
@@ -120,11 +153,17 @@ pub(crate) unsafe fn probe_peripherals() {
         if virtio_net::probe(b) {
             if virtio_net::init(b).is_ok() {
                 let mac = virtio_net::mac();
-                crate::kinf!("virtio-net", "init @ %p mac=%x:%x:%x:%x:%x:%x",
-                    Arg::from(b), Arg::from(mac[0] as u32),
-                    Arg::from(mac[1] as u32), Arg::from(mac[2] as u32),
-                    Arg::from(mac[3] as u32), Arg::from(mac[4] as u32),
-                    Arg::from(mac[5] as u32));
+                crate::kinf!(
+                    "virtio-net",
+                    "init @ %p mac=%x:%x:%x:%x:%x:%x",
+                    Arg::from(b),
+                    Arg::from(mac[0] as u32),
+                    Arg::from(mac[1] as u32),
+                    Arg::from(mac[2] as u32),
+                    Arg::from(mac[3] as u32),
+                    Arg::from(mac[4] as u32),
+                    Arg::from(mac[5] as u32)
+                );
             }
             continue;
         }

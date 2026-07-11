@@ -1,7 +1,7 @@
 //! Process lifecycle — allocation, freeing, `enter_user`, `exit`, and `count`.
 use super::process::Proc;
 use super::process::{
-    by_pid, hart_id, set_current_for_hart, ProcState, G_ALL_PROCS, PROC_RING_KERNEL,
+    G_ALL_PROCS, PROC_RING_KERNEL, ProcState, by_pid, hart_id, set_current_for_hart,
 };
 use crate::arch::trap_frame::TrapFrame;
 use crate::mm::{heap, vmm};
@@ -120,7 +120,9 @@ pub unsafe fn exit(pid: u32, code: i32) {
         // process is expected to call `wait()` periodically to reap them.
         let mut cur = G_ALL_PROCS;
         while !cur.is_null() {
-            if (*cur).parent_pid == pid && !matches!((*cur).state, ProcState::Free | ProcState::Exited) {
+            if (*cur).parent_pid == pid
+                && !matches!((*cur).state, ProcState::Free | ProcState::Exited)
+            {
                 (*cur).parent_pid = 1; // init reaps orphans
             }
             cur = (*cur).all_next;

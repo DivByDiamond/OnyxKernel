@@ -60,11 +60,15 @@ pub unsafe fn arp_request(target_ip: [u8; 4]) {
 }
 
 pub unsafe fn handle_arp(frame: &[u8]) {
-    if frame.len() < 42 { return; }
+    if frame.len() < 42 {
+        return;
+    }
     let mac = virtio_net::mac();
     let oper = u16::from_be_bytes([frame[20], frame[21]]);
     let spa: [u8; 4] = [frame[28], frame[29], frame[30], frame[31]];
-    let sha: [u8; 6] = [frame[22], frame[23], frame[24], frame[25], frame[26], frame[27]];
+    let sha: [u8; 6] = [
+        frame[22], frame[23], frame[24], frame[25], frame[26], frame[27],
+    ];
     let tpa: [u8; 4] = [frame[38], frame[39], frame[40], frame[41]];
     arp_insert(spa, sha);
     if oper == 1 && tpa == crate::net::G_IP {
@@ -74,7 +78,8 @@ pub unsafe fn handle_arp(frame: &[u8]) {
         pkt[12..14].copy_from_slice(&ET_ARP.to_be_bytes());
         pkt[14..16].copy_from_slice(&1u16.to_be_bytes());
         pkt[16..18].copy_from_slice(&ET_IP.to_be_bytes());
-        pkt[18] = 6; pkt[19] = 4;
+        pkt[18] = 6;
+        pkt[19] = 4;
         pkt[20..22].copy_from_slice(&2u16.to_be_bytes());
         pkt[22..28].copy_from_slice(&mac);
         pkt[28..32].copy_from_slice(&crate::net::G_IP);
@@ -96,7 +101,9 @@ pub unsafe fn send_frame(dst_mac: [u8; 6], ethertype: u16, payload: &[u8]) {
 }
 
 pub unsafe fn dispatch(frame: &[u8]) {
-    if frame.len() < ETH_HLEN { return; }
+    if frame.len() < ETH_HLEN {
+        return;
+    }
     let ethertype = u16::from_be_bytes([frame[12], frame[13]]);
     match ethertype {
         ET_ARP => handle_arp(frame),

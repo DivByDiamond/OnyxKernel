@@ -1,7 +1,7 @@
 use crate::arch::trap_frame::TrapFrame;
 use onyx_core::errno::{Errno, KResult};
 
-use super::types::{Channel, G_CHANNELS, CHAN_BUF_SIZE, CHAN_MAX};
+use super::types::{CHAN_BUF_SIZE, CHAN_MAX, Channel, G_CHANNELS};
 
 fn pid_allowed(ch: &Channel, pid: u32) -> bool {
     if pid == ch.owner_pid {

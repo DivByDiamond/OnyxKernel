@@ -29,7 +29,11 @@ struct Slot {
     bound: bool,
 }
 
-static mut G_SLOTS: [Slot; MAX_LEDS] = [Slot { pin: 0, active_low: false, bound: false }; MAX_LEDS];
+static mut G_SLOTS: [Slot; MAX_LEDS] = [Slot {
+    pin: 0,
+    active_low: false,
+    bound: false,
+}; MAX_LEDS];
 
 #[inline]
 fn idx(led: Led) -> usize {
@@ -45,7 +49,11 @@ pub fn bind(led: Led, pin: usize, active_low: bool) -> KResult<()> {
     }
     gpio::set_output(pin)?;
     unsafe {
-        G_SLOTS[i] = Slot { pin, active_low, bound: true };
+        G_SLOTS[i] = Slot {
+            pin,
+            active_low,
+            bound: true,
+        };
     }
     // Default: power LED on, everything else off.
     let initial_on = matches!(led, Led::Power);

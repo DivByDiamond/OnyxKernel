@@ -1,5 +1,5 @@
-use super::{FDT_MAGIC, G_DTB, G_STRUCT, G_STRINGS, G_STRUCT_SIZE};
 use super::reader::rd32;
+use super::{FDT_MAGIC, G_DTB, G_STRINGS, G_STRUCT, G_STRUCT_SIZE};
 
 fn scan_fdt_in_ram() -> Option<usize> {
     let ram_start = 0x8000_0000usize;

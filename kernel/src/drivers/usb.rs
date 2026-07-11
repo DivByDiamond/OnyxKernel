@@ -1,11 +1,12 @@
-//! USB host controller — EHCI async schedule with control/bulk transfers.
+//! USB host controller — EHCI async schedule + xHCI driver.
 //!
-//! Provides a minimal async list scheduler for EHCI, supporting synchronous
-//! control and bulk transfers. Used by hub drivers for device enumeration.
-//! The periodic schedule (interrupt/isochronous) is not implemented.
+//! Provides EHCI async list scheduler and xHCI controller driver
+//! with mass storage class support.
+pub mod xhci;
+
 use crate::arch::mmio::Mmio;
-use onyx_core::errno::{Errno, KResult};
 use crate::mm::pmm;
+use onyx_core::errno::{Errno, KResult};
 
 #[derive(PartialEq, Clone, Copy)]
 enum ControllerType {
@@ -23,22 +24,15 @@ const OHCI_HC_REV: u32 = 0x00;
 const OHCI_HC_CONTROL: u32 = 0x04;
 const OHCI_HC_COMMAND_STATUS: u32 = 0x08;
 const OHCI_HC_INTERRUPT_STATUS: u32 = 0x0C;
-const OHCI_HC_INTERRUPT_ENABLE: u32 = 0x10;
-const OHCI_HC_INTERRUPT_DISABLE: u32 = 0x14;
 const OHCI_HC_HCCA: u32 = 0x18;
-const OHCI_HC_PERIOD_CURRENT_ED: u32 = 0x1C;
 const OHCI_HC_CONTROL_HEAD_ED: u32 = 0x20;
 const OHCI_HC_CONTROL_CURRENT_ED: u32 = 0x24;
 const OHCI_HC_BULK_HEAD_ED: u32 = 0x28;
 const OHCI_HC_BULK_CURRENT_ED: u32 = 0x2C;
-const OHCI_HC_DONE_HEAD: u32 = 0x30;
 const OHCI_HC_FM_INTERVAL: u32 = 0x34;
-const OHCI_HC_FM_REMAINING: u32 = 0x38;
-const OHCI_HC_FM_NUMBER: u32 = 0x3C;
 const OHCI_HC_PERIODIC_START: u32 = 0x40;
 const OHCI_HC_LS_THRESHOLD: u32 = 0x44;
 const OHCI_HC_RH_DESC_A: u32 = 0x48;
-const OHCI_HC_RH_DESC_B: u32 = 0x4C;
 const OHCI_HC_RH_STATUS: u32 = 0x50;
 const OHCI_HC_RH_PORT_STATUS: u32 = 0x54;
 
@@ -46,25 +40,16 @@ const OHCI_HC_RH_PORT_STATUS: u32 = 0x54;
 const OHCI_CTRL_CLE: u32 = 1 << 4;
 const OHCI_CTRL_BLE: u32 = 1 << 5;
 const OHCI_CTRL_HCFS_MASK: u32 = 3 << 6;
-const OHCI_CTRL_HCFS_RESET: u32 = 0 << 6;
-const OHCI_CTRL_HCFS_RESUME: u32 = 1 << 6;
 const OHCI_CTRL_HCFS_OPER: u32 = 2 << 6;
-const OHCI_CTRL_HCFS_SUSPEND: u32 = 3 << 6;
 const OHCI_CTRL_RWE: u32 = 1 << 9;
 
 // OHCI HcCommandStatus bits.
 const OHCI_CMD_HCR: u32 = 1 << 0;
 const OHCI_CMD_CLF: u32 = 1 << 1;
-const OHCI_CMD_BLF: u32 = 1 << 2;
 
 // OHCI interrupt bits.
-const OHCI_INTR_WDH: u32 = 1 << 1;
-const OHCI_INTR_UE: u32 = 1 << 4;
-const OHCI_INTR_RHSC: u32 = 1 << 6;
-const OHCI_INTR_MI: u32 = 1 << 30;
 
 // OHCI Root Hub port status bits.
-const RH_PS_CCS: u32 = 1 << 0;
 const RH_PS_PES: u32 = 1 << 1;
 const RH_PS_PRS: u32 = 1 << 4;
 const RH_PS_PPS: u32 = 1 << 8;
@@ -74,13 +59,9 @@ const RH_PS_PRSC: u32 = 1 << 20;
 
 // OHCI ED/TD bit fields.
 const ED_FA_SHIFT: u32 = 0;
-const ED_EN_SHIFT: u32 = 8;
-const ED_SPEED_SHIFT: u32 = 12;
 const ED_SPEED_FULL: u32 = 0 << 12;
 const ED_SPEED_LOW: u32 = 1 << 12;
-const ED_K_SKIP: u32 = 1 << 14;
 const ED_MPS_SHIFT: u32 = 16;
-const ED_T_TOGGLE: u32 = 1 << 27;
 const ED_TERMINATE: u32 = 1;
 
 const TD_CC_MASK: u32 = 0xF;
@@ -101,15 +82,11 @@ const OHCI_TD_SIZE: usize = 16;
 const EHCI_CAP_LENGTH: u32 = 0x00;
 const EHCI_CAP_VERSION: u32 = 0x02;
 const EHCI_CAP_HCSPARAMS: u32 = 0x04;
-const EHCI_CAP_HCCPARAMS: u32 = 0x08;
 
 // EHCI operational register offsets (relative to op_base).
 const OP_USBCMD: u32 = 0x00;
 const OP_USBSTS: u32 = 0x04;
-const OP_USBINTR: u32 = 0x08;
-const OP_FRINDEX: u32 = 0x0C;
 const OP_CTRLDSSEGMENT: u32 = 0x10;
-const OP_PERIODICLISTBASE: u32 = 0x14;
 const OP_ASYNCLISTADDR: u32 = 0x18;
 const OP_CONFIGFLAG: u32 = 0x40;
 const OP_PORTSC: u32 = 0x44;
@@ -118,7 +95,6 @@ const OP_PORTSC: u32 = 0x44;
 const CMD_RUN: u32 = 1 << 0;
 const CMD_RESET: u32 = 1 << 1;
 const CMD_ASYNC_ENABLE: u32 = 1 << 5;
-const CMD_PERIODIC_ENABLE: u32 = 1 << 4;
 
 // USBSTS bits.
 const STS_HCHALTED: u32 = 1 << 12;
@@ -130,29 +106,22 @@ const QTD_HALTED: u32 = 1 << 6;
 const QTD_BUF_ERR: u32 = 1 << 5;
 const QTD_BABBLE: u32 = 1 << 4;
 const QTD_XACT_ERR: u32 = 1 << 3;
-const QTD_MISSED_MF: u32 = 1 << 2;
 const QTD_ERROR: u32 = QTD_HALTED | QTD_BUF_ERR | QTD_BABBLE | QTD_XACT_ERR;
 const QTD_PID_OUT: u32 = 0 << 8;
 const QTD_PID_IN: u32 = 1 << 8;
 const QTD_PID_SETUP: u32 = 2 << 8;
-const QTD_CERR_MASK: u32 = 3 << 10;
 const QTD_CERR_3: u32 = 3 << 10;
 const QTD_TOGGLE: u32 = 1 << 14;
 const QTD_TOTAL_LEN_SHIFT: u32 = 16;
 
 // QH endpoint chars bits.
 const QH_DEV_ADDR_SHIFT: u32 = 8;
-const QH_DEV_ADDR_MASK: u32 = 0x7F << 8;
 const QH_INACTIVATE: u32 = 1 << 7;
 const QH_EPS_SHIFT: u32 = 12;
 const QH_EPS_HIGH: u32 = 2 << QH_EPS_SHIFT;
-const QH_EPS_FULL: u32 = 0 << QH_EPS_SHIFT;
-const QH_EPS_LOW: u32 = 1 << QH_EPS_SHIFT;
 const QH_DTC: u32 = 1 << 14;
 const QH_HRL: u32 = 1 << 15;
 const QH_MPL_SHIFT: u32 = 16;
-const QH_MPL_MASK: u32 = 0x7FF << QH_MPL_SHIFT;
-const QH_C: u32 = 1 << 0;
 const QH_QH: u32 = 0x02;
 const QH_TERMINATE: u32 = 0x01;
 
@@ -174,7 +143,9 @@ static mut G_ASYNCLIST_ENABLED: bool = false;
 struct DmaPool {
     data: [u8; DMA_POOL_SIZE],
 }
-static mut G_DMA: DmaPool = DmaPool { data: [0; DMA_POOL_SIZE] };
+static mut G_DMA: DmaPool = DmaPool {
+    data: [0; DMA_POOL_SIZE],
+};
 static mut G_DMA_USED: usize = 0;
 
 // OHCI data structures.
@@ -194,15 +165,6 @@ struct OhciTD {
     be: u32,
 }
 
-#[repr(C, align(256))]
-struct OhciHcca {
-    interrupt_table: [u32; 32],
-    frame_number: u16,
-    pad: u16,
-    done_head: u32,
-    reserved: [u8; 112],
-}
-
 // OHCI global state.
 static mut G_OHCI_BASE: usize = 0;
 static mut G_OHCI_N_PORTS: u8 = 0;
@@ -218,7 +180,9 @@ const MAX_OHCI_TD: usize = 64;
 struct OhciDmaPool {
     data: [u8; OHCI_DMA_POOL_SIZE],
 }
-static mut G_OHCI_DMA: OhciDmaPool = OhciDmaPool { data: [0; OHCI_DMA_POOL_SIZE] };
+static mut G_OHCI_DMA: OhciDmaPool = OhciDmaPool {
+    data: [0; OHCI_DMA_POOL_SIZE],
+};
 static mut G_OHCI_DMA_USED: usize = 0;
 static mut G_OHCI_ED_COUNT: usize = 0;
 static mut G_OHCI_TD_COUNT: usize = 0;
@@ -525,7 +489,11 @@ unsafe fn ehci_control_transfer(
     // Setup qTD (first).
     let sqtd = qtd_ptr(qtd_indices[0]);
     let setup_phys = setup_pkt.as_ptr() as u32;
-    let next_phys = if qtd_count > 1 { qtd_phys(qtd_indices[1]) } else { QH_TERMINATE };
+    let next_phys = if qtd_count > 1 {
+        qtd_phys(qtd_indices[1])
+    } else {
+        QH_TERMINATE
+    };
     (*sqtd).next = next_phys;
     (*sqtd).alt_next = QH_TERMINATE;
     (*sqtd).token = setup_pid | QTD_CERR_3 | (8 << QTD_TOTAL_LEN_SHIFT) | QTD_ACTIVE;
@@ -539,7 +507,9 @@ unsafe fn ehci_control_transfer(
         let chunk = remaining.min(QTD_BUF_SIZE);
         let buf_phys = if let Some(ref mut db) = data {
             db.as_mut_ptr().add(buf_pos as usize) as u32
-        } else { 0 };
+        } else {
+            0
+        };
         let next_d = if i + 1 < data_qtds as usize {
             qtd_phys(qtd_indices[1 + i + 1])
         } else {
@@ -553,7 +523,11 @@ unsafe fn ehci_control_transfer(
     }
 
     // Status qTD (last): opposite direction, 0 bytes.
-    let status_pid = if data_in || data_len == 0 { QTD_PID_OUT } else { QTD_PID_IN };
+    let status_pid = if data_in || data_len == 0 {
+        QTD_PID_OUT
+    } else {
+        QTD_PID_IN
+    };
     let status_idx = qtd_count as usize - 1;
     let stqtd = qtd_ptr(qtd_indices[status_idx]);
     (*stqtd).next = QH_TERMINATE;
@@ -726,7 +700,7 @@ pub unsafe fn init_ohci(base: usize) -> KResult<()> {
     // Read default FmInterval from hardware and write it back.
     let fi = ohci_rd(OHCI_HC_FM_INTERVAL);
     // Ensure FSMPS (bits 31:16) is set correctly: FSMPS = FI * 90%.
-    let fi_fit = fi & 0x3FFF;        // bits 13:0 = FrameInterval
+    let fi_fit = fi & 0x3FFF; // bits 13:0 = FrameInterval
     let fsmps = ((fi_fit * 9) / 10) << 16;
     ohci_wr(OHCI_HC_FM_INTERVAL, (fi & 0xFFFF) | fsmps);
 
@@ -747,7 +721,10 @@ pub unsafe fn init_ohci(base: usize) -> KResult<()> {
     ohci_wr(OHCI_HC_INTERRUPT_STATUS, 0xFFFF_FFFF);
 
     // Set HCFS to Operational with CLE|BLE and RWE.
-    ohci_wr(OHCI_HC_CONTROL, OHCI_CTRL_HCFS_OPER | OHCI_CTRL_CLE | OHCI_CTRL_BLE | OHCI_CTRL_RWE);
+    ohci_wr(
+        OHCI_HC_CONTROL,
+        OHCI_CTRL_HCFS_OPER | OHCI_CTRL_CLE | OHCI_CTRL_BLE | OHCI_CTRL_RWE,
+    );
 
     // Wait for controller to become operational.
     timeout = 100_000u32;
@@ -760,7 +737,7 @@ pub unsafe fn init_ohci(base: usize) -> KResult<()> {
     }
 
     // Set global power on root hub ports.
-    ohci_wr(OHCI_HC_RH_STATUS, 1 << 16);  // LPSC (Set Global Power)
+    ohci_wr(OHCI_HC_RH_STATUS, 1 << 16); // LPSC (Set Global Power)
 
     // Enable power on each port individually.
     for i in 0..G_OHCI_N_PORTS {
@@ -800,7 +777,11 @@ pub unsafe fn ohci_control_transfer(
     // Allocate ED.
     let ed_idx = ohci_alloc_ed()?;
     let setup_td_idx = ohci_alloc_td()?;
-    let data_td_idx = if data_len > 0 { Some(ohci_alloc_td()?) } else { None };
+    let data_td_idx = if data_len > 0 {
+        Some(ohci_alloc_td()?)
+    } else {
+        None
+    };
     let status_td_idx = ohci_alloc_td()?;
 
     let ed = ohci_ed_ptr(ed_idx);
@@ -829,7 +810,9 @@ pub unsafe fn ohci_control_transfer(
         let dt = ohci_td_ptr(dt_idx);
         let buf_phys = if let Some(ref mut db) = data {
             db.as_mut_ptr() as u32
-        } else { 0 };
+        } else {
+            0
+        };
 
         let dp = if data_in { TD_DP_IN } else { TD_DP_OUT };
         (*dt).control = TD_CC_NOT_ACCESSED | TD_T_DATA1 | TD_DI_NO_INTR | dp | TD_R_3;
@@ -850,13 +833,17 @@ pub unsafe fn ohci_control_transfer(
     (*status_td).be = 0;
 
     // Configure the ED.
-    let speed_bits = if speed != 0 { ED_SPEED_LOW } else { ED_SPEED_FULL };
-    let mps = max_pkt.min(255) << ED_MPS_SHIFT;  // OHCI MPS is 10 bits
+    let speed_bits = if speed != 0 {
+        ED_SPEED_LOW
+    } else {
+        ED_SPEED_FULL
+    };
+    let mps = max_pkt.min(255) << ED_MPS_SHIFT; // OHCI MPS is 10 bits
     let fa = (dev_addr as u32) << ED_FA_SHIFT;
     (*ed).control = fa | speed_bits | mps;
-    (*ed).tail_td = status_td_phys;  // last TD (stop when head reaches this)
+    (*ed).tail_td = status_td_phys; // last TD (stop when head reaches this)
     (*ed).head_td = ohci_td_phys(setup_td_idx);
-    (*ed).next_ed = ED_TERMINATE;    // single ED in control list
+    (*ed).next_ed = ED_TERMINATE; // single ED in control list
 
     // Link ED into control list.
     ohci_wr(OHCI_HC_CONTROL_HEAD_ED, ohci_ed_phys(ed_idx));

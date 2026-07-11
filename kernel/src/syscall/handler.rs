@@ -141,18 +141,14 @@ pub unsafe fn handle(tf: &mut TrapFrame) -> i64 {
         SYS_getdents64 => fs_sys3::sys_getdents64(a0, a1, a2),
         SYS_ioctl => fs_sys3::sys_ioctl(a0, a1, a2),
         SYS_mprotect => fs_sys3::sys_mprotect(a0, a1, a2),
-        SYS_sigaction => {
-            match fs_sys3::sys_sigaction_impl(a0 as u32, a1, a2) {
-                Ok(()) => 0,
-                Err(e) => e.as_i64(),
-            }
-        }
-        SYS_sigprocmask => {
-            match fs_sys3::sys_sigprocmask_impl(a0 as u32, a1, a2) {
-                Ok(()) => 0,
-                Err(e) => e.as_i64(),
-            }
-        }
+        SYS_sigaction => match fs_sys3::sys_sigaction_impl(a0 as u32, a1, a2) {
+            Ok(()) => 0,
+            Err(e) => e.as_i64(),
+        },
+        SYS_sigprocmask => match fs_sys3::sys_sigprocmask_impl(a0 as u32, a1, a2) {
+            Ok(()) => 0,
+            Err(e) => e.as_i64(),
+        },
         SYS_sigreturn => {
             fs_sys3::sys_sigreturn_impl(tf);
             0

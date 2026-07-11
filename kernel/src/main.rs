@@ -42,7 +42,19 @@
     static_mut_refs,
     non_upper_case_globals,
     non_snake_case,
-    non_camel_case_types
+    non_camel_case_types,
+    clippy::unnecessary_cast,
+    clippy::identity_op,
+    clippy::if_same_then_else,
+    clippy::let_unit_value,
+    clippy::unnecessary_lazy_evaluations,
+    clippy::clone_on_copy,
+    clippy::upper_case_acronyms,
+    clippy::explicit_auto_deref,
+    clippy::manual_is_multiple_of,
+    clippy::unusual_byte_groupings,
+    clippy::doc_overindented_list_items,
+    clippy::empty_line_after_doc_comments
 )]
 
 extern crate alloc;

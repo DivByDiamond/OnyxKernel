@@ -4,8 +4,8 @@
 //! the 8042 is still present. The driver polls the data port (0x60) and
 //! translates scancode set 2 (translated by the 8042 to set 1) to the
 //! unified `input::Event` representation.
-use crate::drivers::input::{self, Event, KeyCode};
 use crate::arch::mmio::Mmio;
+use crate::drivers::input::{self, Event, KeyCode};
 
 const PORT_DATA: usize = 0x60;
 const PORT_STATUS: usize = 0x64;
@@ -67,7 +67,9 @@ pub unsafe fn init() -> bool {
 /// Poll the PS/2 keyboard for one byte. Returns `None` if no data.
 pub fn poll_byte() -> Option<u8> {
     unsafe {
-        if !wait_read() { return None; }
+        if !wait_read() {
+            return None;
+        }
         Some(data())
     }
 }
@@ -83,10 +85,14 @@ fn translate(sc: u8) -> Event {
     let code = sc & 0x7F;
     let kc = scancode_to_key(code);
     if matches!(kc, KeyCode::LeftShift | KeyCode::RightShift) {
-        unsafe { G_SHIFT = down; }
+        unsafe {
+            G_SHIFT = down;
+        }
     }
     if kc == KeyCode::CapsLock && down {
-        unsafe { G_CAPS = !G_CAPS; }
+        unsafe {
+            G_CAPS = !G_CAPS;
+        }
     }
     Event::Key { code: kc, down }
 }
@@ -134,11 +140,7 @@ fn scancode_to_key(code: u8) -> KeyCode {
 #[inline]
 fn apply_case(base: u8) -> u8 {
     let up = unsafe { G_SHIFT ^ G_CAPS };
-    if up {
-        base.to_ascii_uppercase()
-    } else {
-        base
-    }
+    if up { base.to_ascii_uppercase() } else { base }
 }
 
 /// Drive `input::dispatch` from the PS/2 source. Call from a poll loop.

@@ -1,4 +1,4 @@
-use super::shared::{PcfFont, G_FONT, uni_map_insert};
+use super::shared::{G_FONT, PcfFont, uni_map_insert};
 use onyx_core::errno::{Errno, KResult};
 
 pub(super) unsafe fn init_psf1(data: &[u8]) -> KResult<()> {

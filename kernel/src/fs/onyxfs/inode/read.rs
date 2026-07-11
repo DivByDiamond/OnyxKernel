@@ -1,9 +1,8 @@
 use super::super::{
-    inodes_per_block, read_block, OnyfsStat, G_BUF, G_SB, G_VERSION, ONYFS_V1,
-    ONYFS_V1_INODE_SIZE,
+    G_BUF, G_SB, G_VERSION, ONYFS_V1, ONYFS_V1_INODE_SIZE, OnyfsStat, inodes_per_block, read_block,
 };
 use onyx_core::errno::{Errno, KResult};
-use onyx_core::formats::{OnyfsInode, ONYFS_BLOCK_SIZE, ONYFS_DIRECT_BLKS};
+use onyx_core::formats::{ONYFS_BLOCK_SIZE, ONYFS_DIRECT_BLKS, OnyfsInode};
 
 pub unsafe fn read_inode(ino: u32, out: &mut OnyfsInode) -> KResult<()> {
     let ipb = inodes_per_block();

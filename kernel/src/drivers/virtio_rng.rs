@@ -4,11 +4,11 @@
 //! `-device virtio-rng-device`. The driver reuses the existing virtio
 //! MMIO constants and provides a single `read()` entry point.
 use crate::drivers::virtio::{
-    reg_r, reg_w, VqAvail, VqDesc, VqUsed, R_DEVICE_ID, R_GUEST_FEATURES, R_HOST_FEATURES,
-    R_MAGIC_VALUE, R_QUEUE_ALIGN, R_QUEUE_AVAIL_HIGH, R_QUEUE_AVAIL_LOW, R_QUEUE_DESC_HIGH,
-    R_QUEUE_DESC_LOW, R_QUEUE_ENABLE, R_QUEUE_NUM, R_QUEUE_PFN, R_QUEUE_SEL, R_QUEUE_USED_HIGH,
-    R_QUEUE_USED_LOW, R_STATUS, R_VERSION, VIRTIO_S_ACK, VIRTIO_S_DRIVER, VIRTIO_S_DRIVER_OK,
-    VIRTIO_S_FEATURES_OK, VIRTQ_SIZE, VQ_DESC_F_WRITE,
+    R_DEVICE_ID, R_GUEST_FEATURES, R_HOST_FEATURES, R_MAGIC_VALUE, R_QUEUE_ALIGN,
+    R_QUEUE_AVAIL_HIGH, R_QUEUE_AVAIL_LOW, R_QUEUE_DESC_HIGH, R_QUEUE_DESC_LOW, R_QUEUE_ENABLE,
+    R_QUEUE_NUM, R_QUEUE_PFN, R_QUEUE_SEL, R_QUEUE_USED_HIGH, R_QUEUE_USED_LOW, R_STATUS,
+    R_VERSION, VIRTIO_S_ACK, VIRTIO_S_DRIVER, VIRTIO_S_DRIVER_OK, VIRTIO_S_FEATURES_OK, VIRTQ_SIZE,
+    VQ_DESC_F_WRITE, VqAvail, VqDesc, VqUsed, reg_r, reg_w,
 };
 use crate::mm::pmm;
 use core::ptr;
@@ -71,14 +71,21 @@ pub unsafe fn init(base: usize) -> KResult<()> {
     let hf = reg_r(base, R_HOST_FEATURES);
     reg_w(base, R_GUEST_FEATURES, hf & 0x1FFF_FFFF);
     if modern {
-        reg_w(base, R_STATUS,
-            VIRTIO_S_ACK | VIRTIO_S_DRIVER | VIRTIO_S_FEATURES_OK);
+        reg_w(
+            base,
+            R_STATUS,
+            VIRTIO_S_ACK | VIRTIO_S_DRIVER | VIRTIO_S_FEATURES_OK,
+        );
         if reg_r(base, R_STATUS) & VIRTIO_S_FEATURES_OK == 0 {
             return Err(Errno::Inval);
         }
     }
     setup_queue(idx)?;
-    reg_w(base, R_STATUS, VIRTIO_S_ACK | VIRTIO_S_DRIVER | VIRTIO_S_DRIVER_OK);
+    reg_w(
+        base,
+        R_STATUS,
+        VIRTIO_S_ACK | VIRTIO_S_DRIVER | VIRTIO_S_DRIVER_OK,
+    );
     *(&raw mut G_N) += 1;
     Ok(())
 }
@@ -98,7 +105,11 @@ unsafe fn setup_queue(idx: usize) -> KResult<()> {
         reg_w(dev.base, R_QUEUE_DESC_LOW, desc_pa as u32);
         reg_w(dev.base, R_QUEUE_DESC_HIGH, ((desc_pa as u64) >> 32) as u32);
         reg_w(dev.base, R_QUEUE_AVAIL_LOW, avail_pa as u32);
-        reg_w(dev.base, R_QUEUE_AVAIL_HIGH, ((avail_pa as u64) >> 32) as u32);
+        reg_w(
+            dev.base,
+            R_QUEUE_AVAIL_HIGH,
+            ((avail_pa as u64) >> 32) as u32,
+        );
         reg_w(dev.base, R_QUEUE_USED_LOW, used_pa as u32);
         reg_w(dev.base, R_QUEUE_USED_HIGH, ((used_pa as u64) >> 32) as u32);
         reg_w(dev.base, R_QUEUE_ENABLE, 1);

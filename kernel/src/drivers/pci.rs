@@ -14,8 +14,6 @@ const PCI_VENDOR_ID: u32 = 0x00;
 const PCI_CLASS_REV: u32 = 0x08;
 const PCI_BAR0: u32 = 0x10;
 
-
-
 unsafe fn cfg_rd(bus: u8, dev: u8, fun: u8, off: u32) -> u32 {
     let addr = ECAM_BASE
         + ((bus as usize) << 20)
@@ -32,14 +30,25 @@ pub unsafe fn find_vga_fb() -> KResult<usize> {
         if probe == 0xFFFF || probe == 0 {
             continue;
         }
-        crate::kdbg!("pci", "bus=%d has devices", crate::srv::klog::FmtArg::from(bus as u32));
+        crate::kdbg!(
+            "pci",
+            "bus=%d has devices",
+            crate::srv::klog::FmtArg::from(bus as u32)
+        );
         for dev in 0u8..32 {
             let ven = cfg_rd(bus, dev, 0, PCI_VENDOR_ID) & 0xFFFF;
             if ven == 0xFFFF || ven == 0 {
                 continue;
             }
             let cls = cfg_rd(bus, dev, 0, PCI_CLASS_REV) >> 16;
-            crate::kdbg!("pci", "bus=%d dev=%d ven=%x class=%x", crate::srv::klog::FmtArg::from(bus as u32), crate::srv::klog::FmtArg::from(dev as u32), crate::srv::klog::FmtArg::from(ven), crate::srv::klog::FmtArg::from(cls));
+            crate::kdbg!(
+                "pci",
+                "bus=%d dev=%d ven=%x class=%x",
+                crate::srv::klog::FmtArg::from(bus as u32),
+                crate::srv::klog::FmtArg::from(dev as u32),
+                crate::srv::klog::FmtArg::from(ven),
+                crate::srv::klog::FmtArg::from(cls)
+            );
             if (cls >> 8) == 0x03 {
                 for bar_idx in 0u32..6 {
                     let off = PCI_BAR0 + bar_idx * 4;
@@ -52,7 +61,9 @@ pub unsafe fn find_vga_fb() -> KResult<usize> {
                         continue;
                     }
                     if (val & 0x6) == 0x4 {
-                        if bar_idx + 1 >= 6 { continue; }
+                        if bar_idx + 1 >= 6 {
+                            continue;
+                        }
                         let hi = cfg_rd(bus, dev, 0, off + 4);
                         let fb_pa = ((val & 0xFFFF_FFF0) as u64) | ((hi as u64) << 32);
                         crate::kinf!(
@@ -82,9 +93,12 @@ pub unsafe fn find_vga_fb() -> KResult<usize> {
                     }
                 }
                 // fallback: if no BAR found, still report the device
-                crate::kwrn!("pci", "VGA at %d:%d has no valid BAR",
+                crate::kwrn!(
+                    "pci",
+                    "VGA at %d:%d has no valid BAR",
                     crate::srv::klog::FmtArg::from(bus as u32),
-                    crate::srv::klog::FmtArg::from(dev as u32));
+                    crate::srv::klog::FmtArg::from(dev as u32)
+                );
             }
         }
     }

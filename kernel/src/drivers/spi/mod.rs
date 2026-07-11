@@ -4,7 +4,7 @@
 //! chip-select lines. Bus primitives live in `xfer.rs`; high-level
 //! read/write live in `ops.rs`.
 pub use self::ops::{read, write};
-pub use self::xfer::{select, release, transfer};
+pub use self::xfer::{release, select, transfer};
 
 use crate::arch::mmio::Mmio;
 
@@ -65,5 +65,5 @@ pub unsafe fn init(base: usize, sckdiv: u32, cs: u8) {
     wr(R_RXMARK, 0);
 }
 
-pub mod xfer;
 pub mod ops;
+pub mod xfer;

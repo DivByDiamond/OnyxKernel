@@ -3,11 +3,11 @@
 //! Owns the device struct, global state, and probe/init. RX/TX queue
 //! helpers live in `xfer.rs`.
 use crate::drivers::virtio::{
-    reg_r, reg_w, VqAvail, VqDesc, VqUsed, R_DEVICE_ID, R_GUEST_FEATURES, R_HOST_FEATURES,
-    R_MAGIC_VALUE, R_QUEUE_AVAIL_HIGH, R_QUEUE_AVAIL_LOW, R_QUEUE_DESC_HIGH, R_QUEUE_DESC_LOW,
-    R_QUEUE_ENABLE, R_QUEUE_NUM, R_QUEUE_SEL, R_QUEUE_USED_HIGH, R_QUEUE_USED_LOW, R_STATUS,
-    R_VERSION, VIRTIO_S_ACK, VIRTIO_S_DRIVER, VIRTIO_S_DRIVER_OK, VIRTIO_S_FEATURES_OK,
-    VIRTQ_SIZE, VQ_DESC_F_WRITE,
+    R_DEVICE_ID, R_GUEST_FEATURES, R_HOST_FEATURES, R_MAGIC_VALUE, R_QUEUE_AVAIL_HIGH,
+    R_QUEUE_AVAIL_LOW, R_QUEUE_DESC_HIGH, R_QUEUE_DESC_LOW, R_QUEUE_ENABLE, R_QUEUE_NUM,
+    R_QUEUE_SEL, R_QUEUE_USED_HIGH, R_QUEUE_USED_LOW, R_STATUS, R_VERSION, VIRTIO_S_ACK,
+    VIRTIO_S_DRIVER, VIRTIO_S_DRIVER_OK, VIRTIO_S_FEATURES_OK, VIRTQ_SIZE, VQ_DESC_F_WRITE,
+    VqAvail, VqDesc, VqUsed, reg_r, reg_w,
 };
 use crate::mm::pmm;
 use core::ptr;
@@ -65,15 +65,22 @@ pub unsafe fn init(base: usize) -> KResult<()> {
     let hf = reg_r(base, R_HOST_FEATURES);
     reg_w(base, R_GUEST_FEATURES, hf & 0x1FFF_FFFF);
     if modern {
-        reg_w(base, R_STATUS,
-            VIRTIO_S_ACK | VIRTIO_S_DRIVER | VIRTIO_S_FEATURES_OK);
+        reg_w(
+            base,
+            R_STATUS,
+            VIRTIO_S_ACK | VIRTIO_S_DRIVER | VIRTIO_S_FEATURES_OK,
+        );
         if reg_r(base, R_STATUS) & VIRTIO_S_FEATURES_OK == 0 {
             return Err(Errno::Inval);
         }
     }
-    setup_queue(0, true)?;  // RX (queue 0)
+    setup_queue(0, true)?; // RX (queue 0)
     setup_queue(1, false)?; // TX (queue 1)
-    reg_w(base, R_STATUS, VIRTIO_S_ACK | VIRTIO_S_DRIVER | VIRTIO_S_DRIVER_OK);
+    reg_w(
+        base,
+        R_STATUS,
+        VIRTIO_S_ACK | VIRTIO_S_DRIVER | VIRTIO_S_DRIVER_OK,
+    );
     Ok(())
 }
 
@@ -117,7 +124,11 @@ unsafe fn setup_queue(qidx: u32, is_rx: bool) -> KResult<()> {
 }
 
 pub(crate) unsafe fn push(idx: usize, is_rx: bool) {
-    let avail = if is_rx { G_CON.rx_avail } else { G_CON.tx_avail };
+    let avail = if is_rx {
+        G_CON.rx_avail
+    } else {
+        G_CON.tx_avail
+    };
     let i = ptr::read_volatile(ptr::addr_of!((*avail).idx));
     ptr::write_volatile(
         ptr::addr_of_mut!((*avail).ring[(i as usize) % VIRTQ_SIZE]),
@@ -128,4 +139,4 @@ pub(crate) unsafe fn push(idx: usize, is_rx: bool) {
 }
 
 pub mod xfer;
-pub use xfer::{getc, puts, putc};
+pub use xfer::{getc, putc, puts};

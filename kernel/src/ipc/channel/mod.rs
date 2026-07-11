@@ -1,6 +1,6 @@
-pub mod types;
 pub mod channel;
 pub mod ringbuf;
-pub use types::*;
+pub mod types;
 pub use channel::*;
 pub use ringbuf::*;
+pub use types::*;

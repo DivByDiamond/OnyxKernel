@@ -43,8 +43,7 @@ unsafe fn pll_rd(off: u32) -> u32 {
 }
 
 #[inline]
-#[allow(dead_code)]
-unsafe fn pll_wr(off: u32, v: u32) {
+unsafe fn _pll_wr(off: u32, v: u32) {
     Mmio::<u32>::at(G_PLL + off as usize).write(v);
 }
 

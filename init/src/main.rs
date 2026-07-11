@@ -118,6 +118,9 @@ unsafe fn pid1_main() -> ! {
     // Scan /service/ and start enabled services.
     scan_and_start_services();
 
+    // Boot-time tests of devfs devices (inline from init).
+    devfs_boot_test();
+
     // Launch /bin/login so a user can log in.
     let m = b"[init] launching /bin/login\n";
     syscalls::write(1, m.as_ptr(), m.len());
@@ -176,7 +179,7 @@ unsafe fn reap_children() {
     loop {
         let mut status: i32 = 0;
         // waitpid(-1, &status, WNOHANG) — reap any child, don't block.
-        let pid = syscalls::waitpid(u32::MAX as u64, &mut status as *mut i32, WNOHANG);
+        let pid = syscalls::waitpid(u32::MAX as u64, &mut status, WNOHANG);
         if pid <= 0 {
             break;
         }
@@ -309,7 +312,7 @@ unsafe fn refresh_service(idx: usize) {
         return;
     }
     let mut status: i32 = 0;
-    let r = syscalls::waitpid(SERVICES[idx].pid as u64, &mut status as *mut i32, WNOHANG);
+    let r = syscalls::waitpid(SERVICES[idx].pid as u64, &mut status, WNOHANG);
     if r > 0 {
         // The service has exited — reap it and update state.
         SERVICES[idx].running = false;
@@ -504,14 +507,14 @@ unsafe fn handle_list(resp: &mut [u8]) -> usize {
     resp[pos..pos + copy].copy_from_slice(&header[..copy]);
     pos += copy;
 
-    for i in 0..NUM_SERVICES {
+    for svc in SERVICES[..NUM_SERVICES].iter() {
         if pos >= resp.len() {
             break;
         }
-        let name = service_name(i);
-        let state: &[u8] = if SERVICES[i].running {
+        let name = &svc.name[..svc.name_len];
+        let state: &[u8] = if svc.running {
             b"running"
-        } else if SERVICES[i].enabled {
+        } else if svc.enabled {
             b"stopped"
         } else {
             b"disabled"
@@ -617,7 +620,11 @@ unsafe fn control_main(argc: usize, argv: *const u64) -> ! {
 
     // Block on the response.
     let mut resp_buf = [0u8; MAX_MSG_LEN];
-    let n = syscalls::chan_recv(resp_chan as u32, resp_buf.as_mut_ptr(), resp_buf.len() as u32);
+    let n = syscalls::chan_recv(
+        resp_chan as u32,
+        resp_buf.as_mut_ptr(),
+        resp_buf.len() as u32,
+    );
     if n > 0 {
         syscalls::write(1, resp_buf.as_ptr(), n as usize);
         // Ensure a trailing newline for nice shell output.
@@ -697,23 +704,14 @@ fn write_response(resp: &mut [u8], s: &[u8]) -> usize {
 
 /// Look up a service by name in the in-memory table.
 unsafe fn find_service_by_name(name: &[u8]) -> Option<usize> {
-    for i in 0..NUM_SERVICES {
-        let sn = service_name(i);
-        if sn == name {
-            return Some(i);
-        }
-    }
-    None
+    (0..NUM_SERVICES).find(|&i| service_name(i) == name)
 }
 
 /// Look up a service by its recorded PID.
 unsafe fn find_service_by_pid(pid: u32) -> Option<usize> {
-    for i in 0..NUM_SERVICES {
-        if SERVICES[i].pid == pid && pid != 0 {
-            return Some(i);
-        }
-    }
-    None
+    SERVICES[..NUM_SERVICES]
+        .iter()
+        .position(|svc| svc.pid == pid && pid != 0)
 }
 
 /// Borrow the name of service `idx` as a `&[u8]` (no trailing NULs).
@@ -835,11 +833,7 @@ fn dec_slice(s: &[u8; 12]) -> &[u8] {
     let start = s.iter().position(|&b| b != 0).unwrap_or(s.len());
     // Find the last non-zero byte; its index + 1 is `end`.
     let end = s.iter().rposition(|&b| b != 0).map(|i| i + 1).unwrap_or(0);
-    if start < end {
-        &s[start..end]
-    } else {
-        &[]
-    }
+    if start < end { &s[start..end] } else { &[] }
 }
 
 /// Write a decimal integer to stdout (skipping leading NULs).
@@ -849,6 +843,81 @@ unsafe fn write_dec(n: i64) {
     if !slice.is_empty() {
         syscalls::write(1, slice.as_ptr(), slice.len());
     }
+}
+
+// ── Boot-time devfs test ──────────────────────────────────────────────────
+
+/// Test that `/dev/blk0` and `/dev/fb0` are accessible. Runs inline from
+/// PID 1 before launching login so results appear early in the boot log
+/// regardless of service-state or spawn mechanics.
+unsafe fn devfs_boot_test() {
+    let m = b"[init] devfs boot test start\n";
+    syscalls::write(1, m.as_ptr(), m.len());
+
+    // ── blk0 test ─────────────────────────────────────────────────────────
+    let blk_path = b"/dev/blk0\0";
+    let fd = syscalls::open(blk_path.as_ptr(), 0, 0);
+    if fd < 0 {
+        let m = b"[init]   /dev/blk0: open FAILED\n";
+        syscalls::write(1, m.as_ptr(), m.len());
+    } else {
+        let mut mbr = [0u8; 512];
+        let n = syscalls::read(fd as u64, mbr.as_mut_ptr(), 512);
+        if n == 512 && mbr[510] == 0x55 && mbr[511] == 0xAA {
+            let m = b"[init]   /dev/blk0: MBR valid, FS signature reading...\n";
+            syscalls::write(1, m.as_ptr(), m.len());
+            // Read at LBA 10240 (where disk.img is placed in boot.img)
+            syscalls::lseek(fd as u64, 10240i64 * 512, 0);
+            let mut sb = [0u8; 512];
+            let n2 = syscalls::read(fd as u64, sb.as_mut_ptr(), 512);
+            if n2 >= 4 {
+                if &sb[..4] == b"ONY2" {
+                    let m = b"[init]   blk0: OnyxFS v2 OK\n";
+                    syscalls::write(1, m.as_ptr(), m.len());
+                } else {
+                    let m = b"[init]   blk0: FS unknown (not OnyxFS)\n";
+                    syscalls::write(1, m.as_ptr(), m.len());
+                }
+            }
+        } else {
+            let m = b"[init]   /dev/blk0: MBR signature NOT found\n";
+            syscalls::write(1, m.as_ptr(), m.len());
+        }
+        syscalls::close(fd as u64);
+    }
+
+    // ── fb0 test ──────────────────────────────────────────────────────────
+    let fb_path = b"/dev/fb0\0";
+    let fb_fd = syscalls::open(fb_path.as_ptr(), 0, 0);
+    if fb_fd < 0 {
+        let m = b"[init]   /dev/fb0: open FAILED\n";
+        syscalls::write(1, m.as_ptr(), m.len());
+    } else {
+        let mut info = [0u32; 5];
+        let r = syscalls::ioctl(fb_fd as u64, 0x4600, info.as_mut_ptr() as u64);
+        if r < 0 {
+            let m = b"[init]   /dev/fb0: ioctl FAILED\n";
+            syscalls::write(1, m.as_ptr(), m.len());
+        } else {
+            let m = b"[init]   /dev/fb0: ";
+            syscalls::write(1, m.as_ptr(), m.len());
+            syscalls::write(1, b"w=".as_ptr(), 2);
+            write_dec(info[0] as i64);
+            syscalls::write(1, b" h=".as_ptr(), 3);
+            write_dec(info[1] as i64);
+            syscalls::write(1, b" bpp=".as_ptr(), 5);
+            write_dec(info[2] as i64);
+            syscalls::write(1, b" pitch=".as_ptr(), 7);
+            write_dec(info[3] as i64);
+            syscalls::write(1, b" size=".as_ptr(), 6);
+            write_dec(info[4] as i64);
+            syscalls::write(1, b"\n".as_ptr(), 1);
+        }
+        syscalls::close(fb_fd as u64);
+    }
+
+    let m = b"[init] devfs boot test done\n";
+    syscalls::write(1, m.as_ptr(), m.len());
 }
 
 // ── Panic handler ────────────────────────────────────────────────────────

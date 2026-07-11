@@ -1,5 +1,5 @@
-use crate::font;
 use super::G_FB;
+use crate::font;
 
 pub fn scroll() {
     unsafe {
@@ -18,5 +18,4 @@ pub fn scroll() {
     }
 }
 
-pub fn flush() {
-}
+pub fn flush() {}

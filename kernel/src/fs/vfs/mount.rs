@@ -10,11 +10,30 @@ pub struct MountEntry {
 }
 
 pub(crate) static mut G_MOUNTS: [MountEntry; MAX_MOUNTS] = [
-    MountEntry { path: b"", fs: Fs::None },
-    MountEntry { path: b"", fs: Fs::None },
-    MountEntry { path: b"", fs: Fs::None },
-    MountEntry { path: b"", fs: Fs::None },
-    MountEntry { path: b"", fs: Fs::None },
+    MountEntry {
+        path: b"",
+        fs: Fs::None,
+    },
+    MountEntry {
+        path: b"",
+        fs: Fs::None,
+    },
+    MountEntry {
+        path: b"",
+        fs: Fs::None,
+    },
+    MountEntry {
+        path: b"",
+        fs: Fs::None,
+    },
+    MountEntry {
+        path: b"",
+        fs: Fs::None,
+    },
+    MountEntry {
+        path: b"",
+        fs: Fs::None,
+    },
 ];
 
 pub unsafe fn mount_procfs() {
@@ -28,6 +47,13 @@ pub unsafe fn mount_ipcfs() {
     G_MOUNTS[1] = MountEntry {
         path: b"ipc",
         fs: Fs::Ipc,
+    };
+}
+
+pub unsafe fn mount_devfs() {
+    G_MOUNTS[2] = MountEntry {
+        path: b"dev",
+        fs: Fs::Devfs,
     };
 }
 

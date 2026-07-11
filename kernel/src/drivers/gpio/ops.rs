@@ -1,6 +1,8 @@
 //! GPIO pin-level operations: direction, drive, read, edge IRQ.
-use super::{rd, wr, G_PINS, N_PINS, R_INPUT_EN, R_INPUT_VAL,
-            R_OUTPUT_EN, R_OUTPUT_VAL, R_OUT_XOR, R_RISE_IE, R_RISE_IP, R_FALL_IE, R_FALL_IP};
+use super::{
+    G_PINS, N_PINS, R_FALL_IE, R_FALL_IP, R_INPUT_EN, R_INPUT_VAL, R_OUT_XOR, R_OUTPUT_EN,
+    R_OUTPUT_VAL, R_RISE_IE, R_RISE_IP, rd, wr,
+};
 use onyx_core::errno::{Errno, KResult};
 
 pub type PinHandler = fn(usize);
@@ -52,7 +54,9 @@ pub fn read(pin: usize) -> KResult<u8> {
 
 pub fn toggle(pin: usize) -> KResult<()> {
     let m = mask(pin)?;
-    unsafe { wr(R_OUTPUT_VAL, rd(R_OUTPUT_VAL) ^ m); }
+    unsafe {
+        wr(R_OUTPUT_VAL, rd(R_OUTPUT_VAL) ^ m);
+    }
     Ok(())
 }
 

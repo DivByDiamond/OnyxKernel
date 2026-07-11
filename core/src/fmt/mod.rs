@@ -4,4 +4,4 @@ pub mod impls;
 pub mod writer;
 
 pub use impls::Arg;
-pub use writer::{vformat, Write};
+pub use writer::{Write, vformat};

@@ -31,7 +31,9 @@ pub fn psf1() -> Vec<u8> {
     buf.extend_from_slice(&PSF1_MAGIC.to_le_bytes());
     buf.push(mode);
     buf.push(charsize as u8);
-    for c in 0..GLYPHS as u8 { buf.extend_from_slice(glyph_bitmap(c)); }
+    for c in 0..GLYPHS as u8 {
+        buf.extend_from_slice(glyph_bitmap(c));
+    }
     buf.extend_from_slice(&ut);
     buf
 }

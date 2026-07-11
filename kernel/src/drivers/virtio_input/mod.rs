@@ -4,11 +4,11 @@
 //! tablet) from the device's event virtqueue and translates them to
 //! the unified `drivers::input::Event` representation.
 use crate::drivers::virtio::{
-    reg_r, reg_w, VqAvail, VqDesc, VqUsed, R_DEVICE_ID, R_GUEST_FEATURES, R_HOST_FEATURES,
-    R_MAGIC_VALUE, R_QUEUE_AVAIL_HIGH, R_QUEUE_AVAIL_LOW, R_QUEUE_DESC_HIGH, R_QUEUE_DESC_LOW,
-    R_QUEUE_ENABLE, R_QUEUE_NUM, R_QUEUE_SEL, R_QUEUE_USED_HIGH, R_QUEUE_USED_LOW, R_STATUS,
-    R_VERSION, VIRTIO_S_ACK, VIRTIO_S_DRIVER, VIRTIO_S_DRIVER_OK, VIRTIO_S_FEATURES_OK,
-    VIRTQ_SIZE, VQ_DESC_F_WRITE,
+    R_DEVICE_ID, R_GUEST_FEATURES, R_HOST_FEATURES, R_MAGIC_VALUE, R_QUEUE_AVAIL_HIGH,
+    R_QUEUE_AVAIL_LOW, R_QUEUE_DESC_HIGH, R_QUEUE_DESC_LOW, R_QUEUE_ENABLE, R_QUEUE_NUM,
+    R_QUEUE_SEL, R_QUEUE_USED_HIGH, R_QUEUE_USED_LOW, R_STATUS, R_VERSION, VIRTIO_S_ACK,
+    VIRTIO_S_DRIVER, VIRTIO_S_DRIVER_OK, VIRTIO_S_FEATURES_OK, VIRTQ_SIZE, VQ_DESC_F_WRITE,
+    VqAvail, VqDesc, VqUsed, reg_r, reg_w,
 };
 use crate::mm::pmm;
 use core::ptr;
@@ -69,14 +69,21 @@ pub unsafe fn init(base: usize) -> KResult<()> {
     let hf = reg_r(base, R_HOST_FEATURES);
     reg_w(base, R_GUEST_FEATURES, hf & 0x1FFF_FFFF);
     if modern {
-        reg_w(base, R_STATUS,
-            VIRTIO_S_ACK | VIRTIO_S_DRIVER | VIRTIO_S_FEATURES_OK);
+        reg_w(
+            base,
+            R_STATUS,
+            VIRTIO_S_ACK | VIRTIO_S_DRIVER | VIRTIO_S_FEATURES_OK,
+        );
         if reg_r(base, R_STATUS) & VIRTIO_S_FEATURES_OK == 0 {
             return Err(Errno::Inval);
         }
     }
     setup_event_queue()?;
-    reg_w(base, R_STATUS, VIRTIO_S_ACK | VIRTIO_S_DRIVER | VIRTIO_S_DRIVER_OK);
+    reg_w(
+        base,
+        R_STATUS,
+        VIRTIO_S_ACK | VIRTIO_S_DRIVER | VIRTIO_S_DRIVER_OK,
+    );
     Ok(())
 }
 
@@ -124,4 +131,4 @@ unsafe fn push(idx: usize) {
 }
 
 pub mod decode;
-pub use decode::{poll, poll_unified, EventType};
+pub use decode::{EventType, poll, poll_unified};

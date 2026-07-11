@@ -39,7 +39,11 @@ unsafe fn is_eoc(v: u32) -> bool {
     v >= FAT32_EOC
 }
 
-unsafe fn read_cluster_sector(cluster: u32, sector_in_cluster: u32, buf: &mut [u8; 512]) -> KResult<()> {
+unsafe fn read_cluster_sector(
+    cluster: u32,
+    sector_in_cluster: u32,
+    buf: &mut [u8; 512],
+) -> KResult<()> {
     let lba = cluster_to_lba(cluster) + sector_in_cluster as u64;
     read_sec(lba, buf)
 }
@@ -98,8 +102,10 @@ unsafe fn scan_dir_entries(
                     let cluster_hi = u16::from_le_bytes([G_SEC[off + 20], G_SEC[off + 21]]);
                     *out_cluster = ((cluster_hi as u32) << 16) | cluster_lo as u32;
                     *out_size = u32::from_le_bytes([
-                        G_SEC[off + 28], G_SEC[off + 29],
-                        G_SEC[off + 30], G_SEC[off + 31],
+                        G_SEC[off + 28],
+                        G_SEC[off + 29],
+                        G_SEC[off + 30],
+                        G_SEC[off + 31],
                     ]);
                     *is_dir = (attr & ATTR_DIRECTORY) != 0;
                     return Ok(());
@@ -171,11 +177,7 @@ pub unsafe fn read(cluster: u32, buf: *mut u8, off: u32, len: u32) -> KResult<u3
                     let sec_off = copy_off % sector_size;
                     let in_sec = sector_size - sec_off;
                     let chunk = remain.min(in_sec);
-                    read_cluster_sector(
-                        cluster,
-                        si,
-                        &mut *(&raw mut G_SEC),
-                    )?;
+                    read_cluster_sector(cluster, si, &mut *(&raw mut G_SEC))?;
                     ptr::copy_nonoverlapping(
                         G_SEC.as_ptr().add(sec_off as usize),
                         copy_to.add(copy_pos as usize),

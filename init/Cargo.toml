@@ -35,3 +35,12 @@ path = "src/hello.rs"
 [[bin]]
 name = "onyx-argv-test"
 path = "src/argv_test.rs"
+
+[[bin]]
+name = "onyx-fb-draw"
+path = "src/fb_draw.rs"
+
+[[bin]]
+name = "onyx-lsblk"
+path = "src/lsblk.rs"
+

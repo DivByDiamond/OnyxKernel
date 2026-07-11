@@ -1,9 +1,12 @@
-pub mod canaan_eth;
+// pub mod canaan_eth; // replaced by gmac
 pub mod cpufreq;
+pub mod display;
 pub mod dma;
+pub mod edid;
 pub mod entropy;
 pub mod fb;
 pub mod fb_term;
+pub mod gmac;
 pub mod gpio;
 pub mod hwrand;
 pub mod i2c;
@@ -27,6 +30,7 @@ pub mod uart;
 pub mod usb;
 pub mod virtio;
 pub mod virtio_console;
+pub mod virtio_gpu;
 pub mod virtio_input;
 pub mod virtio_net;
 pub mod virtio_req;

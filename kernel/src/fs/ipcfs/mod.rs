@@ -34,7 +34,11 @@ pub unsafe fn lookup(name: &[u8]) -> KResult<u32> {
 
 pub unsafe fn stat(ino: u32) -> KResult<IpcfsStat> {
     if ino == IPCFS_ROOT_INO {
-        return Ok(IpcfsStat { ino, size: 0, mode: 0o040755 });
+        return Ok(IpcfsStat {
+            ino,
+            size: 0,
+            mode: 0o040755,
+        });
     }
     if ino < 2 {
         return Err(Errno::NoEnt);

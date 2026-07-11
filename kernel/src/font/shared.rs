@@ -23,8 +23,10 @@ pub(crate) struct UniMapEntry {
 }
 
 pub(crate) static mut G_FONT: Option<PcfFont> = None;
-pub(crate) static mut G_UNI_MAP: [UniMapEntry; UNICODE_MAP_SIZE] =
-    [UniMapEntry { codepoint: 0, glyph_idx: 0 }; UNICODE_MAP_SIZE];
+pub(crate) static mut G_UNI_MAP: [UniMapEntry; UNICODE_MAP_SIZE] = [UniMapEntry {
+    codepoint: 0,
+    glyph_idx: 0,
+}; UNICODE_MAP_SIZE];
 pub(crate) static mut G_UNI_MAP_LEN: usize = 0;
 
 pub(crate) unsafe fn uni_map_insert(cp: u32, idx: u32) {
@@ -50,5 +52,9 @@ pub fn font_width() -> usize {
 }
 
 pub fn font_charsize() -> usize {
-    unsafe { G_FONT.map(|f| f.charsize as usize).unwrap_or(FONT_GLYPH_BYTES) }
+    unsafe {
+        G_FONT
+            .map(|f| f.charsize as usize)
+            .unwrap_or(FONT_GLYPH_BYTES)
+    }
 }

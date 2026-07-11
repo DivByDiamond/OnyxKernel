@@ -24,7 +24,9 @@ struct Channel {
 
 static mut G_BASE: usize = PWM_BASE;
 static mut G_CHANNELS: [Channel; N_CHANNELS] = [Channel {
-    enabled: false, period: 0, duty: 0,
+    enabled: false,
+    period: 0,
+    duty: 0,
 }; N_CHANNELS];
 
 #[inline]
@@ -33,8 +35,7 @@ unsafe fn reg(chan: usize, off: u32) -> usize {
 }
 
 #[inline]
-#[allow(dead_code)]
-unsafe fn rd(chan: usize, off: u32) -> u32 {
+unsafe fn _rd(chan: usize, off: u32) -> u32 {
     Mmio::<u32>::at(reg(chan, off)).read()
 }
 

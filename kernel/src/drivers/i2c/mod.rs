@@ -52,5 +52,6 @@ pub unsafe fn init(base: usize, prescale: u16) {
     wr(R_CONTROL, C_ENABLE);
 }
 
-pub mod xfer;
+pub mod edid;
 pub mod ops;
+pub mod xfer;

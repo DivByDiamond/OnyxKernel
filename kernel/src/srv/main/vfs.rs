@@ -16,6 +16,8 @@ pub(crate) unsafe fn setup(ndevs: usize) {
     crate::kinf!("vfs", "procfs mounted at /proc");
     vfs::mount_ipcfs();
     crate::kinf!("vfs", "ipcfs mounted at /ipc");
+    vfs::mount_devfs();
+    crate::kinf!("vfs", "devfs mounted at /dev");
 }
 
 pub(crate) unsafe fn load_font() {

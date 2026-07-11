@@ -12,6 +12,7 @@
 //! - chmod / fchmod         : permission bits (no-op — OnyxFS has no perms yet)
 //! - waitpid                : wait for a specific PID or any child
 use crate::arch::trap_frame::TrapFrame;
+use crate::fs::devfs;
 use crate::fs::vfs;
 use crate::proc;
 use crate::syscall::abi::{TCGETS, TCSETS, WNOHANG};
@@ -63,7 +64,11 @@ pub unsafe fn sys_getdents64(fd: u64, buf: u64, count: u64) -> i64 {
                 p.add(18).write(0);
                 core::ptr::copy_nonoverlapping(entry_buf.as_ptr(), p.add(19), name_len);
                 if reclen_aligned > reclen {
-                    core::ptr::write_bytes(p.add(19 + name_len as usize), 0, (reclen_aligned - reclen) as usize);
+                    core::ptr::write_bytes(
+                        p.add(19 + name_len as usize),
+                        0,
+                        (reclen_aligned - reclen) as usize,
+                    );
                 }
                 written += reclen_aligned as u64;
                 cursor += 1;
@@ -92,6 +97,18 @@ pub unsafe fn sys_getdents(fd: u64, buf: u64, count: u64) -> i64 {
 ///   - TIOCGWINSZ (0x5413): fill a `struct winsize` (80x24 default).
 ///   - Other: ENOSYS.
 pub unsafe fn sys_ioctl(fd: u64, request: u64, arg: u64) -> i64 {
+    // Check if this is a devfs fd first.
+    let token = fd;
+    if let Ok(idx) = vfs::fd_check(token) {
+        let f = vfs::fd_get(idx);
+        if f.fs == vfs::Fs::Devfs {
+            return match devfs::ioctl(f.ino, request, arg) {
+                Ok(v) => v,
+                Err(e) => e.as_i64(),
+            };
+        }
+    }
+
     match request {
         TCGETS => {
             if arg == 0 { return 0; }
@@ -318,25 +335,33 @@ pub unsafe fn sys_execve(tf: &mut TrapFrame, path: u64, argv: u64, envp: u64) ->
     vfs::close(token).ok();
     let r = match proc::onx::load(img, size as usize) {
         Ok(r) => r,
-        Err(e) => { crate::mm::heap::kfree(img); return e.as_i64(); }
+        Err(e) => {
+            crate::mm::heap::kfree(img);
+            return e.as_i64();
+        }
     };
     crate::mm::heap::kfree(img);
     if cur_ring == proc::PROC_RING_USER && r.ring == 1 {
         return Errno::Perm.as_i64();
     }
     let uid = proc::current().uid as u64;
-    let (argc, argv_sp) = proc::onx::copy_argv_envp_to_stack(
-        r.root_pa, r.ustack, argv, envp, r.entry, uid,
-    );
+    let (argc, argv_sp) =
+        proc::onx::copy_argv_envp_to_stack(r.root_pa, r.ustack, argv, envp, r.entry, uid);
     let p = proc::current();
-    if p.root_pa != 0 { crate::mm::vmm::destroy_root(p.root_pa); }
+    if p.root_pa != 0 {
+        crate::mm::vmm::destroy_root(p.root_pa);
+    }
     p.root_pa = r.root_pa;
     p.entry = r.entry;
     p.ustack = argv_sp;
     p.heap_brk = r.heap_brk;
     // Reset mmap_brk for the new image.
     p.mmap_brk = 0x2000_0000;
-    p.ring = if r.ring == 1 { proc::PROC_RING_ROOT } else { proc::PROC_RING_USER };
+    p.ring = if r.ring == 1 {
+        proc::PROC_RING_ROOT
+    } else {
+        proc::PROC_RING_USER
+    };
     tf.sepc = r.entry.wrapping_sub(4);
     tf.sp = argv_sp;
     tf.a0 = argc as u64;

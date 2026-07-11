@@ -1,5 +1,5 @@
 //! virtio-input event decode — translate raw events to `input::Event`.
-use super::{push, G_IN, N_EVENTS, VirtioInputEvent};
+use super::{G_IN, N_EVENTS, VirtioInputEvent, push};
 use crate::drivers::input::{self, Event, KeyCode, MouseButton};
 use crate::drivers::virtio::R_QUEUE_NOTIFY;
 use core::ptr;
@@ -38,9 +38,7 @@ pub fn poll() -> Option<EventType> {
         G_IN.last_used = used_idx;
         let elem = ptr::read_volatile(ptr::addr_of!((*G_IN.used).ring[slot]));
         let buf_idx = (elem.idx as usize) % N_EVENTS;
-        let ev = ptr::read_volatile(
-            (G_IN.ev_buf as *const VirtioInputEvent).add(buf_idx),
-        );
+        let ev = ptr::read_volatile((G_IN.ev_buf as *const VirtioInputEvent).add(buf_idx));
         // Recycle the descriptor.
         push(buf_idx);
         let base = G_IN.base;
@@ -82,8 +80,8 @@ fn linux_to_keycode(code: u16) -> KeyCode {
         97 => KeyCode::RightCtrl,
         // Letters and digits use the ASCII value directly.
         c if (2..=11).contains(&c) => KeyCode::Digit((c - 1) as u8),
-        c if (16..=25).contains(&c) => KeyCode::Letter((b'q' + (c - 16) as u8)),
-        c if (30..=38).contains(&c) => KeyCode::Letter((b'a' + (c - 30) as u8)),
+        c if (16..=25).contains(&c) => KeyCode::Letter(b'q' + (c - 16) as u8),
+        c if (30..=38).contains(&c) => KeyCode::Letter(b'a' + (c - 30) as u8),
         _ => KeyCode::Unknown,
     }
 }

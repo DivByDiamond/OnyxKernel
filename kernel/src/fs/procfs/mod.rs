@@ -1,10 +1,10 @@
 mod consts;
-mod stat;
 mod content;
 mod dir;
 mod fmt;
+mod stat;
 
 pub use consts::*;
-pub use stat::*;
 pub use content::read;
 pub use dir::*;
+pub use stat::*;

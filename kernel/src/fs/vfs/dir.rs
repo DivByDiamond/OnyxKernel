@@ -1,9 +1,9 @@
 //! Stateful readdir — single active directory cursor (MVP).
-use crate::fs::{ipcfs, onyxfs, procfs};
+use crate::fs::{devfs, ipcfs, onyxfs, procfs};
 use onyx_core::errno::{Errno, KResult};
 
-use super::resolve_mount;
 use super::Fs;
+use super::resolve_mount;
 
 /// readdir: stateful per-process directory listing.
 /// Uses a static cursor (MVP: single active readdir at a time).
@@ -66,6 +66,29 @@ pub unsafe fn readdir(dir_path: &[u8], name_out: *mut u8, name_len: usize) -> KR
                 }
             }
         }
+        Fs::Devfs => {
+            let ino = if subpath.is_empty() || subpath == b"." {
+                devfs::DEVFS_ROOT_INO
+            } else {
+                devfs::lookup(subpath)?
+            };
+            if !G_DIR_ACTIVE || G_DIR_CURSOR_INO != ino || G_DIR_FS != Fs::Devfs {
+                G_DIR_CURSOR_INO = ino;
+                G_DIR_CURSOR_IDX = 0;
+                G_DIR_ACTIVE = true;
+                G_DIR_FS = Fs::Devfs;
+            }
+            match devfs::readdir_entry(G_DIR_CURSOR_IDX, name_out, name_len) {
+                Some(_ino) => {
+                    G_DIR_CURSOR_IDX += 1;
+                    Ok(true)
+                }
+                None => {
+                    G_DIR_ACTIVE = false;
+                    Ok(false)
+                }
+            }
+        }
         _ => {
             let ino = onyxfs::resolve_dir(dir_path)?;
             if !G_DIR_ACTIVE || G_DIR_CURSOR_INO != ino || G_DIR_FS != Fs::Onyx {
@@ -104,6 +127,10 @@ pub unsafe fn readdir_entry_by_ino(
             None => Ok(None),
         },
         Fs::Ipc => match ipcfs::readdir_entry(idx, name_out, name_len) {
+            Some(d_ino) => Ok(Some(d_ino)),
+            None => Ok(None),
+        },
+        Fs::Devfs => match devfs::readdir_entry(idx, name_out, name_len) {
             Some(d_ino) => Ok(Some(d_ino)),
             None => Ok(None),
         },

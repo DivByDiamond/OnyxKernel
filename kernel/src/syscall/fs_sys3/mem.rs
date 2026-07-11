@@ -1,5 +1,6 @@
 //! Memory-management syscalls — `brk`, `mmap`, `munmap`, `mprotect`.
 use crate::arch::regs;
+use crate::fs::vfs::{self, FD_TOKEN_NONE};
 use crate::mm::{pmm, vmm};
 use crate::proc;
 use onyx_core::errno::Errno;
@@ -69,8 +70,11 @@ pub unsafe fn sys_sbrk(incr: i64) -> i64 {
     cur as i64
 }
 
-/// Anonymous mmap. File-backed mappings are not yet supported — the `fd` and
-/// `offset` parameters are accepted for ABI compatibility but ignored.
+/// Anonymous or devfs-backed mmap.
+///
+/// When `fd == FD_TOKEN_NONE` (0xFFFF_FFFF_FFFF_FFFF), allocates anonymous
+/// pages. When `fd` is a valid token to a devfs file (e.g. `/dev/fb0`), maps
+/// the device's physical memory into the caller's address space.
 ///
 /// `prot` bits (matches POSIX low bits):
 ///   bit 0 = PROT_READ, bit 1 = PROT_WRITE, bit 2 = PROT_EXEC.
@@ -79,61 +83,114 @@ pub unsafe fn sys_sbrk(incr: i64) -> i64 {
 ///   bit 0 = MAP_SHARED  (currently treated same as PRIVATE — no COW yet)
 ///   bit 1 = MAP_PRIVATE (default)
 ///   bit 4 = MAP_FIXED   (must map at exactly `addr`)
-pub unsafe fn sys_mmap(addr: u64, length: u64, prot: u64, flags: u64, _fd: u64, _offset: u64) -> i64 {
+pub unsafe fn sys_mmap(
+    addr: u64,
+    length: u64,
+    prot: u64,
+    flags: u64,
+    fd: u64,
+    _offset: u64,
+) -> i64 {
     if length == 0 {
         return Errno::Inval.as_i64();
     }
+
+    // Build page-table flags from prot.
     let prot_r = prot & 1;
     let prot_w = (prot >> 1) & 1;
     let prot_x = (prot >> 2) & 1;
     let mut pte_flags = regs::PTE_U | regs::PTE_A | regs::PTE_D;
-    if prot_r != 0 { pte_flags |= regs::PTE_R; }
-    if prot_w != 0 { pte_flags |= regs::PTE_W; }
-    if prot_x != 0 { pte_flags |= regs::PTE_X; }
-    // POSIX: PROT_NONE is allowed but we always need at least R for the
-    // hardware not to fault on metadata reads; treat as R-only.
+    if prot_r != 0 {
+        pte_flags |= regs::PTE_R;
+    }
+    if prot_w != 0 {
+        pte_flags |= regs::PTE_W;
+    }
+    if prot_x != 0 {
+        pte_flags |= regs::PTE_X;
+    }
     if pte_flags & regs::PTE_R == 0 && pte_flags & regs::PTE_X == 0 {
         pte_flags |= regs::PTE_R;
     }
 
-    // Round size up to a whole number of pages — critical for VMM invariants.
-    let size = page_align_up(length.max(4096)) as usize;
-
-    let map_fixed = (flags & 0x10) != 0;
-    let p = proc::current();
-
-    let vaddr = if addr == 0 {
-        let va = p.mmap_brk;
-        p.mmap_brk = va.wrapping_add(size as u64);
-        va
-    } else {
-        if addr & 0xFFF != 0 {
-            return Errno::Inval.as_i64();
+    // File-backed mmap (devfs).
+    if fd != FD_TOKEN_NONE {
+        let token = fd as vfs::FdToken;
+        let idx = match vfs::fd_check(token) {
+            Ok(i) => i,
+            Err(e) => return e.as_i64(),
+        };
+        let f = vfs::fd_get(idx);
+        if f.fs != vfs::Fs::Devfs {
+            return Errno::NoSys.as_i64();
         }
-        if map_fixed {
-            // Unmap any overlapping pages first to honor MAP_FIXED semantics.
-            let _ = vmm::unmap(p.root_pa, addr, size);
-            addr
-        } else if vmm::translate_user(p.root_pa, addr) != 0 {
-            // Caller hinted at an address that's already in use — fall back to
-            // the bump allocator rather than silently overwriting mappings.
+        let size = page_align_up(length.max(4096)) as usize;
+        let map_fixed = (flags & 0x10) != 0;
+        let p = proc::current();
+
+        let vaddr = if addr == 0 {
             let va = p.mmap_brk;
             p.mmap_brk = va.wrapping_add(size as u64);
             va
         } else {
-            addr
-        }
-    };
+            if addr & 0xFFF != 0 {
+                return Errno::Inval.as_i64();
+            }
+            if map_fixed {
+                let _ = vmm::unmap(p.root_pa, addr, size);
+                addr
+            } else if vmm::translate_user(p.root_pa, addr) != 0 {
+                let va = p.mmap_brk;
+                p.mmap_brk = va.wrapping_add(size as u64);
+                va
+            } else {
+                addr
+            }
+        };
 
-    // mmap region is [0x2000_0000, USER_HEAP_BASE) so it can never collide
-    // with the heap or stack.
-    let mmap_base: u64 = 0x2000_0000;
-    if vaddr < mmap_base || vaddr.wrapping_add(size as u64) > regs::USER_HEAP_BASE {
-        return Errno::NoMem.as_i64();
-    }
-    match vmm::map_anon(p.root_pa, vaddr, size, pte_flags) {
-        Ok(()) => vaddr as i64,
-        Err(e) => e.as_i64(),
+        let mmap_base: u64 = 0x2000_0000;
+        if vaddr < mmap_base || vaddr.wrapping_add(size as u64) > regs::USER_HEAP_BASE {
+            return Errno::NoMem.as_i64();
+        }
+
+        match crate::fs::devfs::mmap(f.ino, vaddr, size as u64, pte_flags) {
+            Ok(va) => va as i64,
+            Err(e) => e.as_i64(),
+        }
+    } else {
+        // Anonymous mmap.
+        let size = page_align_up(length.max(4096)) as usize;
+        let map_fixed = (flags & 0x10) != 0;
+        let p = proc::current();
+
+        let vaddr = if addr == 0 {
+            let va = p.mmap_brk;
+            p.mmap_brk = va.wrapping_add(size as u64);
+            va
+        } else {
+            if addr & 0xFFF != 0 {
+                return Errno::Inval.as_i64();
+            }
+            if map_fixed {
+                let _ = vmm::unmap(p.root_pa, addr, size);
+                addr
+            } else if vmm::translate_user(p.root_pa, addr) != 0 {
+                let va = p.mmap_brk;
+                p.mmap_brk = va.wrapping_add(size as u64);
+                va
+            } else {
+                addr
+            }
+        };
+
+        let mmap_base: u64 = 0x2000_0000;
+        if vaddr < mmap_base || vaddr.wrapping_add(size as u64) > regs::USER_HEAP_BASE {
+            return Errno::NoMem.as_i64();
+        }
+        match vmm::map_anon(p.root_pa, vaddr, size, pte_flags) {
+            Ok(()) => vaddr as i64,
+            Err(e) => e.as_i64(),
+        }
     }
 }
 
@@ -162,9 +219,15 @@ pub unsafe fn sys_mprotect(addr: u64, length: u64, prot: u64) -> i64 {
     let prot_w = (prot >> 1) & 1;
     let prot_x = (prot >> 2) & 1;
     let mut new_flags = regs::PTE_U | regs::PTE_A | regs::PTE_D;
-    if prot_r != 0 { new_flags |= regs::PTE_R; }
-    if prot_w != 0 { new_flags |= regs::PTE_W; }
-    if prot_x != 0 { new_flags |= regs::PTE_X; }
+    if prot_r != 0 {
+        new_flags |= regs::PTE_R;
+    }
+    if prot_w != 0 {
+        new_flags |= regs::PTE_W;
+    }
+    if prot_x != 0 {
+        new_flags |= regs::PTE_X;
+    }
     if new_flags & regs::PTE_R == 0 && new_flags & regs::PTE_X == 0 {
         new_flags |= regs::PTE_R;
     }
@@ -176,13 +239,7 @@ pub unsafe fn sys_mprotect(addr: u64, length: u64, prot: u64) -> i64 {
         if pa != 0 {
             // Remap with new permissions. We trust translate_user returns the
             // backing physical address; flags are derived from `prot` arg.
-            match vmm::map_one_pub(
-                p.root_pa,
-                va,
-                pa,
-                regs::PTE_V | new_flags,
-                0,
-            ) {
+            match vmm::map_one_pub(p.root_pa, va, pa, regs::PTE_V | new_flags, 0) {
                 Ok(()) => {}
                 Err(e) => return e.as_i64(),
             }

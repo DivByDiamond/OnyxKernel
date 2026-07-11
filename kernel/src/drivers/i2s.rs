@@ -93,12 +93,16 @@ pub fn write_samples(samples: &[i16]) -> KResult<()> {
 
 /// Mute the controller (disable TX) without resetting state.
 pub fn mute() {
-    unsafe { wr(R_ITER, 0); }
+    unsafe {
+        wr(R_ITER, 0);
+    }
 }
 
 /// Unmute the controller (re-enable TX).
 pub fn unmute() {
-    unsafe { wr(R_ITER, ITER_EN); }
+    unsafe {
+        wr(R_ITER, ITER_EN);
+    }
 }
 
 /// Current configured sample rate.

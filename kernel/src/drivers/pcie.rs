@@ -24,7 +24,13 @@ pub struct PciDev {
 }
 
 static mut G_DEVS: [PciDev; MAX_RESULTS] = [PciDev {
-    bus: 0, dev: 0, func: 0, vendor: 0, device: 0, class: 0, bar0: 0,
+    bus: 0,
+    dev: 0,
+    func: 0,
+    vendor: 0,
+    device: 0,
+    class: 0,
+    bar0: 0,
 }; MAX_RESULTS];
 static mut G_N: usize = 0;
 
@@ -88,7 +94,9 @@ pub unsafe fn scan() -> usize {
                 let bar0 = read_bar(bus, dev, func, 0);
                 if G_N < MAX_RESULTS {
                     G_DEVS[G_N] = PciDev {
-                        bus, dev, func,
+                        bus,
+                        dev,
+                        func,
                         vendor,
                         device: (v >> 16) as u16,
                         class: class_raw as u16,
