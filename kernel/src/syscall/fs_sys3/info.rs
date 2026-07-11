@@ -17,7 +17,11 @@ pub unsafe fn sys_uname(buf: u64) -> i64 {
     if !user_ptr_ok(buf, 390) {
         return Errno::Inval.as_i64();
     }
-    let out = buf as *mut u8;
+    let pa = crate::mm::vmm::translate(proc::current().root_pa, buf);
+    if pa == 0 {
+        return Errno::Inval.as_i64();
+    }
+    let out = pa as *mut u8;
     let sysname = b"Onyx\0";
     let nodename = b"onyx\0";
     let release = b"0.4.0\0";

@@ -1,5 +1,5 @@
 //! File creation — `create` (regular file) and `mkdir` (directory).
-use super::{FdToken, Fs, PERM_READ, PERM_SEEK, PERM_WRITE, alloc_fd, fd_token, resolve_mount};
+use super::{alloc_fd, fd_token, resolve_mount, FdToken, Fs, PERM_READ, PERM_SEEK, PERM_WRITE};
 use crate::fs::onyxfs;
 use crate::proc;
 use onyx_core::errno::{Errno, KResult};
@@ -44,12 +44,8 @@ pub unsafe fn create(path: &[u8], mode: u32) -> KResult<FdToken> {
     };
     let new_ino = onyxfs::create(parent_ino, filename, mode)?;
     let idx = alloc_fd(PERM_READ | PERM_WRITE | PERM_SEEK)?;
-    let p = proc::current();
-    let fd = &mut p.fds[idx];
-    fd.ino = new_ino;
-    fd.size = 0;
-    fd.fs = Fs::Onyx;
-    fd.pos = 0;
+    super::fd_set(idx, new_ino, 0, Fs::Onyx, 0);
+    let fd = super::fd_get(idx);
     Ok(fd_token(idx, fd.epoch))
 }
 
