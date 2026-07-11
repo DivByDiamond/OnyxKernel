@@ -1,8 +1,19 @@
 //! Heap allocator (kmalloc/kfree) with SLAB integration.
 use crate::mm::pmm;
+use core::sync::atomic::{AtomicBool, Ordering};
 use onyx_core::errno::{Errno, KResult};
 pub const HEAP_SIZE: usize = 4 * 1024 * 1024;
 pub const MIN_BLOCK: usize = 16;
+
+static HEAP_LOCK: AtomicBool = AtomicBool::new(false);
+
+fn lock_heap() {
+    while HEAP_LOCK.swap(true, Ordering::Acquire) {}
+}
+
+fn unlock_heap() {
+    HEAP_LOCK.store(false, Ordering::Release);
+}
 
 #[repr(C)]
 struct Block {
@@ -52,6 +63,13 @@ pub unsafe fn kmalloc(size: usize) -> KResult<*mut u8> {
     if size == 0 {
         return Err(Errno::Inval);
     }
+    lock_heap();
+    let res = kmalloc_locked(size);
+    unlock_heap();
+    res
+}
+
+unsafe fn kmalloc_locked(size: usize) -> KResult<*mut u8> {
     if let Some(p) = pmm::slab_alloc(size) {
         (*&raw mut G_HEAP).used += size;
         return Ok(p);
@@ -89,11 +107,18 @@ pub unsafe fn kfree(p: *mut u8) {
     if p.is_null() {
         return;
     }
+    lock_heap();
+    kfree_locked(p);
+    unlock_heap();
+}
+
+unsafe fn kfree_locked(p: *mut u8) {
     if pmm::slab_free(p) {
         return;
     }
     let blk_addr = p as usize - Block::hdr_size();
     let blk = blk_addr as *mut Block;
+    (*&raw mut G_HEAP).used -= (*blk).size;
     (*blk).free = true;
     if !(*blk).next.is_null() && (*(*blk).next).free {
         let next = (*blk).next;

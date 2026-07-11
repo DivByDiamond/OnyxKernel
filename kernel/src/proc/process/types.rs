@@ -49,6 +49,11 @@ pub struct Proc {
     /// True if a signal handler is currently executing for this process.
     pub in_signal_handler: bool,
     pub fds: [crate::fs::vfs::VfsFd; PROC_MAX_FDS],
+    pub readdir_ino: u32,
+    pub readdir_idx: u32,
+    pub readdir_active: bool,
+    pub readdir_fs: crate::fs::vfs::Fs,
+    pub root_refcount: *mut u32,
     pub all_next: *mut Proc,
     pub next: *mut Proc,
     pub wait_next: *mut Proc,
@@ -89,12 +94,18 @@ impl Proc {
                 used: false,
                 perms: 0,
                 epoch: 0,
+                cloexec: false,
             }; PROC_MAX_FDS],
+            root_refcount: ptr::null_mut(),
             all_next: ptr::null_mut(),
             next: ptr::null_mut(),
             wait_next: ptr::null_mut(),
             affinity: -1,
             on_rq: false,
+            readdir_ino: 0,
+            readdir_idx: 0,
+            readdir_active: false,
+            readdir_fs: crate::fs::vfs::Fs::None,
         }
     }
 }

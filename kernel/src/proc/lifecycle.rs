@@ -1,7 +1,7 @@
 //! Process lifecycle — allocation, freeing, `enter_user`, `exit`, and `count`.
 use super::process::Proc;
 use super::process::{
-    G_ALL_PROCS, PROC_RING_KERNEL, ProcState, by_pid, hart_id, set_current_for_hart,
+    by_pid, hart_id, set_current_for_hart, ProcState, G_ALL_PROCS, PROC_RING_KERNEL,
 };
 use crate::arch::trap_frame::TrapFrame;
 use crate::mm::{heap, vmm};
@@ -102,7 +102,19 @@ pub unsafe fn exit(pid: u32, code: i32) {
                 let _ = crate::fs::vfs::close(token);
             }
         }
-        vmm::destroy_root(p.root_pa);
+        if p.root_pa != 0 {
+            if !p.root_refcount.is_null() {
+                *p.root_refcount -= 1;
+                if *p.root_refcount == 0 {
+                    heap::kfree(p.root_refcount as *mut u8);
+                    vmm::destroy_root(p.root_pa);
+                }
+            } else {
+                vmm::destroy_root(p.root_pa);
+            }
+            p.root_pa = 0;
+            p.root_refcount = ptr::null_mut();
+        }
         p.exit_code = code;
         p.state = ProcState::Exited;
         // If parent is waiting, wake it up.

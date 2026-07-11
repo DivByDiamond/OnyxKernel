@@ -2,12 +2,13 @@
 //! (the VFS layer maintains the cursor). Uses `parse_dirent` from `lookup.rs`.
 use super::inode::read_inode;
 use super::lookup::parse_dirent;
-use super::{G_BUF, dirents_per_block, read_block};
+use super::{dirents_per_block, read_block, G_BUF};
 use onyx_core::errno::{Errno, KResult};
-use onyx_core::formats::{ONYFS_DIRECT_BLKS, ONYFS_DT_DIR, ONYFS_NAME_MAX, OnyfsInode};
+use onyx_core::formats::{OnyfsInode, ONYFS_DIRECT_BLKS, ONYFS_DT_DIR, ONYFS_NAME_MAX};
 
 /// Read a directory entry by index. Returns (inode, name_len, is_dir).
-/// Used by SYS_readdir.
+/// Used by SYS_readdir and getdents64.
+/// Scans across all direct blocks, skipping zero-inode (deleted/unused) entries.
 pub unsafe fn readdir_entry(
     dir_ino: u32,
     entry_idx: u32,
@@ -31,41 +32,55 @@ pub unsafe fn readdir_entry(
         reserved: 0,
     };
     read_inode(dir_ino, &mut inode)?;
-    // Check it's a directory.
     if inode.mode & 0o170000 != ONYFS_DT_DIR & 0o170000 {
         return Err(Errno::NotDir);
     }
-    let dir_blk = inode.blocks[0];
-    if dir_blk == 0 {
-        return Ok(None);
-    }
-    {
-        let pb = &raw mut G_BUF;
-        read_block(dir_blk, &mut *pb)
-    }?;
     let dpb = dirents_per_block();
-    if (entry_idx as usize) >= dpb {
-        return Ok(None);
+    let max_entries = dpb * ONYFS_DIRECT_BLKS;
+    let mut last_block_idx = usize::MAX;
+
+    for abs_idx in entry_idx as usize..max_entries {
+        let block_idx = abs_idx / dpb;
+        let slot_idx = abs_idx % dpb;
+
+        if block_idx >= ONYFS_DIRECT_BLKS {
+            return Ok(None);
+        }
+
+        let dir_blk = inode.blocks[block_idx];
+        if dir_blk == 0 {
+            return Ok(None);
+        }
+
+        if block_idx != last_block_idx {
+            let pb = &raw mut G_BUF;
+            read_block(dir_blk, &mut *pb)?;
+            last_block_idx = block_idx;
+        }
+
+        let d = parse_dirent(slot_idx)?;
+
+        if d.inode == 0 {
+            continue;
+        }
+
+        let nl = if d.name_len > 0 && (d.name_len as usize) <= ONYFS_NAME_MAX {
+            d.name_len as usize
+        } else {
+            d.name
+                .iter()
+                .position(|&b| b == 0)
+                .unwrap_or(ONYFS_NAME_MAX)
+        };
+        let copy_n = nl.min(name_len.saturating_sub(1));
+        for i in 0..copy_n {
+            *name_out.add(i) = d.name[i];
+        }
+        if copy_n < name_len {
+            *name_out.add(copy_n) = 0;
+        }
+        return Ok(Some(d.inode));
     }
-    let d = parse_dirent(entry_idx as usize)?;
-    if d.inode == 0 {
-        return Ok(None);
-    }
-    // Copy name (NUL-terminated) to caller's buffer.
-    let nl = if d.name_len > 0 && (d.name_len as usize) <= ONYFS_NAME_MAX {
-        d.name_len as usize
-    } else {
-        d.name
-            .iter()
-            .position(|&b| b == 0)
-            .unwrap_or(ONYFS_NAME_MAX)
-    };
-    let copy_n = nl.min(name_len.saturating_sub(1));
-    for i in 0..copy_n {
-        *name_out.add(i) = d.name[i];
-    }
-    if copy_n < name_len {
-        *name_out.add(copy_n) = 0;
-    }
-    Ok(Some(d.inode))
+
+    Ok(None)
 }

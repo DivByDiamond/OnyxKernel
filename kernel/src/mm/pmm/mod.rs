@@ -80,6 +80,15 @@ pub fn total_pages() -> usize {
     unsafe { (*(&raw const G_PMM)).total_pages }
 }
 
+pub fn is_managed(paddr: u64) -> bool {
+    unsafe {
+        let p = &raw const G_PMM;
+        let pa = paddr as usize;
+        let end = (*p).base + (*p).total_pages * PAGE_SIZE;
+        pa >= (*p).base && pa < end
+    }
+}
+
 pub mod bitmap;
 pub mod slab;
 

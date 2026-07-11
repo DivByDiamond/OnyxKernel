@@ -3,7 +3,7 @@ use core::sync::atomic::Ordering;
 use onyx_core::errno::{Errno, KResult};
 
 use super::lifecycle::exit;
-use super::process::{G_NEED_RESCHED, Proc, ProcState, by_pid, current_for_hart, hart_id};
+use super::process::{by_pid, current_for_hart, hart_id, Proc, ProcState, G_NEED_RESCHED};
 use crate::proc::scheduler::enqueue;
 
 /// Signal number for KILL (POSIX SIGKILL = 9). Always honored, never blocked.
@@ -36,7 +36,7 @@ pub unsafe fn sigaction(signum: u32, act_ptr: u64, oldact_ptr: u64) -> KResult<(
 
     // Write old action if requested.
     if oldact_ptr != 0 {
-        let old_pa = crate::mm::vmm::translate(user_root, oldact_ptr);
+        let old_pa = crate::mm::vmm::translate_user_write(user_root, oldact_ptr);
         if old_pa != 0 {
             let dst = old_pa as *mut u64;
             *dst = p.signal_handlers[signum as usize];
@@ -48,7 +48,7 @@ pub unsafe fn sigaction(signum: u32, act_ptr: u64, oldact_ptr: u64) -> KResult<(
 
     // Read new action if requested.
     if act_ptr != 0 {
-        let new_pa = crate::mm::vmm::translate(user_root, act_ptr);
+        let new_pa = crate::mm::vmm::translate_user(user_root, act_ptr);
         if new_pa == 0 {
             return Err(Errno::Inval);
         }
@@ -73,14 +73,14 @@ pub unsafe fn sigprocmask(how: u32, set_ptr: u64, oldset_ptr: u64) -> KResult<()
 
     // Save old mask.
     if oldset_ptr != 0 {
-        let old_pa = crate::mm::vmm::translate(user_root, oldset_ptr);
+        let old_pa = crate::mm::vmm::translate_user_write(user_root, oldset_ptr);
         if old_pa != 0 {
             *(old_pa as *mut u64) = p.signal_mask as u64;
         }
     }
 
     if set_ptr != 0 {
-        let set_pa = crate::mm::vmm::translate(user_root, set_ptr);
+        let set_pa = crate::mm::vmm::translate_user(user_root, set_ptr);
         if set_pa == 0 {
             return Err(Errno::Inval);
         }

@@ -59,7 +59,7 @@ unsafe fn free_subtree(table: *mut u64, level: u32) {
         let is_leaf = pte & PTE_LEAF != 0;
         let child_pa = (pte & PTE_PPN_MASK) >> PTE_PPN_SHIFT << 12;
         if is_leaf {
-            if pte & PTE_U != 0 {
+            if pte & PTE_U != 0 && pmm::is_managed(child_pa) {
                 pmm::free(child_pa);
             }
         } else if level > 0 {
@@ -112,6 +112,39 @@ pub unsafe fn translate_user(root_pa: u64, vaddr: u64) -> u64 {
         }
         if pte & PTE_LEAF != 0 {
             if pte & PTE_U == 0 {
+                return 0;
+            }
+            let leaf_ppn = (pte & PTE_PPN_MASK) >> PTE_PPN_SHIFT;
+            let off = match level {
+                2 => vaddr & ((1u64 << 30) - 1),
+                1 => vaddr & ((1u64 << 21) - 1),
+                0 => vaddr & ((1u64 << 12) - 1),
+                _ => return 0,
+            };
+            return (leaf_ppn << 12) + off;
+        }
+        pa = (pte & PTE_PPN_MASK) >> PTE_PPN_SHIFT << 12;
+    }
+    0
+}
+
+/// Like `translate_user` but also requires `PTE_W` (writable).  Returns 0 if
+/// the page is not both user-accessible and writable.
+pub unsafe fn translate_user_write(root_pa: u64, vaddr: u64) -> u64 {
+    let mut pa = root_pa;
+    for level in (0..=2).rev() {
+        let idx = match level {
+            2 => sv39_l2_idx(vaddr),
+            1 => sv39_l1_idx(vaddr),
+            0 => sv39_l0_idx(vaddr),
+            _ => return 0,
+        };
+        let pte = ptr::read_volatile((pa as usize + idx * 8) as *const u64);
+        if pte & PTE_V == 0 {
+            return 0;
+        }
+        if pte & PTE_LEAF != 0 {
+            if pte & (PTE_U | PTE_W) != (PTE_U | PTE_W) {
                 return 0;
             }
             let leaf_ppn = (pte & PTE_PPN_MASK) >> PTE_PPN_SHIFT;

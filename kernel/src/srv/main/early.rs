@@ -35,6 +35,8 @@ pub(crate) unsafe fn early_init(fdt_addr: usize) {
     heap::init();
     crate::kinf!("heap", "ready");
 
+    crate::proc::scheduler::runqueue::init();
+
     trap::init();
     timer::init();
 

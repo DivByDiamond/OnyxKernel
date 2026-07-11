@@ -4,10 +4,12 @@ use crate::proc;
 use super::super::handler::{parse_user_path, user_ptr_ok};
 
 pub unsafe fn sys_chdir(path: u64) -> i64 {
-    let path_bytes = match parse_user_path(path) {
-        Some(s) => s,
+    let mut path_buf = [0u8; 256];
+    let path_len = match parse_user_path(path, &mut path_buf) {
+        Some(l) => l,
         None => return onyx_core::errno::Errno::Inval.as_i64(),
     };
+    let path_bytes = &path_buf[..path_len];
     match onyxfs::resolve_dir(path_bytes) {
         Ok(_ino) => {
             proc::set_cwd(path_bytes);

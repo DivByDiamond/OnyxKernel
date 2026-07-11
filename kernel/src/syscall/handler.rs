@@ -20,9 +20,9 @@ pub(super) fn user_ptr_ok(p: u64, len: u64) -> bool {
 }
 
 /// Validate `path` is a readable user pointer, then parse it as a NUL-terminated
-/// C string (capped at 256 bytes) into a `&[u8]` slice. Returns `None` if the
-/// pointer is invalid (caller should return `Errno::Inval`).
-pub(super) unsafe fn parse_user_path(path: u64) -> Option<&'static [u8]> {
+/// C string (capped at 256 bytes), copying the result into `out`. Returns
+/// `Some(length)` on success, `None` if the pointer is invalid.
+pub(super) unsafe fn parse_user_path(path: u64, out: &mut [u8; 256]) -> Option<usize> {
     if !user_ptr_ok(path, 1) {
         return None;
     }
@@ -31,7 +31,8 @@ pub(super) unsafe fn parse_user_path(path: u64) -> Option<&'static [u8]> {
     while *p.add(len) != 0 && len < 256 {
         len += 1;
     }
-    Some(core::slice::from_raw_parts(p, len))
+    core::ptr::copy_nonoverlapping(p, out.as_mut_ptr(), len);
+    Some(len)
 }
 
 /// ACL: check if current process ring can call this syscall.

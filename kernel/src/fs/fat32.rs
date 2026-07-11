@@ -15,8 +15,6 @@ static mut G_RESVD: u32 = 0;
 static mut G_FAT_SZ: u32 = 0;
 static mut G_ROOT_CLUSTER: u32 = 0;
 static mut G_DATA_LBA: u32 = 0;
-static mut G_SEC: [u8; 512] = [0; 512];
-
 unsafe fn read_sec(lba: u64, buf: &mut [u8; 512]) -> KResult<()> {
     virtio_req::read(G_DEV, lba, buf.as_mut_ptr())
 }
@@ -25,14 +23,14 @@ unsafe fn cluster_to_lba(cluster: u32) -> u64 {
     (G_DATA_LBA as u64) + ((cluster - 2) as u64) * (G_SPC as u64)
 }
 
-unsafe fn fat_entry(cluster: u32) -> u32 {
+unsafe fn fat_entry(cluster: u32, buf: &mut [u8; 512]) -> u32 {
     let fat_off = cluster as u64 * 4;
     let fat_lba = G_RESVD as u64 + fat_off / 512;
-    if read_sec(fat_lba, &mut G_SEC).is_err() {
+    if read_sec(fat_lba, buf).is_err() {
         return FAT32_EOC;
     }
     let off = (fat_off % 512) as usize;
-    u32::from_le_bytes([G_SEC[off], G_SEC[off + 1], G_SEC[off + 2], G_SEC[off + 3]]) & 0x0FFF_FFFF
+    u32::from_le_bytes([buf[off], buf[off + 1], buf[off + 2], buf[off + 3]]) & 0x0FFF_FFFF
 }
 
 unsafe fn is_eoc(v: u32) -> bool {
@@ -75,6 +73,7 @@ unsafe fn scan_dir_entries(
     out_cluster: &mut u32,
     out_size: &mut u32,
     is_dir: &mut bool,
+    buf: &mut [u8; 512],
 ) -> KResult<()> {
     let mut cluster = dir_cluster;
     if cluster == 0 {
@@ -82,37 +81,37 @@ unsafe fn scan_dir_entries(
     }
     loop {
         for si in 0..G_SPC {
-            read_cluster_sector(cluster, si, &mut G_SEC)?;
+            read_cluster_sector(cluster, si, buf)?;
             for ei in 0..ENTRIES_PER_SECTOR {
                 let off = ei * DIR_ENTRY_SIZE;
-                let attr = G_SEC[off + 11];
+                let attr = buf[off + 11];
                 if attr == ATTR_LFN {
                     continue;
                 }
-                if G_SEC[off] == 0 {
+                if buf[off] == 0 {
                     return Err(Errno::NoEnt);
                 }
-                if G_SEC[off] == 0xE5 {
+                if buf[off] == 0xE5 {
                     continue;
                 }
                 let mut entry = [0u8; 11];
-                entry.copy_from_slice(&G_SEC[off..off + 11]);
+                entry.copy_from_slice(&buf[off..off + 11]);
                 if &entry == needle {
-                    let cluster_lo = u16::from_le_bytes([G_SEC[off + 26], G_SEC[off + 27]]);
-                    let cluster_hi = u16::from_le_bytes([G_SEC[off + 20], G_SEC[off + 21]]);
+                    let cluster_lo = u16::from_le_bytes([buf[off + 26], buf[off + 27]]);
+                    let cluster_hi = u16::from_le_bytes([buf[off + 20], buf[off + 21]]);
                     *out_cluster = ((cluster_hi as u32) << 16) | cluster_lo as u32;
                     *out_size = u32::from_le_bytes([
-                        G_SEC[off + 28],
-                        G_SEC[off + 29],
-                        G_SEC[off + 30],
-                        G_SEC[off + 31],
+                        buf[off + 28],
+                        buf[off + 29],
+                        buf[off + 30],
+                        buf[off + 31],
                     ]);
                     *is_dir = (attr & ATTR_DIRECTORY) != 0;
                     return Ok(());
                 }
             }
         }
-        let next = fat_entry(cluster);
+        let next = fat_entry(cluster, buf);
         if is_eoc(next) {
             return Err(Errno::NoEnt);
         }
@@ -145,7 +144,15 @@ pub unsafe fn mount(dev: usize) -> KResult<()> {
 pub unsafe fn lookup(path: &[u8], out_cluster: &mut u32, out_size: &mut u32) -> KResult<()> {
     let needle = fat32_name_8_3(path);
     let mut is_dir = false;
-    scan_dir_entries(G_ROOT_CLUSTER, &needle, out_cluster, out_size, &mut is_dir)
+    let mut buf = [0u8; 512];
+    scan_dir_entries(
+        G_ROOT_CLUSTER,
+        &needle,
+        out_cluster,
+        out_size,
+        &mut is_dir,
+        &mut buf,
+    )
 }
 
 pub unsafe fn read(cluster: u32, buf: *mut u8, off: u32, len: u32) -> KResult<u32> {
@@ -157,6 +164,7 @@ pub unsafe fn read(cluster: u32, buf: *mut u8, off: u32, len: u32) -> KResult<u3
     let start_byte = off as u64;
     let end_byte = (off as u64 + len as u64).min(u32::MAX as u64);
 
+    let mut sec_buf = [0u8; 512];
     let mut cluster = cluster;
     let mut skipped = 0u64;
     loop {
@@ -177,9 +185,9 @@ pub unsafe fn read(cluster: u32, buf: *mut u8, off: u32, len: u32) -> KResult<u3
                     let sec_off = copy_off % sector_size;
                     let in_sec = sector_size - sec_off;
                     let chunk = remain.min(in_sec);
-                    read_cluster_sector(cluster, si, &mut *(&raw mut G_SEC))?;
+                    read_cluster_sector(cluster, si, &mut sec_buf)?;
                     ptr::copy_nonoverlapping(
-                        G_SEC.as_ptr().add(sec_off as usize),
+                        sec_buf.as_ptr().add(sec_off as usize),
                         copy_to.add(copy_pos as usize),
                         chunk as usize,
                     );
@@ -192,7 +200,7 @@ pub unsafe fn read(cluster: u32, buf: *mut u8, off: u32, len: u32) -> KResult<u3
             }
         }
         skipped += csize;
-        let next = fat_entry(cluster);
+        let next = fat_entry(cluster, &mut sec_buf);
         if is_eoc(next) {
             return Ok((end_byte - start_byte) as u32);
         }

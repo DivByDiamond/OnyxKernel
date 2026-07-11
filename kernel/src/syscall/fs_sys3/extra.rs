@@ -203,7 +203,11 @@ pub unsafe fn sys_fsync(fd: u64) -> i64 {
 /// OnyxFS does not yet support symlinks. We return EINVAL (POSIX "not a
 /// symlink" / "not implemented" indicator) for any path.
 pub unsafe fn sys_readlink(path: u64, buf: u64, bufsiz: u64) -> i64 {
-    let _ = (parse_user_path(path), user_ptr_ok(buf, bufsiz));
+    let mut _path_buf = [0u8; 256];
+    let _ = (
+        parse_user_path(path, &mut _path_buf),
+        user_ptr_ok(buf, bufsiz),
+    );
     Errno::Inval.as_i64()
 }
 
@@ -218,7 +222,8 @@ pub unsafe fn sys_symlink(_target: u64, _linkpath: u64) -> i64 {
 /// chmod(path, mode) — change file mode bits. OnyxFS does not yet enforce
 /// permissions, so we accept and ignore the mode. Returns 0.
 pub unsafe fn sys_chmod(path: u64, _mode: u64) -> i64 {
-    let _ = parse_user_path(path);
+    let mut _path_buf = [0u8; 256];
+    let _ = parse_user_path(path, &mut _path_buf);
     0
 }
 
@@ -316,10 +321,12 @@ pub unsafe fn sys_waitpid(tf: &mut TrapFrame, pid: u64, status_out: u64, options
 /// Same as SYS_exec, but also passes `envp` to the new program so libc's
 /// `getenv()` works. We use the new `copy_argv_envp_to_stack` helper.
 pub unsafe fn sys_execve(tf: &mut TrapFrame, path: u64, argv: u64, envp: u64) -> i64 {
-    let path_bytes = match parse_user_path(path) {
-        Some(s) => s,
+    let mut path_buf = [0u8; 256];
+    let path_len = match parse_user_path(path, &mut path_buf) {
+        Some(l) => l,
         None => return Errno::Inval.as_i64(),
     };
+    let path_bytes = &path_buf[..path_len];
     let cur_ring = proc::current_ring();
     let token = match vfs::open(path_bytes, vfs::PERM_READ | vfs::PERM_SEEK) {
         Ok(t) => t,
@@ -348,10 +355,37 @@ pub unsafe fn sys_execve(tf: &mut TrapFrame, path: u64, argv: u64, envp: u64) ->
     let (argc, argv_sp) =
         proc::onx::copy_argv_envp_to_stack(r.root_pa, r.ustack, argv, envp, r.entry, uid);
     let p = proc::current();
+
+    // Close FD_CLOEXEC file descriptors before replacing the process image.
+    for i in 0..p.fds.len() {
+        if p.fds[i].used && p.fds[i].cloexec {
+            let token = crate::fs::vfs::fd_token(i, p.fds[i].epoch);
+            let _ = crate::fs::vfs::close(token);
+        }
+    }
+
+    // Release the old root page table — decrement refcount, free only when 0.
     if p.root_pa != 0 {
-        crate::mm::vmm::destroy_root(p.root_pa);
+        if !p.root_refcount.is_null() {
+            *p.root_refcount -= 1;
+            if *p.root_refcount == 0 {
+                crate::mm::heap::kfree(p.root_refcount as *mut u8);
+                crate::mm::vmm::destroy_root(p.root_pa);
+            }
+        } else {
+            crate::mm::vmm::destroy_root(p.root_pa);
+        }
     }
     p.root_pa = r.root_pa;
+    // Allocate a fresh refcount for the new root page table.
+    match crate::mm::heap::kmalloc(4) {
+        Ok(rc) => {
+            let rcp = rc as *mut u32;
+            *rcp = 1;
+            p.root_refcount = rcp;
+        }
+        Err(e) => return e.as_i64(),
+    }
     p.entry = r.entry;
     p.ustack = argv_sp;
     p.heap_brk = r.heap_brk;
@@ -393,7 +427,23 @@ pub unsafe fn sys_fork(tf: &mut TrapFrame) -> i64 {
     // 0 from the ecall, the parent will return the child PID.
     let mut child_tf = *tf;
     child_tf.a0 = 0; // child sees fork() == 0
-    // The parent will receive the child PID via the return value of handle().
+                     // The parent will receive the child PID via the return value of handle().
+
+    // Ensure parent has a refcount for root_pa, then increment for the child.
+    let refcount = if parent.root_refcount.is_null() {
+        match crate::mm::heap::kmalloc(4) {
+            Ok(p) => {
+                let rc = p as *mut u32;
+                *rc = 1;
+                parent.root_refcount = rc;
+                rc
+            }
+            Err(e) => return e.as_i64(),
+        }
+    } else {
+        parent.root_refcount
+    };
+    *refcount += 1;
 
     // Create the child process. We give it the parent's root_pa — they
     // share the address space (vfork semantics). The first exec/exit by
@@ -409,6 +459,7 @@ pub unsafe fn sys_fork(tf: &mut TrapFrame) -> i64 {
         ring,
         0, // argc for child — TODO: pass parent's argc/argv
         parent.ustack,
+        refcount,
     );
     match result {
         Ok(()) => {
@@ -418,7 +469,11 @@ pub unsafe fn sys_fork(tf: &mut TrapFrame) -> i64 {
             (*child).tf = child_tf;
             new_pid as i64 // parent sees the child PID
         }
-        Err(e) => e.as_i64(),
+        Err(e) => {
+            // Roll back the refcount increment — child creation failed.
+            *refcount -= 1;
+            e.as_i64()
+        }
     }
 }
 

@@ -1,6 +1,6 @@
 use onyx_core::errno::{Errno, KResult};
 
-use super::vnode::{Fs, VFS_MAX_FDS, VfsFd, fd_token_epoch, fd_token_idx};
+use super::vnode::{fd_token_epoch, fd_token_idx, Fs, VfsFd, VFS_MAX_FDS};
 
 pub(crate) unsafe fn is_kernel_boot() -> bool {
     crate::proc::current_pid() == 0
@@ -14,6 +14,7 @@ pub(crate) static mut G_KERNEL_FDS: [VfsFd; VFS_MAX_FDS] = [VfsFd {
     used: false,
     perms: 0,
     epoch: 0,
+    cloexec: false,
 }; VFS_MAX_FDS];
 
 pub unsafe fn init() {}
@@ -63,6 +64,16 @@ pub(crate) unsafe fn fd_check(token: super::vnode::FdToken) -> KResult<usize> {
         return Err(Errno::BadFd);
     }
     Ok(idx)
+}
+
+pub(crate) unsafe fn fd_set_cloexec(idx: usize, cloexec: bool) {
+    if is_kernel_boot() {
+        let p = &raw mut G_KERNEL_FDS;
+        (*p)[idx].cloexec = cloexec;
+    } else {
+        let p = crate::proc::current();
+        p.fds[idx].cloexec = cloexec;
+    }
 }
 
 pub(crate) unsafe fn fd_check_perm(token: super::vnode::FdToken, perm: u32) -> KResult<usize> {

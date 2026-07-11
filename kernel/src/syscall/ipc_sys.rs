@@ -24,10 +24,12 @@ pub(super) unsafe fn sys_chan_create() -> i64 {
 /// SYS_chan_create_named(name_ptr): create a named channel. `name_ptr` is a
 /// NUL-terminated user-space string. Root-only via ACL.
 pub(super) unsafe fn sys_chan_create_named(name_ptr: u64) -> i64 {
-    let name = match parse_user_path(name_ptr) {
-        Some(n) => n,
+    let mut name_buf = [0u8; 256];
+    let name_len = match parse_user_path(name_ptr, &mut name_buf) {
+        Some(l) => l,
         None => return Errno::Inval.as_i64(),
     };
+    let name = &name_buf[..name_len];
     let pid = proc::current_pid();
     match ipc::create_named(name, pid) {
         Ok(id) => id as i64,
@@ -38,10 +40,12 @@ pub(super) unsafe fn sys_chan_create_named(name_ptr: u64) -> i64 {
 /// SYS_chan_open(name_ptr): open a named channel. `name_ptr` is a NUL-terminated
 /// user-space string. Returns the channel ID. Available to all rings.
 pub(super) unsafe fn sys_chan_open(name_ptr: u64) -> i64 {
-    let name = match parse_user_path(name_ptr) {
-        Some(n) => n,
+    let mut name_buf = [0u8; 256];
+    let name_len = match parse_user_path(name_ptr, &mut name_buf) {
+        Some(l) => l,
         None => return Errno::Inval.as_i64(),
     };
+    let name = &name_buf[..name_len];
     let pid = proc::current_pid();
     match ipc::open_by_name(name, pid) {
         Ok(id) => id as i64,

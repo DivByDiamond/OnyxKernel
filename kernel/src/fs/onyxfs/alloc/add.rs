@@ -1,13 +1,13 @@
 use super::super::inode;
 use super::super::journal::journal_log;
 use super::super::{
-    G_BUF, G_SB, G_VERSION, ONYFS_V1, ONYFS_V1_DIRENT_SIZE, dirents_per_block, read_block,
-    write_block,
+    dirents_per_block, read_block, write_block, G_BUF, G_SB, G_VERSION, ONYFS_V1,
+    ONYFS_V1_DIRENT_SIZE,
 };
 use super::bitmap::alloc_data_block;
 use onyx_core::errno::{Errno, KResult};
 use onyx_core::formats::{
-    ONYFS_BLOCK_SIZE, ONYFS_DIRECT_BLKS, ONYFS_NAME_MAX, OnyfsDirent, OnyfsInode,
+    OnyfsDirent, OnyfsInode, ONYFS_BLOCK_SIZE, ONYFS_DIRECT_BLKS, ONYFS_NAME_MAX,
 };
 
 pub unsafe fn add_dirent(dir_ino: u32, name: &[u8], target_ino: u32, dtype: u8) -> KResult<()> {

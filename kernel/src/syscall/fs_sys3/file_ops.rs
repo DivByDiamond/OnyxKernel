@@ -25,10 +25,12 @@ pub unsafe fn sys_pipe(pipefd: u64) -> i64 {
 }
 
 pub unsafe fn sys_unlink(path: u64) -> i64 {
-    let path_bytes = match parse_user_path(path) {
-        Some(s) => s,
+    let mut path_buf = [0u8; 256];
+    let path_len = match parse_user_path(path, &mut path_buf) {
+        Some(l) => l,
         None => return Errno::Inval.as_i64(),
     };
+    let path_bytes = &path_buf[..path_len];
     match vfs::unlink(path_bytes) {
         Ok(()) => 0,
         Err(e) => e.as_i64(),
@@ -36,14 +38,18 @@ pub unsafe fn sys_unlink(path: u64) -> i64 {
 }
 
 pub unsafe fn sys_rename(old_path: u64, new_path: u64) -> i64 {
-    let old = match parse_user_path(old_path) {
-        Some(s) => s,
+    let mut old_buf = [0u8; 256];
+    let old_len = match parse_user_path(old_path, &mut old_buf) {
+        Some(l) => l,
         None => return Errno::Inval.as_i64(),
     };
-    let new = match parse_user_path(new_path) {
-        Some(s) => s,
+    let old = &old_buf[..old_len];
+    let mut new_buf = [0u8; 256];
+    let new_len = match parse_user_path(new_path, &mut new_buf) {
+        Some(l) => l,
         None => return Errno::Inval.as_i64(),
     };
+    let new = &new_buf[..new_len];
     match vfs::rename(old, new) {
         Ok(()) => 0,
         Err(e) => e.as_i64(),
@@ -54,10 +60,12 @@ pub unsafe fn sys_rename(old_path: u64, new_path: u64) -> i64 {
 /// backwards compatibility with old binaries. New code should use
 /// `SYS_truncate2` (syscall 71) which takes an explicit length.
 pub unsafe fn sys_truncate(path: u64) -> i64 {
-    let path_bytes = match parse_user_path(path) {
-        Some(s) => s,
+    let mut path_buf = [0u8; 256];
+    let path_len = match parse_user_path(path, &mut path_buf) {
+        Some(l) => l,
         None => return Errno::Inval.as_i64(),
     };
+    let path_bytes = &path_buf[..path_len];
     let token = match vfs::open(path_bytes, vfs::PERM_WRITE) {
         Ok(t) => t,
         Err(e) => return e.as_i64(),
@@ -75,10 +83,12 @@ pub unsafe fn sys_truncate(path: u64) -> i64 {
 /// Non-zero length is accepted but treated as "truncate to current size" —
 /// i.e. a no-op. TODO: extend vfs::truncate to take a length parameter.
 pub unsafe fn sys_truncate2(path: u64, length: u64) -> i64 {
-    let path_bytes = match parse_user_path(path) {
-        Some(s) => s,
+    let mut path_buf = [0u8; 256];
+    let path_len = match parse_user_path(path, &mut path_buf) {
+        Some(l) => l,
         None => return Errno::Inval.as_i64(),
     };
+    let path_bytes = &path_buf[..path_len];
     let token = match vfs::open(path_bytes, vfs::PERM_WRITE) {
         Ok(t) => t,
         Err(e) => return e.as_i64(),
@@ -111,10 +121,12 @@ pub unsafe fn sys_ftruncate(fd: u64, length: u64) -> i64 {
 }
 
 pub unsafe fn sys_access(path: u64, _mode: u64) -> i64 {
-    let path_bytes = match parse_user_path(path) {
-        Some(s) => s,
+    let mut path_buf = [0u8; 256];
+    let path_len = match parse_user_path(path, &mut path_buf) {
+        Some(l) => l,
         None => return Errno::Inval.as_i64(),
     };
+    let path_bytes = &path_buf[..path_len];
     let token = match vfs::open(path_bytes, vfs::PERM_READ) {
         Ok(t) => t,
         Err(e) => return e.as_i64(),

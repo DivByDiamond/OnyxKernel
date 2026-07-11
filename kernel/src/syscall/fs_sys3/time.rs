@@ -18,10 +18,12 @@ pub unsafe fn sys_gettimeofday(tv: u64) -> i64 {
 }
 
 pub unsafe fn sys_utimens(path: u64, times: u64) -> i64 {
-    let path_bytes = match parse_user_path(path) {
-        Some(s) => s,
+    let mut path_buf = [0u8; 256];
+    let path_len = match parse_user_path(path, &mut path_buf) {
+        Some(l) => l,
         None => return Errno::Inval.as_i64(),
     };
+    let path_bytes = &path_buf[..path_len];
     if times == 0 {
         let now = *(&raw const crate::srv::timer::G_JIFFIES);
         return match vfs::utimens(path_bytes, now, now) {
@@ -60,12 +62,9 @@ pub unsafe fn sys_nanosleep(req: u64, _rem: u64) -> i64 {
         if now >= target {
             break;
         }
-        // Yield CPU instead of busy-looping. The scheduler will pick another
-        // runnable process (or idle) until the next timer tick wakes us.
-        crate::proc::set_need_resched(crate::proc::hart_id(), true);
-        // Force a scheduler check by re-reading the jiffies — the trap-return
-        // path will switch context if NEED_RESCHED is set.
-        core::hint::spin_loop();
+        // Wait for interrupt — the timer tick will wake us.  Between ticks
+        // the CPU stays in a low-power state instead of busy-looping.
+        core::arch::asm!("wfi", options(nostack, preserves_flags));
     }
     0
 }

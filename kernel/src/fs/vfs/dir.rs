@@ -1,16 +1,9 @@
-//! Stateful readdir — single active directory cursor (MVP).
+//! Stateful readdir — per-process directory cursor.
 use crate::fs::{devfs, ipcfs, onyxfs, procfs};
 use onyx_core::errno::{Errno, KResult};
 
-use super::Fs;
 use super::resolve_mount;
-
-/// readdir: stateful per-process directory listing.
-/// Uses a static cursor (MVP: single active readdir at a time).
-pub(super) static mut G_DIR_CURSOR_INO: u32 = 0;
-pub(super) static mut G_DIR_CURSOR_IDX: u32 = 0;
-pub(super) static mut G_DIR_ACTIVE: bool = false;
-pub(super) static mut G_DIR_FS: Fs = Fs::None;
+use super::Fs;
 
 pub unsafe fn readdir(dir_path: &[u8], name_out: *mut u8, name_len: usize) -> KResult<bool> {
     if dir_path.is_empty() || dir_path[0] != b'/' {
@@ -18,6 +11,7 @@ pub unsafe fn readdir(dir_path: &[u8], name_out: *mut u8, name_len: usize) -> KR
     }
     let name = &dir_path[1..];
     let (fs, subpath) = resolve_mount(name);
+    let p = crate::proc::current();
 
     match fs {
         Fs::Proc => {
@@ -26,19 +20,19 @@ pub unsafe fn readdir(dir_path: &[u8], name_out: *mut u8, name_len: usize) -> KR
             } else {
                 procfs::lookup(subpath)?
             };
-            if !G_DIR_ACTIVE || G_DIR_CURSOR_INO != ino || G_DIR_FS != Fs::Proc {
-                G_DIR_CURSOR_INO = ino;
-                G_DIR_CURSOR_IDX = 0;
-                G_DIR_ACTIVE = true;
-                G_DIR_FS = Fs::Proc;
+            if !p.readdir_active || p.readdir_ino != ino || p.readdir_fs != Fs::Proc {
+                p.readdir_ino = ino;
+                p.readdir_idx = 0;
+                p.readdir_active = true;
+                p.readdir_fs = Fs::Proc;
             }
-            match procfs::readdir_entry(G_DIR_CURSOR_IDX, name_out, name_len) {
+            match procfs::readdir_entry(p.readdir_idx, name_out, name_len) {
                 Some(_ino) => {
-                    G_DIR_CURSOR_IDX += 1;
+                    p.readdir_idx += 1;
                     Ok(true)
                 }
                 None => {
-                    G_DIR_ACTIVE = false;
+                    p.readdir_active = false;
                     Ok(false)
                 }
             }
@@ -49,19 +43,19 @@ pub unsafe fn readdir(dir_path: &[u8], name_out: *mut u8, name_len: usize) -> KR
             } else {
                 ipcfs::lookup(subpath)?
             };
-            if !G_DIR_ACTIVE || G_DIR_CURSOR_INO != ino || G_DIR_FS != Fs::Ipc {
-                G_DIR_CURSOR_INO = ino;
-                G_DIR_CURSOR_IDX = 0;
-                G_DIR_ACTIVE = true;
-                G_DIR_FS = Fs::Ipc;
+            if !p.readdir_active || p.readdir_ino != ino || p.readdir_fs != Fs::Ipc {
+                p.readdir_ino = ino;
+                p.readdir_idx = 0;
+                p.readdir_active = true;
+                p.readdir_fs = Fs::Ipc;
             }
-            match ipcfs::readdir_entry(G_DIR_CURSOR_IDX, name_out, name_len) {
+            match ipcfs::readdir_entry(p.readdir_idx, name_out, name_len) {
                 Some(_ino) => {
-                    G_DIR_CURSOR_IDX += 1;
+                    p.readdir_idx += 1;
                     Ok(true)
                 }
                 None => {
-                    G_DIR_ACTIVE = false;
+                    p.readdir_active = false;
                     Ok(false)
                 }
             }
@@ -72,38 +66,38 @@ pub unsafe fn readdir(dir_path: &[u8], name_out: *mut u8, name_len: usize) -> KR
             } else {
                 devfs::lookup(subpath)?
             };
-            if !G_DIR_ACTIVE || G_DIR_CURSOR_INO != ino || G_DIR_FS != Fs::Devfs {
-                G_DIR_CURSOR_INO = ino;
-                G_DIR_CURSOR_IDX = 0;
-                G_DIR_ACTIVE = true;
-                G_DIR_FS = Fs::Devfs;
+            if !p.readdir_active || p.readdir_ino != ino || p.readdir_fs != Fs::Devfs {
+                p.readdir_ino = ino;
+                p.readdir_idx = 0;
+                p.readdir_active = true;
+                p.readdir_fs = Fs::Devfs;
             }
-            match devfs::readdir_entry(G_DIR_CURSOR_IDX, name_out, name_len) {
+            match devfs::readdir_entry(p.readdir_idx, name_out, name_len) {
                 Some(_ino) => {
-                    G_DIR_CURSOR_IDX += 1;
+                    p.readdir_idx += 1;
                     Ok(true)
                 }
                 None => {
-                    G_DIR_ACTIVE = false;
+                    p.readdir_active = false;
                     Ok(false)
                 }
             }
         }
         _ => {
             let ino = onyxfs::resolve_dir(dir_path)?;
-            if !G_DIR_ACTIVE || G_DIR_CURSOR_INO != ino || G_DIR_FS != Fs::Onyx {
-                G_DIR_CURSOR_INO = ino;
-                G_DIR_CURSOR_IDX = 0;
-                G_DIR_ACTIVE = true;
-                G_DIR_FS = Fs::Onyx;
+            if !p.readdir_active || p.readdir_ino != ino || p.readdir_fs != Fs::Onyx {
+                p.readdir_ino = ino;
+                p.readdir_idx = 0;
+                p.readdir_active = true;
+                p.readdir_fs = Fs::Onyx;
             }
-            match onyxfs::readdir_entry(G_DIR_CURSOR_INO, G_DIR_CURSOR_IDX, name_out, name_len)? {
+            match onyxfs::readdir_entry(p.readdir_ino, p.readdir_idx, name_out, name_len)? {
                 Some(_ino) => {
-                    G_DIR_CURSOR_IDX += 1;
+                    p.readdir_idx += 1;
                     Ok(true)
                 }
                 None => {
-                    G_DIR_ACTIVE = false;
+                    p.readdir_active = false;
                     Ok(false)
                 }
             }

@@ -26,6 +26,7 @@ pub struct VfsFd {
     pub used: bool,
     pub perms: u32,
     pub epoch: u32,
+    pub cloexec: bool,
 }
 
 impl Default for VfsFd {
@@ -38,6 +39,7 @@ impl Default for VfsFd {
             used: false,
             perms: 0,
             epoch: 0,
+            cloexec: false,
         }
     }
 }

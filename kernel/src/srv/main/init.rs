@@ -62,6 +62,7 @@ pub(crate) unsafe fn launch() -> ! {
         ring,
         0,
         0,
+        core::ptr::null_mut(),
     ) {
         crate::kerr!("kmain", "create_user failed: %s", Arg::from(e.as_str()));
         crate::srv::klog::halt();

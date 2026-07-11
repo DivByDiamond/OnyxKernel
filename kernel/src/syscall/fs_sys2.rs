@@ -9,10 +9,12 @@ use onyx_core::errno::Errno;
 use super::handler::{parse_user_path, user_ptr_ok};
 
 pub(super) unsafe fn sys_exec(tf: &mut TrapFrame, path: u64, argv: u64) -> i64 {
-    let path_bytes = match parse_user_path(path) {
-        Some(s) => s,
+    let mut path_buf = [0u8; 256];
+    let path_len = match parse_user_path(path, &mut path_buf) {
+        Some(l) => l,
         None => return Errno::Inval.as_i64(),
     };
+    let path_bytes = &path_buf[..path_len];
     let cur_ring = proc::current_ring();
     let token = match vfs::open(path_bytes, vfs::PERM_READ | vfs::PERM_SEEK) {
         Ok(t) => t,
@@ -78,10 +80,12 @@ pub(super) unsafe fn sys_sbrk(incr: i64) -> i64 {
 }
 
 pub(super) unsafe fn sys_readdir(dir: u64, name_out: u64, len: u64) -> i64 {
-    let dir_path = match parse_user_path(dir) {
-        Some(s) => s,
+    let mut dir_buf = [0u8; 256];
+    let dir_len = match parse_user_path(dir, &mut dir_buf) {
+        Some(l) => l,
         None => return Errno::Inval.as_i64(),
     };
+    let dir_path = &dir_buf[..dir_len];
     if !user_ptr_ok(name_out, len) {
         return Errno::Inval.as_i64();
     }
@@ -108,10 +112,12 @@ pub(super) unsafe fn sys_write_fd(token: u64, buf: u64, len: u64) -> i64 {
 }
 
 pub(super) unsafe fn sys_create(path: u64, mode: u64, _reserved: u64) -> i64 {
-    let path_bytes = match parse_user_path(path) {
-        Some(s) => s,
+    let mut path_buf = [0u8; 256];
+    let path_len = match parse_user_path(path, &mut path_buf) {
+        Some(l) => l,
         None => return Errno::Inval.as_i64(),
     };
+    let path_bytes = &path_buf[..path_len];
     let mode_u32 = if mode == 0 {
         onyx_core::formats::ONYFS_DT_REG
     } else {
@@ -124,10 +130,12 @@ pub(super) unsafe fn sys_create(path: u64, mode: u64, _reserved: u64) -> i64 {
 }
 
 pub(super) unsafe fn sys_mkdir(path: u64) -> i64 {
-    let path_bytes = match parse_user_path(path) {
-        Some(s) => s,
+    let mut path_buf = [0u8; 256];
+    let path_len = match parse_user_path(path, &mut path_buf) {
+        Some(l) => l,
         None => return Errno::Inval.as_i64(),
     };
+    let path_bytes = &path_buf[..path_len];
     match vfs::mkdir(path_bytes) {
         Ok(()) => 0,
         Err(e) => e.as_i64(),

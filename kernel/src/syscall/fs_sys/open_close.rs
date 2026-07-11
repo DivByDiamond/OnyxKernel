@@ -7,7 +7,7 @@
 use crate::fs::vfs;
 use crate::proc;
 use crate::syscall::abi::{
-    F_DUPFD, F_GETFD, F_GETFL, F_SETFD, F_SETFL, FD_CLOEXEC, O_ACCMODE, O_APPEND, O_CREAT,
+    FD_CLOEXEC, F_DUPFD, F_GETFD, F_GETFL, F_SETFD, F_SETFL, O_ACCMODE, O_APPEND, O_CREAT,
     O_DIRECTORY, O_EXCL, O_NONBLOCK, O_RDONLY, O_RDWR, O_TRUNC, O_WRONLY,
 };
 use onyx_core::errno::Errno;
@@ -124,8 +124,9 @@ pub(in super::super) unsafe fn sys_open(path: u64, flags: u64, mode: u64) -> i64
         Arg::from(mode as u32)
     );
 
-    let path_bytes = match parse_user_path(path) {
-        Some(s) => s,
+    let mut path_buf = [0u8; 256];
+    let path_len = match parse_user_path(path, &mut path_buf) {
+        Some(l) => l,
         None => {
             crate::kerr!(
                 "sys_open",
@@ -135,6 +136,7 @@ pub(in super::super) unsafe fn sys_open(path: u64, flags: u64, mode: u64) -> i64
             return Errno::Inval.as_i64();
         }
     };
+    let path_bytes = &path_buf[..path_len];
 
     crate::kinf!(
         "sys_open",
@@ -233,10 +235,12 @@ pub(in super::super) unsafe fn sys_lseek(token: u64, off: i64, whence: u32) -> i
 /// stat(path, struct stat *st) — fills a Linux-compatible `struct stat` and
 /// returns 0 on success or a negative errno on failure.
 pub(in super::super) unsafe fn sys_stat(path: u64, st_buf: u64) -> i64 {
-    let path_bytes = match parse_user_path(path) {
-        Some(s) => s,
+    let mut path_buf = [0u8; 256];
+    let path_len = match parse_user_path(path, &mut path_buf) {
+        Some(l) => l,
         None => return Errno::Inval.as_i64(),
     };
+    let path_bytes = &path_buf[..path_len];
     if !user_ptr_ok(st_buf, core::mem::size_of::<UserStat>() as u64) {
         return Errno::Inval.as_i64();
     }
@@ -291,8 +295,8 @@ pub(in super::super) unsafe fn sys_fstat(token: u64, st_buf: u64) -> i64 {
 /// fcntl(fd, cmd, arg) — file descriptor control.
 /// Currently supports:
 ///   - `F_DUPFD` (cmd=0): duplicate fd to lowest available number ≥ arg.
-///   - `F_GETFD` (cmd=1): get fd flags (only FD_CLOEXEC bit, always 0 for now).
-///   - `F_SETFD` (cmd=2): set fd flags (accepted, FD_CLOEXEC is a no-op).
+///   - `F_GETFD` (cmd=1): get fd flags (FD_CLOEXEC bit).
+///   - `F_SETFD` (cmd=2): set fd flags (FD_CLOEXEC honoured on execve).
 ///   - `F_GETFL` (cmd=3): get open flags (returns O_RDONLY for now).
 ///   - `F_SETFL` (cmd=4): set open flags (O_NONBLOCK accepted as no-op).
 pub(in super::super) unsafe fn sys_fcntl(fd: u64, cmd: u32, arg: u64) -> i64 {
@@ -300,11 +304,23 @@ pub(in super::super) unsafe fn sys_fcntl(fd: u64, cmd: u32, arg: u64) -> i64 {
         F_DUPFD => vfs::dup(fd)
             .map(|t| t as i64)
             .unwrap_or_else(|e| e.as_i64()),
-        F_GETFD => 0,
+        F_GETFD => {
+            let idx = match vfs::fd_check(fd) {
+                Ok(i) => i,
+                Err(e) => return e.as_i64(),
+            };
+            if vfs::fd_get(idx).cloexec {
+                FD_CLOEXEC as i64
+            } else {
+                0
+            }
+        }
         F_SETFD => {
-            // FD_CLOEXEC bit is stored but not honored (no execve-with-fd-
-            // preservation yet). Accept silently.
-            let _ = arg;
+            let idx = match vfs::fd_check(fd) {
+                Ok(i) => i,
+                Err(e) => return e.as_i64(),
+            };
+            vfs::fd_set_cloexec(idx, (arg & FD_CLOEXEC as u64) != 0);
             0
         }
         F_GETFL => O_RDONLY as i64,

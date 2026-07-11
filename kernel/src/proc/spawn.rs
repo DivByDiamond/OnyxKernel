@@ -5,8 +5,8 @@
 //! is SYS_wait: it blocks the caller until a child exits, then reaps it.
 use super::lifecycle::{alloc_proc, free_proc};
 use super::process::{
-    G_ALL_PROCS, PROC_RING_ROOT, PROC_RING_USER, ProcState, alloc_pid, by_pid, current_for_hart,
-    current_pid, hart_id,
+    alloc_pid, by_pid, current_for_hart, current_pid, hart_id, ProcState, G_ALL_PROCS,
+    PROC_RING_ROOT, PROC_RING_USER,
 };
 use crate::arch::regs::*;
 use crate::arch::trap_frame::TrapFrame;
@@ -16,6 +16,10 @@ use crate::proc::scheduler::enqueue;
 use onyx_core::errno::{Errno, KResult};
 
 /// Create a user-mode process (ring 1 or 2). Dynamic allocation — no limit.
+///
+/// `root_refcount` — if non-null, shares the root page table refcount with the
+/// caller (used by fork). If null, a new refcount (initialised to 1) is
+/// allocated, indicating the process owns its page table.
 pub unsafe fn create_user(
     entry: u64,
     ustack: u64,
@@ -26,6 +30,7 @@ pub unsafe fn create_user(
     ring: u8,
     argc: usize,
     argv_sp: u64,
+    root_refcount: *mut u32,
 ) -> KResult<()> {
     if entry == 0 {
         crate::kerr!("create_user", "entry=0 — would cause page fault, rejecting");
@@ -38,6 +43,14 @@ pub unsafe fn create_user(
     (*p).parent_pid = parent_pid;
     (*p).exit_code = 0;
     (*p).root_pa = root_pa;
+    if !root_refcount.is_null() {
+        (*p).root_refcount = root_refcount;
+    } else {
+        // Process owns its own page table — allocate a refcount of 1.
+        let rc = heap::kmalloc(4)? as *mut u32;
+        *rc = 1;
+        (*p).root_refcount = rc;
+    }
     (*p).entry = entry;
     (*p).ustack = ustack;
     (*p).heap_brk = heap_brk;
@@ -83,7 +96,16 @@ pub unsafe fn spawn(path: &[u8], argv_user: u64, ring_hint: u8, parent_pid: u32)
         (0, 0)
     };
     create_user(
-        r.entry, r.ustack, r.root_pa, new_pid, parent_pid, r.heap_brk, ring, argc, argv_sp,
+        r.entry,
+        r.ustack,
+        r.root_pa,
+        new_pid,
+        parent_pid,
+        r.heap_brk,
+        ring,
+        argc,
+        argv_sp,
+        core::ptr::null_mut(),
     )?;
     Ok(new_pid)
 }
