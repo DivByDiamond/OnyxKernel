@@ -28,12 +28,11 @@ echo "==> Converting userland ELFs → .onx (v2 default, --compress)"
 "$ROOT/target/release/elf2onx" --ring=1 --compress "$ROOT/target/riscv64gc-unknown-none-elf/release/onyx-userdel" "$BUILD/userdel.onx"
 "$ROOT/target/release/elf2onx" --compress "$ROOT/target/riscv64gc-unknown-none-elf/release/onyx-argv-test" "$BUILD/argv_test.onx"
 
-# Pre-create passwd and shadow so login works without first-boot setup.
-# root password is "root" with SHA-256.
-echo -n 'root:0:0:/users/root:/bin/osh
-' > "$BUILD/passwd.txt"
-echo -n 'root:$5$3132333435363738$1c9c6bef25512438b9ede5f8494269152d0959d8d062b4a098cb9e530f4fa0bd
-' > "$BUILD/shadow.txt"
+# NOTE: /etc/passwd and /etc/shadow are NOT pre-baked into the image.
+# On first boot, /bin/login detects that no root user exists and calls
+# ensure_default_root() which creates both files with the default
+# password "root". This guarantees the hash algorithm matches between
+# creation and verification.
 
 # Build OnyxCC .onx
 echo "==> Building OnyxCC"
@@ -48,27 +47,33 @@ fi
 echo "==> Generating font"
 "$ROOT/target/release/psfgen" "$BUILD/default.psf"
 
-# Create manifest
-cat > "$BUILD/manifest.txt" << EOF
-dir /bin
-dir /etc
-dir /service
-dir /users
-dir /font
-file $BUILD/hello.onx /bin/hello.onx --ring=1
-file $BUILD/init.onx /bin/init --ring=1
-file $BUILD/login.onx /bin/login --ring=1
-file $BUILD/osh.onx /bin/osh
-file $BUILD/passwd.onx /bin/passwd
-file $BUILD/useradd.onx /bin/useradd --ring=1
-file $BUILD/userdel.onx /bin/userdel --ring=1
-file $BUILD/default.psf /font/default.psf
-file $BUILD/onyxcc.onx /bin/onyxcc --ring=1
-file $BUILD/argv_test.onx /bin/argv_test
-file /home/loki/Projects/Onyx/OnyxCompiller/tests/hello_full.c /tmp/test.c
-file $BUILD/passwd.txt /etc/passwd
-file $BUILD/shadow.txt /etc/shadow
-EOF
+# Create manifest. Optional files (onyxcc, test.c) are added only if
+# they exist — otherwise mkimage would fail trying to read them.
+MANIFEST="$BUILD/manifest.txt"
+{
+    echo "dir /bin"
+    echo "dir /etc"
+    echo "dir /etc/init"
+    echo "dir /service"
+    echo "dir /users"
+    echo "dir /font"
+    echo "file $BUILD/hello.onx /bin/hello.onx --ring=1"
+    echo "file $BUILD/init.onx /bin/init --ring=1"
+    echo "file $BUILD/login.onx /bin/login --ring=1"
+    echo "file $BUILD/osh.onx /bin/osh"
+    echo "file $BUILD/passwd.onx /bin/passwd"
+    echo "file $BUILD/useradd.onx /bin/useradd --ring=1"
+    echo "file $BUILD/userdel.onx /bin/userdel --ring=1"
+    echo "file $BUILD/default.psf /font/default.psf"
+    if [ -f "$BUILD/onyxcc.onx" ]; then
+        echo "file $BUILD/onyxcc.onx /bin/onyxcc --ring=1"
+    fi
+    echo "file $BUILD/argv_test.onx /bin/argv_test"
+    ONYXCC_TEST_C="$ROOT/../OnyxCompiller/tests/hello_full.c"
+    if [ -f "$ONYXCC_TEST_C" ]; then
+        echo "file $ONYXCC_TEST_C /tmp/test.c"
+    fi
+} > "$MANIFEST"
 
 # Create OnyxFS v2 disk image using manifest (v2 is now the default)
 echo "==> Creating OnyxFS v2 disk image"

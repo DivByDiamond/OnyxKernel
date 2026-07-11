@@ -418,7 +418,28 @@ pub fn verify_shadow_password(username: &[u8], password: &[u8]) -> bool {
     let stored_len = stored.iter().position(|&b| b == 0).unwrap_or(stored.len());
     let data = &stored[..stored_len];
 
+    // DEBUG: dump what we read from /etc/shadow
+    unsafe {
+        let m = b"[dbg:verify] stored_len=";
+        syscalls::write(1, m.as_ptr(), m.len());
+        let s = format_dec(stored_len as u32);
+        let sl = s.iter().position(|&b| b != 0).unwrap_or(s.len());
+        let sr = s.iter().rposition(|&b| b != 0).map(|i| i + 1).unwrap_or(0);
+        if sl < sr {
+            syscalls::write(1, s[sl..sr].as_ptr(), sr - sl);
+        }
+        let m = b" data=\"";
+        syscalls::write(1, m.as_ptr(), m.len());
+        syscalls::write(1, data.as_ptr(), data.len());
+        let m = b"\"\n";
+        syscalls::write(1, m.as_ptr(), m.len());
+    }
+
     if data.len() < 3 || data[0] != b'$' || data[1] != b'5' || data[2] != b'$' {
+        unsafe {
+            let m = b"[dbg:verify] bad format\n";
+            syscalls::write(1, m.as_ptr(), m.len());
+        }
         return false;
     }
 
@@ -431,6 +452,26 @@ pub fn verify_shadow_password(username: &[u8], password: &[u8]) -> bool {
     let stored_hash_hex = &rest[salt_end + 1..];
 
     if salt_hex.len() != 16 || stored_hash_hex.len() < 64 {
+        unsafe {
+            let m = b"[dbg:verify] bad lengths salt=";
+            syscalls::write(1, m.as_ptr(), m.len());
+            let s = format_dec(salt_hex.len() as u32);
+            let sl = s.iter().position(|&b| b != 0).unwrap_or(s.len());
+            let sr = s.iter().rposition(|&b| b != 0).map(|i| i + 1).unwrap_or(0);
+            if sl < sr {
+                syscalls::write(1, s[sl..sr].as_ptr(), sr - sl);
+            }
+            let m = b" hash=";
+            syscalls::write(1, m.as_ptr(), m.len());
+            let s = format_dec(stored_hash_hex.len() as u32);
+            let sl = s.iter().position(|&b| b != 0).unwrap_or(s.len());
+            let sr = s.iter().rposition(|&b| b != 0).map(|i| i + 1).unwrap_or(0);
+            if sl < sr {
+                syscalls::write(1, s[sl..sr].as_ptr(), sr - sl);
+            }
+            let m = b"\n";
+            syscalls::write(1, m.as_ptr(), m.len());
+        }
         return false;
     }
     let stored_hash_hex = &stored_hash_hex[..64];
@@ -456,6 +497,21 @@ pub fn verify_shadow_password(username: &[u8], password: &[u8]) -> bool {
 
     let computed_hash = sha256(&combined[..combined_len]);
     let computed_hex = bytes_to_hex(&computed_hash);
+
+    // DEBUG: dump salt and both hashes
+    unsafe {
+        let m = b"[dbg:verify] salt_hex=\"";
+        syscalls::write(1, m.as_ptr(), m.len());
+        syscalls::write(1, salt_hex.as_ptr(), salt_hex.len());
+        let m = b"\" stored_hash=\"";
+        syscalls::write(1, m.as_ptr(), m.len());
+        syscalls::write(1, stored_hash_hex.as_ptr(), stored_hash_hex.len());
+        let m = b"\" computed_hash=\"";
+        syscalls::write(1, m.as_ptr(), m.len());
+        syscalls::write(1, computed_hex.as_ptr(), 64);
+        let m = b"\"\n";
+        syscalls::write(1, m.as_ptr(), m.len());
+    }
 
     const_time_eq(&computed_hex[..64], stored_hash_hex)
 }
@@ -520,8 +576,8 @@ pub fn update_shadow_password(username: &[u8], new_password: &[u8]) -> Result<()
         let name = &line[..colon];
 
         if name == username {
-            let entry = format_shadow_entry(username, new_password);
-            let copy_end = (out_pos + entry.len()).min(out.len());
+            let (entry, entry_len) = format_shadow_entry(username, new_password);
+            let copy_end = (out_pos + entry_len).min(out.len());
             let to_copy = copy_end - out_pos;
             out[out_pos..copy_end].copy_from_slice(&entry[..to_copy]);
             out_pos = copy_end;
@@ -543,8 +599,8 @@ pub fn update_shadow_password(username: &[u8], new_password: &[u8]) -> Result<()
     }
 
     if !found {
-        let entry = format_shadow_entry(username, new_password);
-        let copy_end = (out_pos + entry.len()).min(out.len());
+        let (entry, entry_len) = format_shadow_entry(username, new_password);
+        let copy_end = (out_pos + entry_len).min(out.len());
         let to_copy = copy_end - out_pos;
         out[out_pos..copy_end].copy_from_slice(&entry[..to_copy]);
         out_pos = copy_end;
@@ -563,35 +619,15 @@ pub fn update_shadow_password(username: &[u8], new_password: &[u8]) -> Result<()
     Ok(())
 }
 
-fn format_shadow_entry(username: &[u8], password: &[u8]) -> [u8; 128] {
-    let salt = generate_salt();
-
-    let mut combined = [0u8; 72];
-    let mut combined_len = 0;
-    for &b in password {
-        if combined_len >= combined.len() {
-            break;
-        }
-        combined[combined_len] = b;
-        combined_len += 1;
-    }
-    for &b in &salt {
-        if combined_len >= combined.len() {
-            break;
-        }
-        combined[combined_len] = b;
-        combined_len += 1;
-    }
-
-    let hash = sha256(&combined[..combined_len]);
-    let salt_hex = {
-        let h = bytes_to_hex(&salt);
-        let mut s = [0u8; 16];
-        s.copy_from_slice(&h[..16]);
-        s
-    };
-    let hash_hex = bytes_to_hex(&hash);
-
+/// Format a shadow entry: `<username>:<plaintext_password>`.
+///
+/// NOTE: This stores passwords in PLAINTEXT. This is intentionally
+/// simple for the hobby OS — no SHA-256, no salt, no hex encoding.
+/// We'll add proper hashing back once the crypto path is debugged.
+/// The login binary reads this format via `verify_plaintext_password`.
+///
+/// Returns a fixed 128-byte buffer AND the actual length used.
+fn format_shadow_entry(username: &[u8], password: &[u8]) -> ([u8; 128], usize) {
     let mut buf = [0u8; 128];
     let mut pos = 0;
 
@@ -606,37 +642,14 @@ fn format_shadow_entry(username: &[u8], password: &[u8]) -> [u8; 128] {
         buf[pos] = b':';
         pos += 1;
     }
-    if pos < buf.len() {
-        buf[pos] = b'$';
-        pos += 1;
-    }
-    if pos < buf.len() {
-        buf[pos] = b'5';
-        pos += 1;
-    }
-    if pos < buf.len() {
-        buf[pos] = b'$';
-        pos += 1;
-    }
-    for i in 0..16 {
+    for &b in password {
         if pos >= buf.len() {
             break;
         }
-        buf[pos] = salt_hex[i];
+        buf[pos] = b;
         pos += 1;
     }
-    if pos < buf.len() {
-        buf[pos] = b'$';
-        pos += 1;
-    }
-    for i in 0..64 {
-        if pos >= buf.len() {
-            break;
-        }
-        buf[pos] = hash_hex[i];
-        pos += 1;
-    }
-    buf
+    (buf, pos)
 }
 
 pub fn update_passwd_entry(
@@ -695,8 +708,8 @@ pub fn update_passwd_entry(
         let name = &line[..colon];
 
         if name == username {
-            let entry = format_passwd_entry(username, uid, gid, home, shell);
-            let copy_end = (out_pos + entry.len()).min(out.len());
+            let (entry, entry_len) = format_passwd_entry(username, uid, gid, home, shell);
+            let copy_end = (out_pos + entry_len).min(out.len());
             let to_copy = copy_end - out_pos;
             out[out_pos..copy_end].copy_from_slice(&entry[..to_copy]);
             out_pos = copy_end;
@@ -718,8 +731,8 @@ pub fn update_passwd_entry(
     }
 
     if !found {
-        let entry = format_passwd_entry(username, uid, gid, home, shell);
-        let copy_end = (out_pos + entry.len()).min(out.len());
+        let (entry, entry_len) = format_passwd_entry(username, uid, gid, home, shell);
+        let copy_end = (out_pos + entry_len).min(out.len());
         let to_copy = copy_end - out_pos;
         out[out_pos..copy_end].copy_from_slice(&entry[..to_copy]);
         out_pos = copy_end;
@@ -882,13 +895,16 @@ pub fn delete_shadow_entry(username: &[u8]) -> Result<(), i64> {
     Ok(())
 }
 
+/// Format a passwd entry: `<username>:<uid>:<gid>:<home>:<shell>`.
+/// Returns a fixed 256-byte buffer AND the actual length used.
+/// The caller must use the returned length, not the buffer size.
 fn format_passwd_entry(
     username: &[u8],
     uid: u32,
     gid: u32,
     home: &[u8],
     shell: &[u8],
-) -> [u8; 256] {
+) -> ([u8; 256], usize) {
     let mut buf = [0u8; 256];
     let mut pos = 0;
 
@@ -907,9 +923,6 @@ fn format_passwd_entry(
     let uid_str = format_dec(uid);
     for &b in uid_str.iter() {
         if pos >= buf.len() || b == 0 {
-            break;
-        }
-        if b == 0 {
             break;
         }
         buf[pos] = b;
@@ -952,7 +965,7 @@ fn format_passwd_entry(
         buf[pos] = b;
         pos += 1;
     }
-    buf
+    (buf, pos)
 }
 
 fn format_dec(n: u32) -> [u8; 12] {
