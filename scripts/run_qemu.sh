@@ -15,6 +15,11 @@ cargo build --release -p onyx_kernel --target riscv64gc-unknown-none-elf 2>&1 | 
 cargo build --release -p onyx_init --target riscv64gc-unknown-none-elf 2>&1 | tail -3
 cargo build --release -p onyx_tools 2>&1 | tail -3
 
+# Build OnyxShell (separate project outside workspace)
+SHELL_DIR="${ONYXSHELL_DIR:-$ROOT/../OnyxShell}"
+echo "==> Building OnyxShell"
+"$SHELL_DIR/build.sh"
+
 # Convert all userland ELFs to .onx (v2 format is now the default)
 BUILD="$ROOT/build"
 mkdir -p "$BUILD"
@@ -22,7 +27,7 @@ echo "==> Converting userland ELFs → .onx (v2 default, --compress)"
 "$ROOT/target/release/elf2onx" --ring=1 --compress "$ROOT/target/riscv64gc-unknown-none-elf/release/onyx-init" "$BUILD/init.onx"
 "$ROOT/target/release/elf2onx" --ring=1 --compress "$ROOT/target/riscv64gc-unknown-none-elf/release/onyx-hello" "$BUILD/hello.onx"
 "$ROOT/target/release/elf2onx" --ring=1 --compress "$ROOT/target/riscv64gc-unknown-none-elf/release/onyx-login" "$BUILD/login.onx"
-"$ROOT/target/release/elf2onx" --compress "$ROOT/target/riscv64gc-unknown-none-elf/release/onyx-osh" "$BUILD/osh.onx"
+cp "$SHELL_DIR/build/osh.onx" "$BUILD/osh.onx"
 "$ROOT/target/release/elf2onx" --compress "$ROOT/target/riscv64gc-unknown-none-elf/release/onyx-passwd" "$BUILD/passwd.onx"
 "$ROOT/target/release/elf2onx" --ring=1 --compress "$ROOT/target/riscv64gc-unknown-none-elf/release/onyx-useradd" "$BUILD/useradd.onx"
 "$ROOT/target/release/elf2onx" --ring=1 --compress "$ROOT/target/riscv64gc-unknown-none-elf/release/onyx-userdel" "$BUILD/userdel.onx"
