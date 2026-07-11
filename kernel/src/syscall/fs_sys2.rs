@@ -48,6 +48,10 @@ pub(super) unsafe fn sys_exec(tf: &mut TrapFrame, path: u64, argv: u64) -> i64 {
     p.entry = r.entry;
     p.ustack = if argc > 0 { argv_sp } else { r.ustack };
     p.heap_brk = r.heap_brk;
+    p.readdir_ino = 0;
+    p.readdir_idx = 0;
+    p.readdir_active = false;
+    p.readdir_fs = crate::fs::vfs::Fs::None;
     p.ring = if r.ring == 1 {
         proc::PROC_RING_ROOT
     } else {

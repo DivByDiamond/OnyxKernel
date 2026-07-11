@@ -389,8 +389,11 @@ pub unsafe fn sys_execve(tf: &mut TrapFrame, path: u64, argv: u64, envp: u64) ->
     p.entry = r.entry;
     p.ustack = argv_sp;
     p.heap_brk = r.heap_brk;
-    // Reset mmap_brk for the new image.
     p.mmap_brk = 0x2000_0000;
+    p.readdir_ino = 0;
+    p.readdir_idx = 0;
+    p.readdir_active = false;
+    p.readdir_fs = crate::fs::vfs::Fs::None;
     p.ring = if r.ring == 1 {
         proc::PROC_RING_ROOT
     } else {
