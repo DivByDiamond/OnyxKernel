@@ -15,9 +15,28 @@ pub unsafe fn map_segment_data(
     let end = s.vaddr + s.memsz;
     while va < end {
         let page_base = va & !0xFFF;
-        if vmm::translate_user(root_pa, page_base) == 0 {
+        // `translate_user` returns the PA only if the page is already
+        // mapped WITH PTE_U (i.e. a previously-mapped user page from an
+        // earlier segment). The 3 1 GiB identity-mapped leaf PTEs set up
+        // by `onx::load` do NOT have PTE_U, so translate_user returns 0
+        // for them — which is exactly what we want: those pages must be
+        // replaced with freshly-allocated user pages, not "upgraded".
+        let existing_pa = vmm::translate_user(root_pa, page_base);
+        if existing_pa == 0 {
+            // Page not mapped as a user page — allocate a fresh zero page.
             let page_pa = pmm::alloc_zero()?;
             vmm::map_one_pub(root_pa, page_base, page_pa, seg_flags, 0)?;
+        } else {
+            // Page is already mapped as a user page (from a previous
+            // segment that shares this page). Upgrade permissions: OR
+            // the segment's flags into the existing PTE so that, e.g.,
+            // a .data segment needing PTE_W gets it even if .rodata
+            // already mapped the page as r--.
+            let existing_flags = vmm::pte_user_flags(root_pa, page_base);
+            let combined_flags = existing_flags | seg_flags;
+            if combined_flags != existing_flags {
+                vmm::map_one_pub(root_pa, page_base, existing_pa, combined_flags, 0)?;
+            }
         }
         va = (page_base + 4096).min(end);
     }

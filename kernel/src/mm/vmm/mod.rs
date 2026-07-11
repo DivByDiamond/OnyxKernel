@@ -161,6 +161,43 @@ pub unsafe fn translate_user_write(root_pa: u64, vaddr: u64) -> u64 {
     0
 }
 
+/// Return the current PTE flags for `vaddr` in the page table rooted at
+/// `root_pa`, but ONLY if the page is a user page (PTE_U set). Returns 0
+/// otherwise. This lets callers distinguish:
+///   - "not mapped at all" (returns 0)
+///   - "mapped as identity / kernel page without PTE_U" (returns 0)
+///   - "mapped as a user page" (returns the flag bits)
+///
+/// The second case is important: during `onx::load`, the kernel sets up
+/// 3 1 GiB identity-mapped leaf PTEs (without PTE_U) so that the first
+/// 3 GiB of VA == PA. When `map_segment_data` later maps a user segment
+/// that falls inside one of those 1 GiB regions, we must NOT try to
+/// "upgrade" the identity PTE — we must allocate a fresh user page.
+pub unsafe fn pte_user_flags(root_pa: u64, vaddr: u64) -> u64 {
+    let mut pa = root_pa;
+    for level in (0..=2).rev() {
+        let idx = match level {
+            2 => sv39_l2_idx(vaddr),
+            1 => sv39_l1_idx(vaddr),
+            0 => sv39_l0_idx(vaddr),
+            _ => return 0,
+        };
+        let pte = ptr::read_volatile((pa as usize + idx * 8) as *const u64);
+        if pte & PTE_V == 0 {
+            return 0;
+        }
+        if pte & PTE_LEAF != 0 {
+            // Only return flags if this is a user page.
+            if pte & PTE_U == 0 {
+                return 0;
+            }
+            return pte & PTE_FLAGS_MASK;
+        }
+        pa = (pte & PTE_PPN_MASK) >> PTE_PPN_SHIFT << 12;
+    }
+    0
+}
+
 pub mod map;
 pub mod unmap;
 pub mod walk;
