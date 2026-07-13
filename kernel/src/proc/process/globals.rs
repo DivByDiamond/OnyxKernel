@@ -1,7 +1,7 @@
 use crate::arch::trap_frame::TrapFrame;
 use core::hint::spin_loop;
 use core::ptr;
-use core::sync::atomic::{AtomicBool, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 use super::types::{PROC_PID_INIT, Proc};
 use crate::arch::smp;
@@ -18,7 +18,7 @@ pub static G_NEED_RESCHED: [AtomicBool; MAX_HARTS] = [const { AtomicBool::new(fa
 
 pub static mut G_CURRENT: *mut Proc = ptr::null_mut();
 
-pub static mut G_NEXT_PID: u32 = PROC_PID_INIT;
+pub static G_NEXT_PID: AtomicU32 = AtomicU32::new(PROC_PID_INIT);
 
 /// Global process-list spinlock (Bug #16 fix). All mutations and iterations
 /// of `G_ALL_PROCS` (the singly-linked list of all Proc nodes) must hold
@@ -60,15 +60,15 @@ pub unsafe fn init() {
         G_HART_CURRENT[i] = ptr::null_mut();
         G_NEED_RESCHED[i].store(false, Ordering::Release);
     }
-    G_NEXT_PID = PROC_PID_INIT;
+    G_NEXT_PID.store(PROC_PID_INIT, Ordering::Release);
 }
 
 pub fn alloc_pid() -> u32 {
-    unsafe {
-        let pid = G_NEXT_PID;
-        G_NEXT_PID = pid + 1;
-        pid
-    }
+    // Bug (syscall SERIOUS #6): use atomic fetch_add to avoid races between
+    // concurrent fork()/spawn() calls on different harts. The previous
+    // non-atomic read-then-write could hand out the same PID to two
+    // processes if they raced.
+    G_NEXT_PID.fetch_add(1, Ordering::SeqCst)
 }
 
 pub unsafe fn current_for_hart(hartid: usize) -> *mut Proc {

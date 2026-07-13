@@ -181,6 +181,12 @@ pub unsafe fn exit(pid: u32, code: i32) {
 }
 
 /// Count active processes (for diagnostics).
+///
+/// Bug (syscall SERIOUS #8): the previous code walked `(*cur).next`
+/// (the runqueue link) instead of `(*cur).all_next` (the global
+/// process-list link). For processes not on any runqueue, `next` is
+/// null, so count() would stop at the first non-runqueue process and
+/// massively undercount. Now walks all_next.
 pub fn count() -> usize {
     unsafe {
         let mut n = 0;
@@ -189,7 +195,7 @@ pub fn count() -> usize {
             if !matches!((*cur).state, ProcState::Free) {
                 n += 1;
             }
-            cur = (*cur).next;
+            cur = (*cur).all_next;
         }
         n
     }

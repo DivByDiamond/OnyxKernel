@@ -272,7 +272,14 @@ pub unsafe fn sys_mprotect(addr: u64, length: u64, prot: u64) -> i64 {
     }
 
     let mut va = addr;
-    let end = addr + size;
+    // Bug (syscall SERIOUS #3): use checked_add for the end. The previous
+    // code did `addr + size` which silently wraps on overflow — a large
+    // size with addr near USER_TOP would wrap to a tiny end and the loop
+    // would skip entirely (silently doing nothing) or worse, run forever.
+    let end = match addr.checked_add(size) {
+        Some(e) => e,
+        None => return Errno::Inval.as_i64(),
+    };
     while va < end {
         let pa = vmm::translate_user(p.root_pa, va);
         if pa != 0 {

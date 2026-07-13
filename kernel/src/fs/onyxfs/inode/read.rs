@@ -5,9 +5,25 @@ use onyx_core::errno::{Errno, KResult};
 use onyx_core::formats::{ONYFS_BLOCK_SIZE, ONYFS_DIRECT_BLKS, OnyfsInode};
 
 pub unsafe fn read_inode(ino: u32, out: &mut OnyfsInode) -> KResult<()> {
+    // Bug (fs SERIOUS #10): bounds-check the inode number. A bogus ino
+    // (e.g. 0, or > max inodes) would compute a blk/slot that reads
+    // past the inode table into data blocks — silently returning
+    // garbage as an inode. We refuse ino == 0 (no inode 0 in OnyxFS)
+    // and rely on the page-aligned read_block to not OOB, but still
+    // sanity-check the resulting block number against the superblock.
+    if ino == 0 {
+        return Err(Errno::Inval);
+    }
     let ipb = inodes_per_block();
     let idx = (ino as usize).saturating_sub(1);
     let blk = (*(&raw const G_SB)).inode_table_start as usize + idx / ipb;
+    // Sanity: the inode table starts at inode_table_start and spans
+    // inode_count inodes. If blk is past the end of the table, reject.
+    let inode_table_blocks = ((*(&raw const G_SB)).inode_count as usize).div_ceil(ipb);
+    let inode_table_end = (*(&raw const G_SB)).inode_table_start as usize + inode_table_blocks;
+    if blk >= inode_table_end {
+        return Err(Errno::Inval);
+    }
     let slot = idx % ipb;
     {
         let pb = &raw mut G_BUF;

@@ -108,7 +108,15 @@ pub(super) unsafe fn sys_sbrk(incr: i64) -> i64 {
     let p = proc::by_pid(pid).unwrap();
     let cur = p.heap_brk;
     let heap_end = crate::arch::regs::USER_HEAP_BASE + crate::arch::regs::USER_HEAP_SIZE;
-    let new_brk = (cur as i64 + incr) as u64;
+    // Bug (syscall SERIOUS #1): use checked arithmetic for the new brk.
+    // The previous code did `(cur as i64 + incr) as u64` which silently
+    // wraps on signed overflow — e.g. sbrk(i64::MIN) or sbrk(very large)
+    // would produce a tiny new_brk that passes the bounds check and
+    // corrupt the heap.
+    let new_brk = match (cur as i64).checked_add(incr) {
+        Some(v) => v as u64,
+        None => return Errno::NoMem.as_i64(),
+    };
     if new_brk < crate::arch::regs::USER_HEAP_BASE || new_brk > heap_end {
         return Errno::NoMem.as_i64();
     }

@@ -1,5 +1,5 @@
 use core::hint::spin_loop;
-use core::sync::atomic::{AtomicBool, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 pub const MAX_HARTS: usize = 8;
 pub const SEC_STACK_SIZE: usize = 4096;
@@ -7,7 +7,9 @@ pub const SEC_STACK_SIZE: usize = 4096;
 #[unsafe(no_mangle)]
 pub static mut G_SEC_STACKS: [u8; MAX_HARTS * SEC_STACK_SIZE] = [0; MAX_HARTS * SEC_STACK_SIZE];
 
-static mut G_ONLINE_HARTS: u32 = 1;
+// Bug (syscall SERIOUS #10): make G_ONLINE_HARTS atomic so concurrent
+// secondary hart bring-up doesn't race on the increment.
+static G_ONLINE_HARTS: AtomicU32 = AtomicU32::new(1);
 
 #[unsafe(no_mangle)]
 pub static mut G_RELEASE: u64 = 0;
@@ -57,7 +59,13 @@ impl SpinLock {
 }
 
 pub unsafe fn release_secondary_harts() {
-    core::ptr::write_volatile(core::ptr::addr_of_mut!(G_RELEASE), 1);
+    // Bug (syscall SERIOUS #9): use an atomic store with SeqCst so the
+    // secondary harts (which spin on a read_volatile + wfi loop) are
+    // guaranteed to observe the release on all cores. The previous
+    // write_volatile was fine for a single secondary hart but had no
+    // ordering guarantee for multi-hart systems.
+    core::sync::atomic::AtomicU64::from_ptr(core::ptr::addr_of_mut!(G_RELEASE) as *mut u64)
+        .store(1, Ordering::SeqCst);
 }
 
 #[unsafe(no_mangle)]
@@ -102,10 +110,13 @@ pub unsafe extern "Rust" fn secondary_kmain() -> ! {
     let hartid: usize;
     core::arch::asm!("mv {0}, tp", out(reg) hartid);
     crate::proc::process::set_cpu_online(hartid, true);
-    *(&raw mut G_ONLINE_HARTS) += 1;
+    // Bug (syscall SERIOUS #10): atomic fetch_add to avoid races between
+    // concurrent secondary harts. The previous non-atomic increment could
+    // lose updates when two harts booted simultaneously.
+    G_ONLINE_HARTS.fetch_add(1, Ordering::SeqCst);
     crate::proc::scheduler::sched_enter_idle()
 }
 
 pub fn online_harts() -> u32 {
-    unsafe { *(&raw const G_ONLINE_HARTS) }
+    G_ONLINE_HARTS.load(Ordering::SeqCst)
 }
