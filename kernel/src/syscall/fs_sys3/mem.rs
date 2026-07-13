@@ -148,8 +148,12 @@ pub unsafe fn sys_mmap(
             }
         };
 
+        // mmap region lives above the brk heap (>= 0x2000_0000) and must
+        // not run past USER_TOP. The previous check used USER_HEAP_BASE
+        // (0x0100_0000) as the upper bound, which is below mmap_base and so
+        // every mapping attempt returned ENOMEM.
         let mmap_base: u64 = 0x2000_0000;
-        if vaddr < mmap_base || vaddr.wrapping_add(size as u64) > regs::USER_HEAP_BASE {
+        if vaddr < mmap_base || vaddr.wrapping_add(size as u64) > regs::USER_TOP {
             return Errno::NoMem.as_i64();
         }
 
@@ -183,8 +187,10 @@ pub unsafe fn sys_mmap(
             }
         };
 
+        // See the file-backed branch: upper bound is USER_TOP, not
+        // USER_HEAP_BASE, otherwise every anonymous mmap fails with ENOMEM.
         let mmap_base: u64 = 0x2000_0000;
-        if vaddr < mmap_base || vaddr.wrapping_add(size as u64) > regs::USER_HEAP_BASE {
+        if vaddr < mmap_base || vaddr.wrapping_add(size as u64) > regs::USER_TOP {
             return Errno::NoMem.as_i64();
         }
         match vmm::map_anon(p.root_pa, vaddr, size, pte_flags) {

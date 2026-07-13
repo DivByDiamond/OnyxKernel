@@ -27,7 +27,13 @@ _start:
     csrw pmpaddr0, t0
     li t0, 0x9F
     csrw pmpcfg0, t0
-    li t0, (1<<0)|(1<<2)|(1<<3)|(1<<5)|(1<<7)|(1<<8)|(1<<9)|(1<<12)|(1<<13)|(1<<15)
+    // Delegate the standard set of S-mode exceptions, INCLUDING:
+    //   bit 1  — instruction access fault
+    //   bit 11 — instruction page fault
+    // Without bits 1 and 11 a jump into unmapped or unmapped-execute
+    // memory traps into M-mode and hangs/crashes the machine instead of
+    // being delivered to the kernel as an S-mode page fault.
+    li t0, (1<<0)|(1<<1)|(1<<2)|(1<<3)|(1<<5)|(1<<7)|(1<<8)|(1<<9)|(1<<11)|(1<<12)|(1<<13)|(1<<15)
     csrw medeleg, t0
     li t0, (1<<1)|(1<<5)|(1<<9)
     csrw mideleg, t0

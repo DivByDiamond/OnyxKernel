@@ -99,12 +99,11 @@ pub unsafe fn sched_yield(tf: &mut TrapFrame) {
             return;
         }
         if matches!((*current).state, ProcState::Exited) {
-            if hartid == 0 {
-                set_current_for_hart(hartid, ptr::null_mut());
-                rq_unlock(hartid);
-                G_NEED_RESCHED[hartid].store(false, Ordering::Release);
-                crate::srv::klog::halt();
-            }
+            // Switch this hart to its idle context instead of halting the
+            // machine. Previously, hart 0 would `klog::halt()` here, which
+            // took the whole system down on the first process exit. Now all
+            // harts behave uniformly: drop the exited process as current and
+            // resume the idle trap frame saved on entry to sched_yield.
             set_current_for_hart(hartid, ptr::null_mut());
             rq_unlock(hartid);
             G_NEED_RESCHED[hartid].store(false, Ordering::Release);
@@ -114,7 +113,13 @@ pub unsafe fn sched_yield(tf: &mut TrapFrame) {
             ptr::write_volatile(dst, G_HART_IDLE_TF[hartid]);
             crate::arch::asm::sched_switch(dst as usize);
         }
-        (*current).state = ProcState::Running;
+        // Only flip a preempted Running/Ready process back to Running. A
+        // process that is Waiting (on a child, pipe, etc.) or otherwise
+        // blocked must NOT be scheduled here — restoring Running would
+        // defeat wait()/waitpid() and run the process prematurely.
+        if matches!((*current).state, ProcState::Ready) {
+            (*current).state = ProcState::Running;
+        }
         rq_unlock(hartid);
         G_NEED_RESCHED[hartid].store(false, Ordering::Release);
         return;
