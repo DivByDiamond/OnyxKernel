@@ -3,8 +3,8 @@ use core::sync::atomic::Ordering;
 use onyx_core::errno::{Errno, KResult};
 
 use super::lifecycle::exit;
-use super::process::{by_pid, current_for_hart, hart_id, Proc, ProcState, G_NEED_RESCHED};
-use crate::proc::scheduler::enqueue;
+use super::process::{by_pid, current_for_hart, hart_id, Proc, ProcState, G_NEED_RESCHED, MAX_HARTS};
+use crate::proc::scheduler::{enqueue, rq_lock, rq_unlock};
 
 /// Signal number for KILL (POSIX SIGKILL = 9). Always honored, never blocked.
 pub const SIG_KILL: u32 = 9;
@@ -19,7 +19,14 @@ pub unsafe fn signal_send(pid: u32, signal: u32) -> KResult<()> {
     p.pending_signals |= 1u32 << signal;
     if matches!(p.state, ProcState::Waiting) {
         p.state = ProcState::Ready;
-        enqueue(hart_id(), p as *mut Proc);
+        // Bug #11 fix: acquire the caller's rq_lock before enqueue. The
+        // previous code called enqueue(hart_id(), p) without any lock,
+        // racing with the scheduler on the same hart and producing
+        // orphaned/duplicated runqueue entries.
+        let caller_hart = hart_id();
+        rq_lock(caller_hart);
+        enqueue(caller_hart, p as *mut Proc);
+        rq_unlock(caller_hart);
     }
     Ok(())
 }

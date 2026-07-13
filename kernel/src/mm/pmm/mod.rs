@@ -5,7 +5,9 @@
 //! operations (alloc/free) live in `bitmap.rs`; SLAB operations live in
 //! `slab.rs`.
 use crate::arch::__kernel_end;
+use core::hint::spin_loop;
 use core::ptr;
+use core::sync::atomic::{AtomicBool, Ordering};
 
 pub const PAGE_SIZE: usize = 4096;
 pub const KERNEL_HEAP_RESERVE: usize = 4 * 1024 * 1024;
@@ -31,6 +33,30 @@ pub(super) static mut G_PMM: Pmm = Pmm {
     bitmap_bytes: 0,
     slab_heads: [ptr::null_mut(); SLAB_SIZES.len()],
 };
+
+/// Global PMM spinlock (Bug #1 fix). All bitmap and slab free-list mutations
+/// go through this lock, preventing the SMP race where two harts simultaneously
+/// read the same bitmap bit as free, both set it, and return the same PA —
+/// leading to double-mapping, UAF, and silent memory corruption.
+///
+/// Callers must use `pmm_lock` / `pmm_unlock` around any sequence that reads
+/// and mutates `G_PMM` fields, the bitmap, or the slab free-lists. Internal
+/// `_unlocked` variants exist for call sites that already hold the lock.
+pub(super) static G_PMM_LOCK: AtomicBool = AtomicBool::new(false);
+
+#[inline]
+pub(super) unsafe fn pmm_lock() {
+    while G_PMM_LOCK.swap(true, Ordering::Acquire) {
+        while G_PMM_LOCK.load(Ordering::Relaxed) {
+            spin_loop();
+        }
+    }
+}
+
+#[inline]
+pub(super) unsafe fn pmm_unlock() {
+    G_PMM_LOCK.store(false, Ordering::Release);
+}
 
 pub unsafe fn init(dram_base: u64, dram_size: u64) {
     let kernel_end_pa = &__kernel_end as *const u8 as usize;

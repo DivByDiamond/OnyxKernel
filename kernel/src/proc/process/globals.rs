@@ -1,4 +1,5 @@
 use crate::arch::trap_frame::TrapFrame;
+use core::hint::spin_loop;
 use core::ptr;
 use core::sync::atomic::{AtomicBool, Ordering};
 
@@ -18,6 +19,32 @@ pub static G_NEED_RESCHED: [AtomicBool; MAX_HARTS] = [const { AtomicBool::new(fa
 pub static mut G_CURRENT: *mut Proc = ptr::null_mut();
 
 pub static mut G_NEXT_PID: u32 = PROC_PID_INIT;
+
+/// Global process-list spinlock (Bug #16 fix). All mutations and iterations
+/// of `G_ALL_PROCS` (the singly-linked list of all Proc nodes) must hold
+/// this lock, preventing the race where two harts simultaneously reap the
+/// same exited child via `wait()` / `waitpid()` and double-`kfree` the Proc
+/// node, or where one hart iterates the list while another is removing a
+/// node (orphaned/duplicated processes, UAF).
+///
+/// Lock ordering: PROC_LIST_LOCK is outermost. Never acquire it while
+/// already holding an rq_lock — acquire PROC_LIST_LOCK first, then
+/// rq_lock inside if needed.
+pub static G_PROC_LIST_LOCK: AtomicBool = AtomicBool::new(false);
+
+#[inline]
+pub fn proc_list_lock() {
+    while G_PROC_LIST_LOCK.swap(true, Ordering::Acquire) {
+        while G_PROC_LIST_LOCK.load(Ordering::Relaxed) {
+            spin_loop();
+        }
+    }
+}
+
+#[inline]
+pub fn proc_list_unlock() {
+    G_PROC_LIST_LOCK.store(false, Ordering::Release);
+}
 
 #[inline]
 pub fn hart_id() -> usize {

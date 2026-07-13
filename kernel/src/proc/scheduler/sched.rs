@@ -28,6 +28,12 @@ pub unsafe fn steal(hartid: usize) -> *mut Proc {
         if victim == hartid {
             continue;
         }
+        // Bug #11 fix: hold the victim's rq_lock across dequeue AND any
+        // re-enqueue caused by an affinity mismatch. Previously the lock
+        // was released immediately after dequeue and the subsequent
+        // `enqueue(victim, p)` for an affinity-mismatched process mutated
+        // the victim's runqueue without any lock, racing with the victim
+        // hart's own scheduler and producing orphaned/duplicated entries.
         if (*G_RQ.as_mut_ptr())[victim]
             .lock
             .swap(true, Ordering::Acquire)
@@ -35,17 +41,26 @@ pub unsafe fn steal(hartid: usize) -> *mut Proc {
             continue;
         }
         let p = dequeue(victim);
-        (*G_RQ.as_mut_ptr())[victim]
-            .lock
-            .store(false, Ordering::Release);
         if !p.is_null() {
             let affinity = (*p).affinity;
             if affinity >= 0 && (affinity as usize) != hartid {
+                // Put it back on the victim's queue (lock still held).
                 enqueue(victim, p);
+                (*G_RQ.as_mut_ptr())[victim]
+                    .lock
+                    .store(false, Ordering::Release);
                 continue;
             }
+            // Got a stealable process — release the lock and return it.
+            (*G_RQ.as_mut_ptr())[victim]
+                .lock
+                .store(false, Ordering::Release);
             return p;
         }
+        // Nothing to steal from this victim — release the lock.
+        (*G_RQ.as_mut_ptr())[victim]
+            .lock
+            .store(false, Ordering::Release);
     }
     core::ptr::null_mut()
 }

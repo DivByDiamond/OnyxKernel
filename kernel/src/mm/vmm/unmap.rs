@@ -7,6 +7,13 @@ use onyx_core::errno::KResult;
 use super::walk::walk;
 
 pub unsafe fn unmap(root_pa: u64, vaddr: u64, size: usize) -> KResult<()> {
+    super::vmm_lock();
+    let r = unmap_impl(root_pa, vaddr, size);
+    super::vmm_unlock();
+    r
+}
+
+unsafe fn unmap_impl(root_pa: u64, vaddr: u64, size: usize) -> KResult<()> {
     let mut va = vaddr;
     let mut remaining = size;
     while remaining > 0 {

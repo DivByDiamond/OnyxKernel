@@ -29,6 +29,14 @@ unsafe fn slab_class_for(size: usize) -> Option<usize> {
 }
 
 pub unsafe fn slab_alloc(size: usize) -> Option<*mut u8> {
+    super::pmm_lock();
+    let r = slab_alloc_unlocked(size);
+    super::pmm_unlock();
+    r
+}
+
+/// Internal slab_alloc without locking. Caller MUST hold `pmm_lock()`.
+unsafe fn slab_alloc_unlocked(size: usize) -> Option<*mut u8> {
     let class = slab_class_for(size)?;
     let obj_size = SLAB_SIZES[class];
     let hdr_size = size_of_slab_header();
@@ -53,7 +61,8 @@ pub unsafe fn slab_alloc(size: usize) -> Option<*mut u8> {
         }
         page = hdr.next;
     }
-    let new_page_pa = alloc().ok()? as usize;
+    // Use the unlocked variant — we already hold pmm_lock.
+    let new_page_pa = super::bitmap::alloc_unlocked().ok()? as usize;
     let new_page = new_page_pa as *mut SlabHeader;
     let avail = PAGE_SIZE - hdr_size;
     let capacity = (avail / obj_size) as u32;
@@ -78,6 +87,14 @@ pub unsafe fn slab_alloc(size: usize) -> Option<*mut u8> {
 }
 
 pub unsafe fn slab_free(ptr: *mut u8) -> bool {
+    super::pmm_lock();
+    let r = slab_free_unlocked(ptr);
+    super::pmm_unlock();
+    r
+}
+
+/// Internal slab_free without locking. Caller MUST hold `pmm_lock()`.
+unsafe fn slab_free_unlocked(ptr: *mut u8) -> bool {
     let page_addr = (ptr as usize) & !(PAGE_SIZE - 1);
     let page = page_addr as *mut SlabHeader;
     if page.is_null() {
@@ -95,6 +112,13 @@ pub unsafe fn slab_free(ptr: *mut u8) -> bool {
     }
     let slot = (offset / obj_size) as u32;
     if slot >= hdr.capacity {
+        return false;
+    }
+    // Bug #3 fix (extra top-30): detect double-free. Without this check,
+    // a double-free would re-set the already-free bit, bump free_count
+    // past capacity, and cause the slab page to be returned to the bitmap
+    // while slots are still referenced — leading to UAF.
+    if hdr.free_bits & (1u64 << slot) != 0 {
         return false;
     }
     hdr.free_bits |= 1u64 << slot;
@@ -115,7 +139,8 @@ pub unsafe fn slab_free(ptr: *mut u8) -> bool {
             prev = cur;
             cur = (*cur).next;
         }
-        super::bitmap::free(page_addr as u64);
+        // Use the unlocked variant — we already hold pmm_lock.
+        super::bitmap::free_unlocked(page_addr as u64);
     }
     true
 }

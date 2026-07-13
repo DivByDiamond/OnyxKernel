@@ -7,6 +7,13 @@ use onyx_core::errno::KResult;
 use super::walk::walk;
 
 pub unsafe fn map(root_pa: u64, vaddr: u64, paddr: u64, size: usize, flags: u64) -> KResult<()> {
+    super::vmm_lock();
+    let r = map_impl(root_pa, vaddr, paddr, size, flags);
+    super::vmm_unlock();
+    r
+}
+
+unsafe fn map_impl(root_pa: u64, vaddr: u64, paddr: u64, size: usize, flags: u64) -> KResult<()> {
     let mut va = vaddr;
     let mut pa = paddr;
     let mut remaining = size as u64;
@@ -29,6 +36,13 @@ pub unsafe fn map(root_pa: u64, vaddr: u64, paddr: u64, size: usize, flags: u64)
 }
 
 pub unsafe fn map_anon(root_pa: u64, vaddr: u64, size: usize, flags: u64) -> KResult<()> {
+    super::vmm_lock();
+    let r = map_anon_impl(root_pa, vaddr, size, flags);
+    super::vmm_unlock();
+    r
+}
+
+unsafe fn map_anon_impl(root_pa: u64, vaddr: u64, size: usize, flags: u64) -> KResult<()> {
     let mut va = vaddr;
     let mut remaining = size as u64;
     while remaining > 0 {
@@ -54,7 +68,10 @@ pub unsafe fn map_one_pub(
     flags: u64,
     level: u32,
 ) -> KResult<()> {
-    map_one(root_pa, vaddr, paddr, flags, level)
+    super::vmm_lock();
+    let r = map_one(root_pa, vaddr, paddr, flags, level);
+    super::vmm_unlock();
+    r
 }
 
 fn best_level(va: u64, pa: u64, remaining: u64) -> u32 {

@@ -35,6 +35,14 @@ fn idx_to_pa(idx: usize) -> usize {
 }
 
 pub unsafe fn alloc() -> KResult<u64> {
+    super::pmm_lock();
+    let r = alloc_unlocked();
+    super::pmm_unlock();
+    r
+}
+
+/// Internal alloc without locking. Caller MUST hold `pmm_lock()`.
+pub(super) unsafe fn alloc_unlocked() -> KResult<u64> {
     let p = &raw const G_PMM;
     let n = (*p).total_pages;
     let mut i = 0;
@@ -51,6 +59,14 @@ pub unsafe fn alloc() -> KResult<u64> {
 }
 
 pub unsafe fn alloc_n(n: usize) -> KResult<u64> {
+    super::pmm_lock();
+    let r = alloc_n_unlocked(n);
+    super::pmm_unlock();
+    r
+}
+
+/// Internal alloc_n without locking. Caller MUST hold `pmm_lock()`.
+pub(super) unsafe fn alloc_n_unlocked(n: usize) -> KResult<u64> {
     if n == 0 {
         return Err(Errno::Inval);
     }
@@ -80,6 +96,13 @@ pub unsafe fn alloc_n(n: usize) -> KResult<u64> {
 }
 
 pub unsafe fn free(pa: u64) {
+    super::pmm_lock();
+    free_unlocked(pa);
+    super::pmm_unlock();
+}
+
+/// Internal free without locking. Caller MUST hold `pmm_lock()`.
+pub(super) unsafe fn free_unlocked(pa: u64) {
     let idx = pa_to_idx(pa as usize);
     if idx < unsafe { (*(&raw const G_PMM)).total_pages } {
         if bm_get(idx) {
@@ -89,5 +112,6 @@ pub unsafe fn free(pa: u64) {
 }
 
 pub unsafe fn alloc_zero() -> KResult<u64> {
+    // alloc() already acquires pmm_lock; no extra locking needed here.
     alloc()
 }

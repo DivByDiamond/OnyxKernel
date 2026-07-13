@@ -1,10 +1,12 @@
 //! Process lifecycle — allocation, freeing, `enter_user`, `exit`, and `count`.
 use super::process::Proc;
 use super::process::{
-    by_pid, hart_id, set_current_for_hart, ProcState, G_ALL_PROCS, PROC_RING_KERNEL,
+    by_pid, hart_id, proc_list_lock, proc_list_unlock, set_current_for_hart, ProcState, G_ALL_PROCS,
+    PROC_RING_KERNEL,
 };
 use crate::arch::trap_frame::TrapFrame;
 use crate::mm::{heap, vmm};
+use crate::proc::scheduler::{rq_lock, rq_unlock};
 use core::ptr;
 use onyx_core::errno::KResult;
 
@@ -46,7 +48,12 @@ pub(super) unsafe fn alloc_proc() -> KResult<*mut Proc> {
 }
 
 /// Free a Proc node from the list and heap.
+///
+/// Bug #16 fix: hold proc_list_lock while unlinking from G_ALL_PROCS so
+/// two harts reaping the same exited child via wait()/waitpid() can't
+/// race past each other and double-kfree the node.
 pub unsafe fn free_proc(p: *mut Proc) {
+    proc_list_lock();
     // Remove from process list.
     if G_ALL_PROCS == p {
         G_ALL_PROCS = (*p).all_next;
@@ -59,6 +66,7 @@ pub unsafe fn free_proc(p: *mut Proc) {
             (*cur).all_next = (*p).all_next;
         }
     }
+    proc_list_unlock();
     heap::kfree(p as *mut u8);
 }
 
@@ -123,13 +131,24 @@ pub unsafe fn exit(pid: u32, code: i32) {
             if let Some(pp) = by_pid(parent) {
                 if matches!(pp.state, ProcState::Waiting) {
                     pp.state = ProcState::Ready;
-                    crate::proc::scheduler::enqueue(hart_id(), pp as *mut Proc);
+                    // Bug #11 fix: acquire rq_lock before enqueue. The
+                    // previous code called enqueue(hart_id(), pp) with no
+                    // lock, racing with the scheduler on this hart.
+                    let caller_hart = hart_id();
+                    rq_lock(caller_hart);
+                    crate::proc::scheduler::enqueue(caller_hart, pp as *mut Proc);
+                    rq_unlock(caller_hart);
                 }
             }
         }
         // Re-parent any orphaned children to PID 1 (init). This prevents
         // zombie leaks when a parent dies before its children. The init
         // process is expected to call `wait()` periodically to reap them.
+        //
+        // Bug #16 fix: hold proc_list_lock while walking G_ALL_PROCS —
+        // another hart may concurrently be freeing a process and
+        // unlinking it from the list, which would orphan our cursor.
+        proc_list_lock();
         let mut cur = G_ALL_PROCS;
         while !cur.is_null() {
             if (*cur).parent_pid == pid
@@ -139,6 +158,7 @@ pub unsafe fn exit(pid: u32, code: i32) {
             }
             cur = (*cur).all_next;
         }
+        proc_list_unlock();
     }
 }
 

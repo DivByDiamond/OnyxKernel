@@ -15,6 +15,7 @@ use crate::arch::trap_frame::TrapFrame;
 use crate::fs::devfs;
 use crate::fs::vfs;
 use crate::proc;
+use crate::proc::process::{proc_list_lock, proc_list_unlock};
 use crate::syscall::abi::{TCGETS, TCSETS, WNOHANG};
 use onyx_core::errno::Errno;
 
@@ -251,6 +252,11 @@ pub unsafe fn sys_waitpid(tf: &mut TrapFrame, pid: u64, status_out: u64, options
         return Errno::Inval.as_i64();
     }
 
+    // Bug #16 fix: hold proc_list_lock around the iteration + free_proc so
+    // two harts can't simultaneously reap the same exited child and
+    // double-kfree the Proc node.
+    proc_list_lock();
+
     // Look for an exited child matching the pid filter.
     let mut cur = proc::G_ALL_PROCS;
     while !cur.is_null() {
@@ -265,13 +271,27 @@ pub unsafe fn sys_waitpid(tf: &mut TrapFrame, pid: u64, status_out: u64, options
             if matches_pid {
                 let exited_pid = (*cur).pid;
                 let code = (*cur).exit_code;
+                // Detach from the list first (still under lock), then drop
+                // the lock before doing the actual kfree.
+                if proc::G_ALL_PROCS == cur {
+                    proc::G_ALL_PROCS = (*cur).all_next;
+                } else {
+                    let mut walk = proc::G_ALL_PROCS;
+                    while !walk.is_null() && (*walk).all_next != cur {
+                        walk = (*walk).all_next;
+                    }
+                    if !walk.is_null() {
+                        (*walk).all_next = (*cur).all_next;
+                    }
+                }
+                proc_list_unlock();
                 if status_out != 0 {
                     let pa = crate::mm::vmm::translate(proc::current().root_pa, status_out);
                     if pa != 0 {
                         *(pa as *mut i32) = code;
                     }
                 }
-                proc::free_proc(cur);
+                crate::mm::heap::kfree(cur as *mut u8);
                 return exited_pid as i64;
             }
         }
@@ -297,6 +317,7 @@ pub unsafe fn sys_waitpid(tf: &mut TrapFrame, pid: u64, status_out: u64, options
         }
         cur = (*cur).all_next;
     }
+    proc_list_unlock();
     if !has_child {
         return Errno::NoEnt.as_i64();
     }
