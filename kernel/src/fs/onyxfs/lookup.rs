@@ -54,6 +54,10 @@ pub(super) unsafe fn parse_dirent(slot: usize) -> KResult<OnyfsDirent> {
 
 /// Lookup name in a directory inode. Returns inode number and fills `out` stat.
 /// Supports subdirectories: if name contains '/', splits and walks.
+///
+/// Bug #19 fix: previously this only scanned `inode.blocks[0]`, so any
+/// directory with more than ~102 entries returned NoEnt for everything
+/// past the first block. We now iterate every direct block.
 pub unsafe fn lookup_in(dir_ino: u32, name: &[u8], out: &mut OnyfsStat) -> KResult<u32> {
     let mut inode = OnyfsInode {
         mode: 0,
@@ -72,35 +76,39 @@ pub unsafe fn lookup_in(dir_ino: u32, name: &[u8], out: &mut OnyfsStat) -> KResu
         reserved: 0,
     };
     read_inode(dir_ino, &mut inode)?;
-    let dir_blk = inode.blocks[0];
-    if dir_blk == 0 {
-        return Err(Errno::NoEnt);
-    }
-    {
-        let pb = &raw mut G_BUF;
-        read_block(dir_blk, &mut *pb)
-    }?;
     let dpb = dirents_per_block();
-    for i in 0..dpb {
-        let d = parse_dirent(i)?;
-        if d.inode == 0 {
+    // Scan every direct block of the directory inode. Skip slots that
+    // are 0 (unused/deleted).
+    for blk_idx in 0..ONYFS_DIRECT_BLKS {
+        let dir_blk = inode.blocks[blk_idx];
+        if dir_blk == 0 {
             continue;
         }
-        // Resolve actual name length: prefer name_len field (v2), fall back to
-        // NUL-termination scan (v1 / malformed v2).
-        let nl = if d.name_len > 0 && (d.name_len as usize) <= ONYFS_NAME_MAX {
-            d.name_len as usize
-        } else {
-            d.name
-                .iter()
-                .position(|&b| b == 0)
-                .unwrap_or(ONYFS_NAME_MAX)
-        };
-        if nl == name.len() && d.name[..nl] == *name {
-            // Capture inode number BEFORE calling stat — stat() overwrites G_BUF.
-            let found_ino = d.inode;
-            stat(found_ino, out)?;
-            return Ok(found_ino);
+        {
+            let pb = &raw mut G_BUF;
+            read_block(dir_blk, &mut *pb)
+        }?;
+        for i in 0..dpb {
+            let d = parse_dirent(i)?;
+            if d.inode == 0 {
+                continue;
+            }
+            // Resolve actual name length: prefer name_len field (v2), fall back to
+            // NUL-termination scan (v1 / malformed v2).
+            let nl = if d.name_len > 0 && (d.name_len as usize) <= ONYFS_NAME_MAX {
+                d.name_len as usize
+            } else {
+                d.name
+                    .iter()
+                    .position(|&b| b == 0)
+                    .unwrap_or(ONYFS_NAME_MAX)
+            };
+            if nl == name.len() && d.name[..nl] == *name {
+                // Capture inode number BEFORE calling stat — stat() overwrites G_BUF.
+                let found_ino = d.inode;
+                stat(found_ino, out)?;
+                return Ok(found_ino);
+            }
         }
     }
     Err(Errno::NoEnt)

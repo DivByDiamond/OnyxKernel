@@ -1,5 +1,5 @@
 use super::OnyfsStat;
-use super::alloc::remove_dirent;
+use super::alloc::{free_inode, remove_dirent};
 use super::journal::journal_commit;
 use super::lookup::lookup;
 use onyx_core::errno::{Errno, KResult};
@@ -28,7 +28,25 @@ pub unsafe fn unlink(path: &[u8]) -> KResult<()> {
         lookup(parent_path, &mut st)?;
         st.ino
     };
+    // Resolve the target inode BEFORE removing the dirent — we need its
+    // inode number to free it. The previous code skipped this entirely,
+    // so unlink only zeroed the dirent's inode field and leaked the
+    // inode + every data block it referenced (Bug #20).
+    let mut target_st = OnyfsStat::default();
+    let target_ino = match lookup(path, &mut target_st) {
+        Ok(ino) => ino,
+        // Already gone — nothing to do.
+        Err(_) => return Err(Errno::NoEnt),
+    };
+    // Refuse to unlink the root or a directory via this path. Directory
+    // removal should go through rmdir (TODO). The mode check uses the
+    // S_IFMT bits (0o170000); S_IFDIR = 0o040000.
+    if target_st.mode & 0o170000 == 0o040000 {
+        return Err(Errno::IsDir);
+    }
     remove_dirent(parent_ino, filename)?;
+    // Now actually reclaim the inode and its data blocks.
+    free_inode(target_ino)?;
     journal_commit()?;
     Ok(())
 }
