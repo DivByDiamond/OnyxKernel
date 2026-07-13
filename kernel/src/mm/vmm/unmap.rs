@@ -15,7 +15,10 @@ pub unsafe fn unmap(root_pa: u64, vaddr: u64, size: usize) -> KResult<()> {
 
 unsafe fn unmap_impl(root_pa: u64, vaddr: u64, size: usize) -> KResult<()> {
     let mut va = vaddr;
-    let mut remaining = size;
+    // Bug #5 fix: page-align size up so `remaining -= 4096` can't underflow
+    // when size is not a multiple of PAGE_SIZE.
+    let size_aligned = (size + 4095) & !4095;
+    let mut remaining = size_aligned;
     while remaining > 0 {
         let pte_ptr = walk(root_pa, va, 0, false)?;
         let pte = ptr::read_volatile(pte_ptr);

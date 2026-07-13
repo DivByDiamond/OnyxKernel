@@ -53,7 +53,19 @@ pub unsafe fn dup2(old_token: FdToken, new_fd: u64) -> KResult<FdToken> {
 pub unsafe fn create_pipe() -> KResult<(FdToken, FdToken)> {
     let r_idx = alloc_fd(PERM_READ)?;
     let w_idx = alloc_fd(PERM_WRITE)?;
-    let pipe_ino = !0u32;
+    // Bug #24 fix: previously used pipe_ino = !0u32 (0xFFFFFFFF). When a
+    // pipe fd was later read/written, ipcfs::read/write computed
+    // chan_id = ino - 2 = 0xFFFFFFFD and indexed G_CHANNELS[0xFFFFFFFD],
+    // a massive OOB write into kernel memory. Now we allocate a real IPC
+    // channel and use (chan_id + 2) as the ino, matching the ipcfs
+    // convention (ino 0/1 are reserved, ino 2+ maps to chan_id = ino-2).
+    let owner_pid = if crate::fs::vfs::ops::is_kernel_boot() {
+        0
+    } else {
+        crate::proc::current_pid()
+    };
+    let chan_id = crate::ipc::create(owner_pid)?;
+    let pipe_ino = chan_id + 2;
     if crate::fs::vfs::ops::is_kernel_boot() {
         let p = &raw mut crate::fs::vfs::ops::G_KERNEL_FDS;
         (*p)[r_idx].ino = pipe_ino;

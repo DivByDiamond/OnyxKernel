@@ -146,10 +146,49 @@ pub unsafe fn krealloc(p: *mut u8, new_size: usize) -> KResult<*mut u8> {
         kfree(p);
         return Err(Errno::Inval);
     }
+    // Bug #4 fix: previously krealloc unconditionally copied `new_size` bytes
+    // from the old buffer. If new_size > old allocation size, this read past
+    // the old buffer's end and leaked kernel heap data into the new buffer
+    // (heap over-read). We now introspect the old allocation's actual size
+    // via alloc_size() and copy min(old_size, new_size) bytes.
+    let old_size = alloc_size(p);
+    let copy_n = if old_size == 0 {
+        new_size
+    } else {
+        old_size.min(new_size)
+    };
     let new = kmalloc(new_size)?;
-    core::ptr::copy_nonoverlapping(p, new, new_size);
+    core::ptr::copy_nonoverlapping(p, new, copy_n);
     kfree(p);
     Ok(new)
+}
+
+/// Return the usable size of the allocation at `p`, or 0 if unknown.
+/// Used by krealloc to bound the copy when shrinking/growing. Looks at
+/// the slab header (if the allocation came from the slab allocator) or
+/// the block header (if it came from the free-list).
+unsafe fn alloc_size(p: *mut u8) -> usize {
+    if p.is_null() {
+        return 0;
+    }
+    // Try slab first: the page-aligned address holds a SlabHeader with
+    // SLAB_MAGIC if this is a slab allocation.
+    let page_addr = (p as usize) & !(pmm::PAGE_SIZE - 1);
+    let page = page_addr as *const pmm::slab::SlabHeader;
+    if (*page).magic == pmm::SLAB_MAGIC {
+        let class = (*page).size_idx as usize;
+        if class < pmm::SLAB_SIZES.len() {
+            return pmm::SLAB_SIZES[class];
+        }
+        return 0;
+    }
+    // Otherwise it's a free-list block. The Block header sits immediately
+    // before the user pointer.
+    let blk_addr = p as usize - Block::hdr_size();
+    let blk = blk_addr as *const Block;
+    // Best-effort: trust the size field. We can't easily validate without
+    // a magic, but kfree_locked has the same trust assumption.
+    (*blk).size
 }
 pub fn used() -> usize {
     unsafe { (*&raw const G_HEAP).used }

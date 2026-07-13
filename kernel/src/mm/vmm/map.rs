@@ -44,7 +44,12 @@ pub unsafe fn map_anon(root_pa: u64, vaddr: u64, size: usize, flags: u64) -> KRe
 
 unsafe fn map_anon_impl(root_pa: u64, vaddr: u64, size: usize, flags: u64) -> KResult<()> {
     let mut va = vaddr;
-    let mut remaining = size as u64;
+    // Bug #5 fix: page-align size up so the subtraction `remaining -= 4096`
+    // can't underflow when the caller passes a non-page-multiple size.
+    // Without this, a size like 5000 would loop forever in release builds
+    // (underflow wraps to a huge u64) or panic in debug builds.
+    let size_aligned = (size + 4095) & !4095;
+    let mut remaining = size_aligned as u64;
     while remaining > 0 {
         let page_pa = pmm::alloc_zero()?;
         map_one(root_pa, va, page_pa, flags | PTE_A | PTE_D, 0)?;

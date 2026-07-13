@@ -1,7 +1,6 @@
 //! SLAB allocator — fixed-size object pools for small allocations (64, 256,
 //! 1024 bytes). Each SLAB page has a `SlabHeader` followed by an array of
 //! equal-sized object slots tracked via a 64-bit free bitmap.
-use super::bitmap::alloc;
 use super::{G_PMM, PAGE_SIZE, SLAB_MAGIC, SLAB_SIZES};
 use core::ptr;
 

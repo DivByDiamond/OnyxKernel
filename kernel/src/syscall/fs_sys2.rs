@@ -41,10 +41,33 @@ pub(super) unsafe fn sys_exec(tf: &mut TrapFrame, path: u64, argv: u64) -> i64 {
     }
     let (argc, argv_sp) = proc::onx::copy_argv_to_stack(r.root_pa, r.ustack, argv);
     let p = proc::current();
+    // Bug #8 fix: port the root_refcount logic from sys_execve. The previous
+    // code unconditionally destroyed the old root page table, even when
+    // fork() had shared it with a child via root_refcount. After fork+exec,
+    // the child's root_pa pointer would dangle into freed page-table memory
+    // — a classic UAF. Now we decrement the refcount and only destroy when
+    // it reaches zero, and we allocate a fresh refcount for the new root.
     if p.root_pa != 0 {
-        crate::mm::vmm::destroy_root(p.root_pa);
+        if !p.root_refcount.is_null() {
+            *p.root_refcount -= 1;
+            if *p.root_refcount == 0 {
+                heap::kfree(p.root_refcount as *mut u8);
+                crate::mm::vmm::destroy_root(p.root_pa);
+            }
+        } else {
+            crate::mm::vmm::destroy_root(p.root_pa);
+        }
     }
     p.root_pa = r.root_pa;
+    // Allocate a fresh refcount for the new root page table.
+    match heap::kmalloc(4) {
+        Ok(rc) => {
+            let rcp = rc as *mut u32;
+            *rcp = 1;
+            p.root_refcount = rcp;
+        }
+        Err(e) => return e.as_i64(),
+    }
     p.entry = r.entry;
     p.ustack = if argc > 0 { argv_sp } else { r.ustack };
     p.heap_brk = r.heap_brk;

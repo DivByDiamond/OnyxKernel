@@ -101,6 +101,20 @@ pub unsafe fn exit(pid: u32, code: i32) {
             onyx_core::fmt::Arg::from(pid),
             onyx_core::fmt::Arg::from(code)
         );
+        // Bug #15 fix: remove the process from every hart's runqueue BEFORE
+        // setting state to Exited. Without this, the process could still be
+        // on a runqueue with on_rq=true, and the next sched_yield on that
+        // hart would dequeue it, see state != Running (it's Exited), skip
+        // the re-enqueue, but then promote it back to Running at the bottom
+        // of sched_yield — effectively reviving a dead process. Iterating
+        // all harts is O(MAX_HARTS) but MAX_HARTS is small, and remove()
+        // returns immediately when on_rq is false.
+        let p_ptr = p as *mut Proc;
+        for h in 0..super::process::MAX_HARTS {
+            crate::proc::scheduler::rq_lock(h);
+            let _ = crate::proc::scheduler::runqueue::remove(h, p_ptr);
+            crate::proc::scheduler::rq_unlock(h);
+        }
         // Close all open file descriptors so kernel-internal file resources
         // (OnyxFS inodes, pipe buffers, etc.) are released. The FD slots
         // themselves live in the Proc struct and will be freed with it.
