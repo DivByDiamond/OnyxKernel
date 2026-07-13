@@ -103,8 +103,24 @@ unsafe fn slab_free_unlocked(ptr: *mut u8) -> bool {
     if hdr.magic != SLAB_MAGIC {
         return false;
     }
-    let obj_size = SLAB_SIZES[hdr.size_idx as usize];
+    // Bug (mm SERIOUS #2): bounds-check hdr.size_idx before indexing
+    // SLAB_SIZES. A corrupted header (e.g. from a wild pointer free or
+    // memory corruption) could have size_idx >= SLAB_SIZES.len(), which
+    // would index out of bounds on the next line and panic the kernel.
+    let class = hdr.size_idx as usize;
+    if class >= SLAB_SIZES.len() {
+        return false;
+    }
+    let obj_size = SLAB_SIZES[class];
     let hdr_size = size_of_slab_header();
+    // Bug (mm SERIOUS #3): guard against offset underflow. If ptr is
+    // inside the slab page but BEFORE the header (e.g. points into the
+    // header itself), `ptr - page_addr - hdr_size` would underflow and
+    // produce a huge offset, then `1u64 << slot` with slot >= 64 would
+    // be UB. Reject anything that doesn't sit above the header.
+    if ptr as usize < page_addr + hdr_size {
+        return false;
+    }
     let offset = ptr as usize - page_addr - hdr_size;
     if !offset.is_multiple_of(obj_size) {
         return false;
@@ -123,7 +139,6 @@ unsafe fn slab_free_unlocked(ptr: *mut u8) -> bool {
     hdr.free_bits |= 1u64 << slot;
     hdr.free_count += 1;
     if hdr.free_count == hdr.capacity {
-        let class = hdr.size_idx as usize;
         let mut cur = (*(&raw const G_PMM)).slab_heads[class];
         let mut prev: *mut SlabHeader = ptr::null_mut();
         while !cur.is_null() {

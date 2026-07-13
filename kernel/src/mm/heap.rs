@@ -63,6 +63,13 @@ pub unsafe fn kmalloc(size: usize) -> KResult<*mut u8> {
     if size == 0 {
         return Err(Errno::Inval);
     }
+    // Bug (mm SERIOUS #9): guard against size+align overflow. The previous
+    // code computed `(size + 15) & !15` without checking for overflow — a
+    // size near usize::MAX would wrap to a tiny value and we'd allocate a
+    // too-small buffer. Reject anything that doesn't fit in 15 + size.
+    if size > isize::MAX as usize - 16 {
+        return Err(Errno::NoMem);
+    }
     lock_heap();
     let res = kmalloc_locked(size);
     unlock_heap();
@@ -116,8 +123,24 @@ unsafe fn kfree_locked(p: *mut u8) {
     if pmm::slab_free(p) {
         return;
     }
+    // Bug (mm SERIOUS #14): sanity-check the pointer's alignment before
+    // treating it as a free-list Block. The Block header sits immediately
+    // before the user pointer, so p must point to (Block::hdr_size()) bytes
+    // past a 16-byte boundary. If p is unaligned or points into the middle
+    // of a block, the previous code would compute a bogus blk_addr and
+    // corrupt the free list (or panic on the size subtraction). We refuse
+    // to free such pointers — they're either bad calls or double-frees.
+    if (p as usize) < Block::hdr_size() || (p as usize) & 15 != 0 {
+        return;
+    }
     let blk_addr = p as usize - Block::hdr_size();
     let blk = blk_addr as *mut Block;
+    // Trust-but-verify: only proceed if the block looks like one of ours
+    // (size is sane — not zero, not absurdly large). This catches a lot
+    // of accidental kfree(random pointer) cases without a full magic.
+    if (*blk).size == 0 || (*blk).size > HEAP_SIZE {
+        return;
+    }
     (*&raw mut G_HEAP).used -= (*blk).size;
     (*blk).free = true;
     if !(*blk).next.is_null() && (*(*blk).next).free {

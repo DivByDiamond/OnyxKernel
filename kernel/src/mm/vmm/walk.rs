@@ -54,6 +54,10 @@ pub(super) unsafe fn walk(
 /// 512-entry intermediate table. `parent_level` is the level of the original
 /// leaf (2 = 1 GiB, 1 = 2 MiB). The new table is written back to
 /// `parent_pte_ptr` as a non-leaf PTE pointing at the freshly-allocated page.
+///
+/// Bug (mm SERIOUS #10): emit sfence.vma after the split so other harts don't
+/// observe a stale 1 GiB / 2 MiB leaf PTE via a cached TLB entry — which would
+/// bypass the new intermediate table and write directly to the old huge page.
 unsafe fn split_leaf(parent_pte_ptr: *mut u64, parent_pte: u64, parent_level: u32) -> KResult<()> {
     let new_pa = pmm::alloc_zero()?;
     let new_table = new_pa as *mut u64;
@@ -72,5 +76,10 @@ unsafe fn split_leaf(parent_pte_ptr: *mut u64, parent_pte: u64, parent_level: u3
         );
     }
     ptr::write_volatile(parent_pte_ptr, PTE_V | ((new_pa >> 12) << PTE_PPN_SHIFT));
+    // Invalidate any cached TLB entry for the VA range covered by the
+    // original huge leaf — otherwise another hart could keep using the
+    // old 1 GiB / 2 MiB mapping and miss the freshly-split table. We
+    // don't know the exact VA here (walk does), so flush everything.
+    crate::arch::csr::sfence_vma_all();
     Ok(())
 }
