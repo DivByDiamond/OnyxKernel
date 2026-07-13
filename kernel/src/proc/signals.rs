@@ -11,6 +11,13 @@ pub const SIG_KILL: u32 = 9;
 /// Signal number for STOP (POSIX SIGSTOP = 19). Cannot be caught or blocked.
 pub const SIG_STOP: u32 = 19;
 
+/// Bitmask of signals that can never be blocked or caught (KILL + STOP).
+/// Used by sigaction / sigprocmask / signal_check to enforce POSIX.
+#[inline]
+fn protected_mask() -> u32 {
+    (1u32 << SIG_KILL) | (1u32 << SIG_STOP)
+}
+
 pub unsafe fn signal_send(pid: u32, signal: u32) -> KResult<()> {
     if signal == 0 || signal >= 32 {
         return Err(Errno::Inval);
@@ -61,15 +68,20 @@ pub unsafe fn sigaction(signum: u32, act_ptr: u64, oldact_ptr: u64) -> KResult<(
         }
         let src = new_pa as *const u64;
         let handler = *src;
-        // sa_mask bits at offset 8 — OR them into the process signal_mask so
-        // those signals are blocked while the handler runs.
-        let extra_mask = *src.add(1);
+        // sa_mask bits at offset 8.
+        // Bug (proc SERIOUS #1): the previous code permanently OR-ed the
+        // extra mask into the process's signal_mask. POSIX semantics say
+        // sa_mask is applied TRANSIENTLY during the handler execution —
+        // it blocks those signals only while the handler runs, not for
+        // the rest of the process's life. We now stash the per-handler
+        // mask in a separate field (signal_handler_masks) and apply it
+        // only when entering the handler (in signal_check) and remove it
+        // on sigreturn. Without this, every sigaction() call would
+        // permanently widen the blocked set, eventually blocking
+        // everything.
+        let extra_mask = *src.add(1) as u32;
         p.signal_handlers[signum as usize] = handler;
-        // The extra mask is applied transiently during signal delivery, not
-        // permanently; for simplicity we permanently OR it in here.
-        if extra_mask != 0 {
-            p.signal_mask |= extra_mask as u32;
-        }
+        p.signal_handler_masks[signum as usize] = extra_mask & !protected_mask();
     }
     Ok(())
 }
@@ -111,6 +123,11 @@ pub unsafe fn sigreturn(tf: &mut TrapFrame) {
         return;
     }
     p.in_signal_handler = false;
+    // Bug (proc SERIOUS #1, cont.): remove the per-handler mask that was
+    // applied when we entered the handler. signal_check saved the
+    // pre-handler mask in saved_mask; restore it now so the blocked set
+    // returns to its pre-handler state.
+    p.signal_mask = p.saved_mask;
     // Restore the trap frame saved when we entered the handler. We can't
     // move the whole struct at once because `tf` is `&mut` borrowed by the
     // trap handler — copy field by field.
@@ -129,6 +146,18 @@ pub unsafe fn signal_check(tf: &mut TrapFrame) {
     if (*cur).pending_signals & (1u32 << SIG_KILL) != 0 {
         (*cur).pending_signals &= !(1u32 << SIG_KILL);
         exit(pid, 128 + SIG_KILL as i32);
+        G_NEED_RESCHED[hartid].store(true, Ordering::Release);
+        return;
+    }
+
+    // Bug (proc SERIOUS #9): SIGSTOP stops the process (transitions to
+    // Waiting, doesn't terminate). The previous code fell through to the
+    // default-action branch below which called exit() — terminating the
+    // process instead of stopping it. POSIX requires SIGSTOP to suspend
+    // the process until SIGCONT is received.
+    if (*cur).pending_signals & (1u32 << SIG_STOP) != 0 {
+        (*cur).pending_signals &= !(1u32 << SIG_STOP);
+        (*cur).state = ProcState::Waiting;
         G_NEED_RESCHED[hartid].store(true, Ordering::Release);
         return;
     }
@@ -172,6 +201,13 @@ pub unsafe fn signal_check(tf: &mut TrapFrame) {
     // Stash the original trap frame and rewrite `tf` to enter the handler.
     (*cur).saved_tf = *tf;
     (*cur).in_signal_handler = true;
+    // Bug (proc SERIOUS #1, cont.): apply the per-handler mask TRANSIENTLY.
+    // Save the current mask so sigreturn can restore it, then OR in the
+    // handler's sa_mask (so those signals are blocked while the handler
+    // runs). KILL and STOP are never blocked.
+    (*cur).saved_mask = (*cur).signal_mask;
+    (*cur).signal_mask |= (*cur).signal_handler_masks[signum as usize];
+    (*cur).signal_mask &= !protected_mask();
 
     // Set up the handler call: pc=handler, a0=signum, sp stays the same.
     tf.sepc = handler;

@@ -70,21 +70,24 @@ pub(super) unsafe fn sys_sigmask(how: u32, sig: u32) -> i64 {
         return Errno::Inval.as_i64();
     }
     let p = proc::current();
+    // Bug (proc SERIOUS #2): also protect SIGSTOP from being blocked.
+    // The previous code only protected SIG_KILL — a process could block
+    // SIGSTOP, defeating the "cannot be caught or blocked" POSIX rule.
+    if (sig == proc::SIG_KILL || sig == proc::SIG_STOP) && how == 0 {
+        return 0; // silently ignore attempts to block KILL/STOP
+    }
     match how {
         0 => {
-            // Block — but KILL cannot be blocked.
-            if sig != proc::SIG_KILL {
-                p.signal_mask |= 1u32 << sig;
-            }
+            // Block — but KILL/STOP cannot be blocked (checked above).
+            p.signal_mask |= 1u32 << sig;
         }
         1 => {
             p.signal_mask &= !(1u32 << sig);
         }
         2 => {
-            // Set mask to exactly {sig} (plus KILL-ignoring: KILL still
-            // cannot be blocked, so don't add it).
+            // Set mask to exactly {sig} (KILL/STOP still never blocked).
             let mut m = 0u32;
-            if sig != proc::SIG_KILL {
+            if sig != proc::SIG_KILL && sig != proc::SIG_STOP {
                 m = 1u32 << sig;
             }
             p.signal_mask = m;

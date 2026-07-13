@@ -42,6 +42,12 @@ pub struct Proc {
     /// Indexed by signal number 1..NSIG. Signal 0 is unused (POSIX reserves
     /// it as "no signal"). Length is 32 to match NSIG.
     pub signal_handlers: [u64; 32],
+    /// Per-signal sa_mask: signals to block while this handler runs.
+    /// Applied transiently in signal_check, removed in sigreturn.
+    pub signal_handler_masks: [u32; 32],
+    /// Saved signal_mask for sigreturn. When a handler is entered, the
+    /// current mask is stashed here so sigreturn can restore it.
+    pub saved_mask: u32,
     /// Saved trap frame for `sigreturn`. When a signal handler is entered,
     /// the original user tf is stashed here so the `sigreturn` syscall can
     /// restore it. Single-deep — nested signals are not yet supported.
@@ -84,6 +90,8 @@ impl Proc {
             pending_signals: 0,
             signal_mask: 0,
             signal_handlers: [0; 32],
+            signal_handler_masks: [0; 32],
+            saved_mask: 0,
             saved_tf: TrapFrame::zero(),
             in_signal_handler: false,
             fds: [crate::fs::vfs::VfsFd {

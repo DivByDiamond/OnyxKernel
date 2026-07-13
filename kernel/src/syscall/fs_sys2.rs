@@ -41,6 +41,16 @@ pub(super) unsafe fn sys_exec(tf: &mut TrapFrame, path: u64, argv: u64) -> i64 {
     }
     let (argc, argv_sp) = proc::onx::copy_argv_to_stack(r.root_pa, r.ustack, argv);
     let p = proc::current();
+    // Bug (proc SERIOUS #4): close FD_CLOEXEC file descriptors before
+    // replacing the process image, matching sys_execve's behavior.
+    // Without this, file descriptors marked close-on-exec would leak
+    // across exec() (sys_execve handled it, but sys_exec didn't).
+    for i in 0..p.fds.len() {
+        if p.fds[i].used && p.fds[i].cloexec {
+            let token = crate::fs::vfs::fd_token(i, p.fds[i].epoch);
+            let _ = crate::fs::vfs::close(token);
+        }
+    }
     // Bug #8 fix: port the root_refcount logic from sys_execve. The previous
     // code unconditionally destroyed the old root page table, even when
     // fork() had shared it with a child via root_refcount. After fork+exec,

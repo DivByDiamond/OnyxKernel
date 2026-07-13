@@ -35,6 +35,10 @@ pub(super) unsafe fn alloc_proc() -> KResult<*mut Proc> {
     for h in (*p).signal_handlers.iter_mut() {
         *h = 0;
     }
+    for m in (*p).signal_handler_masks.iter_mut() {
+        *m = 0;
+    }
+    (*p).saved_mask = 0;
     (*p).saved_tf = TrapFrame::zero();
     (*p).in_signal_handler = false;
     // Initialize per-process FD table — all slots free.
