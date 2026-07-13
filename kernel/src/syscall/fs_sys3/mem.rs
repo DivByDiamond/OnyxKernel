@@ -10,6 +10,18 @@ const fn page_align_up(n: u64) -> u64 {
     (n + 0xFFF) & !0xFFF
 }
 
+/// User-VA range check (Bug #27, #28 fix). Returns true iff
+/// [addr, addr+size) lies entirely inside [USER_BASE, USER_TOP) with no
+/// arithmetic overflow. Used by sys_mmap / sys_munmap / sys_mprotect to
+/// prevent a user process from mapping, unmapping, or re-protecting
+/// kernel pages.
+const fn user_range_ok(addr: u64, size: u64) -> bool {
+    match addr.checked_add(size) {
+        Some(end) => addr >= regs::USER_BASE && end <= regs::USER_TOP,
+        None => false,
+    }
+}
+
 /// Ensure that all pages in `[heap_brk, new_brk)` are mapped in the current
 /// process's root page table. Used by `brk`/`sbrk` to grow the heap on demand
 /// instead of pre-allocating the entire heap region at load time.
@@ -152,8 +164,17 @@ pub unsafe fn sys_mmap(
         // not run past USER_TOP. The previous check used USER_HEAP_BASE
         // (0x0100_0000) as the upper bound, which is below mmap_base and so
         // every mapping attempt returned ENOMEM.
+        //
+        // Bug #28 fix: use checked_add so a MAP_FIXED request with a near-
+        // overflow (vaddr + size) can't wrap around to a small value and
+        // pass the upper-bound check, which would otherwise let a user
+        // process map kernel VA space.
         let mmap_base: u64 = 0x2000_0000;
-        if vaddr < mmap_base || vaddr.wrapping_add(size as u64) > regs::USER_TOP {
+        let end = match vaddr.checked_add(size as u64) {
+            Some(e) => e,
+            None => return Errno::NoMem.as_i64(),
+        };
+        if vaddr < mmap_base || end > regs::USER_TOP {
             return Errno::NoMem.as_i64();
         }
 
@@ -189,8 +210,13 @@ pub unsafe fn sys_mmap(
 
         // See the file-backed branch: upper bound is USER_TOP, not
         // USER_HEAP_BASE, otherwise every anonymous mmap fails with ENOMEM.
+        // Bug #28 fix: same checked_add hardening as the file-backed branch.
         let mmap_base: u64 = 0x2000_0000;
-        if vaddr < mmap_base || vaddr.wrapping_add(size as u64) > regs::USER_TOP {
+        let end = match vaddr.checked_add(size as u64) {
+            Some(e) => e,
+            None => return Errno::NoMem.as_i64(),
+        };
+        if vaddr < mmap_base || end > regs::USER_TOP {
             return Errno::NoMem.as_i64();
         }
         match vmm::map_anon(p.root_pa, vaddr, size, pte_flags) {
@@ -205,6 +231,13 @@ pub unsafe fn sys_munmap(addr: u64, length: u64) -> i64 {
         return Errno::Inval.as_i64();
     }
     let size = page_align_up(length.max(4096)) as usize;
+    // Bug #27 fix: reject any munmap whose range extends outside the user
+    // VA window. Without this check a user process could unmap kernel
+    // PTEs by passing an addr past USER_TOP, taking the kernel down or
+    // paving the way for privilege escalation.
+    if !user_range_ok(addr, size as u64) {
+        return Errno::Inval.as_i64();
+    }
     let p = proc::current();
     match vmm::unmap(p.root_pa, addr, size) {
         Ok(()) => 0,

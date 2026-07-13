@@ -22,8 +22,17 @@ pub(super) fn user_ptr_ok(p: u64, len: u64) -> bool {
 /// Validate `path` is a readable user pointer, then parse it as a NUL-terminated
 /// C string (capped at 256 bytes), copying the result into `out`. Returns
 /// `Some(length)` on success, `None` if the pointer is invalid.
+///
+/// Bug #25 fix: the previous implementation only validated the first byte
+/// (`user_ptr_ok(path, 1)`) and then read up to 256 bytes from `path` —
+/// so a path straddling the USER_TOP boundary, or a malicious pointer
+/// into kernel memory, would leak kernel bytes into the user-visible
+/// path buffer. We now validate the FULL 256-byte window up front via
+/// user_ptr_ok(path, 256), which forces the entire window to lie inside
+/// [USER_BASE, USER_TOP]. A shorter user-supplied string is still
+/// honored — NUL termination ends the copy early.
 pub(super) unsafe fn parse_user_path(path: u64, out: &mut [u8; 256]) -> Option<usize> {
-    if !user_ptr_ok(path, 1) {
+    if !user_ptr_ok(path, 256) {
         return None;
     }
     let mut len = 0usize;
