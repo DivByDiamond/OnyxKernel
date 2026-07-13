@@ -55,6 +55,17 @@ pub(super) unsafe fn journal_log(block_num: u32, data: &[u8; ONYFS_BLOCK_SIZE]) 
 /// replayed on the next mount if a crash occurs before the data writes
 /// themselves complete. Resets the in-memory journal head so the journal
 /// area can be reused for the next transaction.
+///
+/// Bug #22 fix: also ZERO every journal entry that was part of this
+/// transaction. Without this, a subsequent transaction that crashes
+/// before writing its own commit_end would leave the new (incomplete)
+/// BLOCK_WRITE entries followed by the OLD commit_end marker from this
+/// transaction. On next mount, journal_recover would scan past the new
+/// entries, hit the old commit_end, and replay BOTH the new (incomplete)
+/// entries AND any stale BLOCK_WRITE entries sitting between them and
+/// the old commit_end — silently corrupting the filesystem. Zeroing the
+/// entries after commit ensures the next transaction always starts with
+/// a clean slate on disk.
 pub(super) unsafe fn journal_commit() -> KResult<()> {
     let sb_ptr = &raw const G_SB;
     let journal_start = (*sb_ptr).journal_start;
@@ -71,6 +82,20 @@ pub(super) unsafe fn journal_commit() -> KResult<()> {
         write_block(journal_start + head, &entry)?;
     }
     *(&raw mut G_JOURNAL_HEAD) = 0;
+    // Zero every entry that was part of this transaction (positions 0..head).
+    // The commit_end marker at `head` is left in place for now so a crash
+    // mid-zero still results in correct replay on the next mount — once all
+    // zeroing is complete, the next transaction's first write will overwrite
+    // the commit_end marker.
+    let zero = [0u8; ONYFS_BLOCK_SIZE];
+    for j in 0..head {
+        write_block(journal_start + j, &zero)?;
+    }
+    // Now zero the commit_end marker too — the transaction is fully
+    // completed and the journal area is clean for reuse.
+    if head < (*sb_ptr).journal_size {
+        write_block(journal_start + head, &zero)?;
+    }
     Ok(())
 }
 

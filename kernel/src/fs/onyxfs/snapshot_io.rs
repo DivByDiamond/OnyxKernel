@@ -9,12 +9,23 @@
 //! `snapshot_list` writes each snapshot name (NUL-terminated, newline-
 //! separated) into `names_out` and returns the number listed.
 use super::compress::rle_decompress;
+use super::journal::{journal_commit, journal_log};
 use super::{
     G_BUF, G_SB, SNAPSHOT_BLOCKS_EACH, SNAPSHOT_SLOT_BLKS, SNAPSHOT_SLOTS, read_block, write_block,
 };
 use onyx_core::errno::{Errno, KResult};
 use onyx_core::formats::{ONYFS_BLOCK_SIZE, SnapshotMeta};
 
+/// Restore filesystem state from a snapshot.
+///
+/// Bug #10 (fs critical list, item 11) fix: previously each block write
+/// went directly to disk via `write_block` with no journaling, so a crash
+/// mid-rollback left the filesystem in an inconsistent state (some blocks
+/// restored, others not). Now every block write is preceded by a
+/// `journal_log` call and the whole rollback is wrapped in a single
+/// transaction via `journal_commit` at the end. If a crash occurs mid-
+/// rollback, the next mount's `journal_recover` will replay the remaining
+/// writes and bring the filesystem to a consistent snapshot-restored state.
 pub unsafe fn snapshot_rollback(snapshot_id: u32) -> KResult<()> {
     let sb_ptr = &raw const G_SB;
     if (*sb_ptr).snapshot_area_start == 0 {
@@ -67,8 +78,18 @@ pub unsafe fn snapshot_rollback(snapshot_id: u32) -> KResult<()> {
                 return Err(Errno::Io);
             }
         }
+        // Bug #10 fix: journal the write so a crash mid-rollback can be
+        // recovered on next mount. Without this, a partial rollback would
+        // leave the filesystem with a mix of pre-rollback and post-rollback
+        // blocks — silently corrupting it.
+        journal_log(block_num, &out_buf)?;
         write_block(block_num, &out_buf)?;
     }
+    // Commit the rollback transaction. After this point the rollback is
+    // durable: either all blocks are restored or, if a crash happened
+    // before commit, the next mount's journal_recover will replay the
+    // remaining writes.
+    journal_commit()?;
     Ok(())
 }
 
