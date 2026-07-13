@@ -14,19 +14,34 @@ pub unsafe fn open(path: &[u8], perms: u32) -> KResult<FdToken> {
 
     // Check mount table first.
     let (fs, subpath) = super::resolve_mount(name);
+    // Bug (fs SERIOUS #3): if the lookup below fails, we must release the
+    // FD slot we just allocated — otherwise every failed open() permanently
+    // leaks an FD slot, and a process that retries open() in a loop will
+    // exhaust its FD table (VFS_MAX_FDS = 16). We use a closure-style
+    // pattern: do the lookup, and on Err, call fd_clear(idx) before
+    // propagating the error.
     let (ino, size) = match fs {
         Fs::Proc => {
-            let ino = procfs::lookup(subpath)?;
+            let ino = match procfs::lookup(subpath) {
+                Ok(i) => i,
+                Err(e) => { let _ = fd_clear(idx); return Err(e); }
+            };
             let st = procfs::stat(ino)?;
             (ino, st.size)
         }
         Fs::Ipc => {
-            let ino = ipcfs::lookup(subpath)?;
+            let ino = match ipcfs::lookup(subpath) {
+                Ok(i) => i,
+                Err(e) => { let _ = fd_clear(idx); return Err(e); }
+            };
             let st = ipcfs::stat(ino)?;
             (ino, st.size)
         }
         Fs::Devfs => {
-            let ino = devfs::lookup(subpath)?;
+            let ino = match devfs::lookup(subpath) {
+                Ok(i) => i,
+                Err(e) => { let _ = fd_clear(idx); return Err(e); }
+            };
             let st = devfs::stat(ino)?;
             (ino, st.size)
         }
@@ -34,16 +49,22 @@ pub unsafe fn open(path: &[u8], perms: u32) -> KResult<FdToken> {
             let mut st = onyxfs::OnyfsStat::default();
             match *(&raw const G_ROOT_FS) {
                 Fs::Onyx => {
-                    onyxfs::lookup(name, &mut st)?;
+                    if let Err(e) = onyxfs::lookup(name, &mut st) {
+                        let _ = fd_clear(idx);
+                        return Err(e);
+                    }
                     (st.ino, st.size.min(u32::MAX as u64) as u32)
                 }
                 Fs::Fat32 => {
                     let mut cluster = 0u32;
                     let mut sz = 0u32;
-                    fat32::lookup(name, &mut cluster, &mut sz)?;
+                    if let Err(e) = fat32::lookup(name, &mut cluster, &mut sz) {
+                        let _ = fd_clear(idx);
+                        return Err(e);
+                    }
                     (cluster, sz)
                 }
-                _ => return Err(Errno::Inval),
+                _ => { let _ = fd_clear(idx); return Err(Errno::Inval); },
             }
         }
     };

@@ -10,7 +10,18 @@ pub unsafe fn lseek(token: FdToken, off: i64, whence: u32) -> KResult<u32> {
         2 => fd.size as i64 + off,
         _ => return Err(Errno::Inval),
     };
-    if new_pos < 0 || new_pos > fd.size as i64 {
+    // Bug (fs SERIOUS #2): allow seeking past EOF. POSIX permits lseek
+    // past end of file (subsequent reads return 0 / short read); the
+    // previous code rejected any new_pos > fd.size with ERANGE, which
+    // broke legitimate patterns like lseek(fd, 0, SEEK_END) + 1 to
+    // reserve space, and broke libc's fseek() to end+1. We still reject
+    // negative positions. For regular files this creates a sparse
+    // region that reads as zeros until a write fills it in.
+    if new_pos < 0 {
+        return Err(Errno::Range);
+    }
+    // Cap at u32::MAX (VFS positions are u32). Slightly past EOF is OK.
+    if new_pos > u32::MAX as i64 {
         return Err(Errno::Range);
     }
     fd_update_pos(idx, new_pos as u32);

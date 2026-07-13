@@ -31,7 +31,11 @@ pub unsafe fn write(token: FdToken, buf: *const u8, len: u32) -> KResult<u32> {
         Fs::Ipc => ipcfs::write(fd.ino, buf, fd.pos, len)?,
         _ => return Err(Errno::NoSys),
     };
-    let new_pos = fd.pos + written;
+    // Bug (fs SERIOUS #1): use checked_add for the new position. The
+    // previous code did `fd.pos + written` which silently wraps on
+    // overflow — a 4 GB file with pos near u32::MAX would wrap to a
+    // tiny position and corrupt subsequent reads/writes.
+    let new_pos = fd.pos.checked_add(written).ok_or(Errno::NoMem)?;
     fd_update_pos(idx, new_pos);
     if new_pos > fd.size {
         if crate::fs::vfs::ops::is_kernel_boot() {
