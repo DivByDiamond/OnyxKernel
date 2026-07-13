@@ -57,7 +57,17 @@ pub unsafe fn handle() {
     G_UPTICKS = G_UPTICKS.wrapping_add(1);
     G_JIFFIES = G_JIFFIES.wrapping_add(1);
     let now = read_mtime();
-    write_mtimecmp(now + G_TICK_INTERVAL);
+    // Write to THIS hart's mtimecmp, not hart 0's. The previous code used
+    // the global G_MTIMECMP (hardwired to hart 0), so on multi-hart systems
+    // harts 1..N never had their comparators advanced — they re-fired the
+    // timer interrupt immediately on return from SRET, producing a timer
+    // storm that starved every other hart.
+    let hartid = crate::arch::smp::current_hart();
+    let cmp_addr = clint_mtimecmp_hart(hartid) as usize;
+    let next = now + G_TICK_INTERVAL;
+    Mmio::<u32>::at(cmp_addr + 4).write(0xFFFF_FFFF);
+    Mmio::<u32>::at(cmp_addr).write(next as u32);
+    Mmio::<u32>::at(cmp_addr + 4).write((next >> 32) as u32);
     proc::sched_tick();
     // Heartbeat: ping the watchdog every tick (100 Hz) so the system
     // resets if a scheduler stall prevents us from reaching this point.

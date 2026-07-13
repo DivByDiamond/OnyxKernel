@@ -4,6 +4,7 @@ use crate::arch::trap_frame::TrapFrame;
 use crate::drivers::plic;
 use crate::proc;
 use crate::srv::timer;
+use crate::syscall::abi::SYS_sigreturn;
 use crate::syscall::handler;
 
 pub unsafe fn init() {
@@ -51,9 +52,18 @@ pub unsafe fn handle(tf: &mut TrapFrame) {
     } else {
         match code {
             CAUSE_U_ECALL => {
+                // SYS_sigreturn fully restores the saved trap frame inside
+                // the handler (it writes *tf = saved_tf). If we then go on
+                // to overwrite a0 with the handler's return value and
+                // advance sepc by 4, we corrupt the restored state — the
+                // signal handler's return address and a0 would be lost.
+                // Special-case sigreturn: skip the post-handle fixups.
+                let is_sigreturn = tf.a7 == SYS_sigreturn;
                 let ret = handler::handle(tf);
-                tf.a0 = ret as u64;
-                tf.sepc = tf.sepc.wrapping_add(4);
+                if !is_sigreturn {
+                    tf.a0 = ret as u64;
+                    tf.sepc = tf.sepc.wrapping_add(4);
+                }
             }
             CAUSE_INST_PF | CAUSE_LD_PF | CAUSE_ST_PF | CAUSE_IAMISS | CAUSE_LDAMISS
             | CAUSE_STAMISS => {

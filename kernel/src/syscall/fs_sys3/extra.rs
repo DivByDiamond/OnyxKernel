@@ -430,7 +430,9 @@ pub unsafe fn sys_fork(tf: &mut TrapFrame) -> i64 {
     // 0 from the ecall, the parent will return the child PID.
     let mut child_tf = *tf;
     child_tf.a0 = 0; // child sees fork() == 0
-                     // The parent will receive the child PID via the return value of handle().
+    // Advance past the ecall instruction. Without this, the child would
+    // re-execute SYS_fork on its first scheduling, recursing forever (fork bomb).
+    child_tf.sepc = tf.sepc.wrapping_add(4);
 
     // Ensure parent has a refcount for root_pa, then increment for the child.
     let refcount = if parent.root_refcount.is_null() {
@@ -469,6 +471,23 @@ pub unsafe fn sys_fork(tf: &mut TrapFrame) -> i64 {
             // Overwrite the child's tf with the cloned one so it resumes
             // right after the ecall, with a0=0.
             let child = proc::by_pid(new_pid).unwrap();
+            // POSIX inheritance: the child must inherit the parent's open
+            // file descriptors (with the same epoch tokens), installed
+            // signal handlers, current signal mask, working directory,
+            // and mmap_brk cursor. Without this, fork+exec loses stdin /
+            // stdout / stderr, all signal handlers, and cwd — making the
+            // child essentially unusable in any real shell pipeline.
+            //
+            // We do NOT inherit pending_signals or in_signal_handler:
+            // a signal that was pending for the parent is not automati-
+            // cally pending for the child (POSIX), and fork from inside
+            // a signal handler is undefined behavior anyway.
+            (*child).fds = parent.fds;
+            (*child).signal_handlers = parent.signal_handlers;
+            (*child).signal_mask = parent.signal_mask;
+            (*child).cwd = parent.cwd;
+            (*child).cwd_len = parent.cwd_len;
+            (*child).mmap_brk = parent.mmap_brk;
             (*child).tf = child_tf;
             new_pid as i64 // parent sees the child PID
         }
