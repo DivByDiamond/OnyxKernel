@@ -46,7 +46,20 @@ pub unsafe fn new_root() -> KResult<u64> {
 }
 
 pub unsafe fn install_root(root_pa: u64) {
-    csr::write_satp(SATP_MODE_SV39 | (root_pa >> 12));
+    // SATP encoding differs between Sv39 (64-bit) and Sv32 (32-bit):
+    //   Sv39: bits 60-63 = mode (0x8), bits 0-43 = PPN
+    //   Sv32: bit 31 = mode (0x1), bits 0-21 = PPN
+    #[cfg(target_pointer_width = "64")]
+    {
+        csr::write_satp(crate::arch::regs::SATP_MODE_SV39 | (root_pa >> 12));
+    }
+    #[cfg(target_pointer_width = "32")]
+    {
+        // Sv32: MODE = bit 31, PPN = bits 0-21.
+        // root_pa >> 12 gives the PPN; mask to 22 bits for Sv32.
+        let satp = crate::arch::bits::SATP_MODE_SV32 | ((root_pa >> 12) & 0x3FFFFF) as u32;
+        csr::write_satp(satp as u64);
+    }
     csr::sfence_vma_all();
 }
 
@@ -55,11 +68,35 @@ pub unsafe fn init() -> KResult<u64> {
     crate::arch::smp::G_KERNEL_ROOT_PA = root_pa;
     let root = root_pa as *mut u64;
     let leaf_flags = PTE_V | PTE_R | PTE_W | PTE_X | PTE_A | PTE_D;
-    for i in 0..3u64 {
-        let pa = i << 30;
+    // Identity-map the first chunk of physical memory so the kernel can
+    // run after enabling paging.
+    //
+    // Sv39 (64-bit): 3 × 1 GiB leaves (bits 30, 31, 32 of VA) cover the
+    //   first 3 GiB — enough for the kernel image + DRAM on QEMU virt.
+    // Sv32 (32-bit): 1 × 1 GiB leaf at VA 0 covers the first 1 GiB (which
+    //   is where the kernel + DRAM live on rv32 QEMU virt). We can't use
+    //   4 MiB leaves here because that would require 256 L1 entries; the
+    //   1 GiB L1 leaf is simpler. Note: Sv32 L1 leaves are 4 MiB, so we
+    //   actually map 4 MiB at a time, not 1 GiB — but for the kernel's
+    //   first few MiB that's sufficient. The map() function will split
+    //   this leaf on demand when user processes need finer granularity.
+    #[cfg(target_pointer_width = "64")]
+    {
+        for i in 0..3u64 {
+            let pa = i << 30;
+            ptr::write_volatile(
+                root.add(i as usize),
+                PTE_V | leaf_flags | (pa >> 12 << PTE_PPN_SHIFT),
+            );
+        }
+    }
+    #[cfg(target_pointer_width = "32")]
+    {
+        // Map the first 4 MiB (one L1 leaf) as kernel identity.
+        // Sv32 L1 index for VA 0 is 0; the leaf covers VA [0, 4 MiB).
         ptr::write_volatile(
-            root.add(i as usize),
-            PTE_V | leaf_flags | (pa >> 12 << PTE_PPN_SHIFT),
+            root.add(0),
+            PTE_V | leaf_flags | (0u64 >> 12 << PTE_PPN_SHIFT),
         );
     }
     let p = &raw mut G_KERNEL_ROOT_PA;
@@ -245,6 +282,8 @@ pub unsafe fn pte_user_flags(root_pa: u64, vaddr: u64) -> u64 {
 pub mod map;
 pub mod unmap;
 pub mod walk;
+#[cfg(target_pointer_width = "32")]
+pub mod walk_32;
 
 pub use map::{map, map_anon, map_one_pub};
 pub use unmap::*;

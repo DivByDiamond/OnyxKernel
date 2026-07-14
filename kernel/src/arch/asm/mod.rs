@@ -5,6 +5,8 @@
 //! - drop_to_user does NOT zero gp/tp
 //! - sscratch initialized to __stack_top in trap::init
 pub mod boot;
+#[cfg(target_pointer_width = "32")]
+pub mod boot_32;
 pub mod trap_asm;
 
 pub use trap_asm::{drop_to_user, sched_switch, trap_entry, trap_return};
