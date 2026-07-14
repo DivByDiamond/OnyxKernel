@@ -140,6 +140,13 @@ pub fn is_managed(paddr: u64) -> bool {
     unsafe {
         let p = &raw const G_PMM;
         let pa = paddr as usize;
+        // Bug (mm MINOR #2): require page alignment. The previous code
+        // accepted any address in [base, end) — a non-page-aligned PA
+        // would later compute a bogus bit index in pa_to_idx and corrupt
+        // the bitmap. Refuse anything that isn't page-aligned.
+        if pa & (PAGE_SIZE - 1) != 0 {
+            return false;
+        }
         let end = (*p).base + (*p).total_pages * PAGE_SIZE;
         pa >= (*p).base && pa < end
     }

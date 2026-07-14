@@ -138,6 +138,15 @@ unsafe fn slab_free_unlocked(ptr: *mut u8) -> bool {
     }
     hdr.free_bits |= 1u64 << slot;
     hdr.free_count += 1;
+    // Bug (mm MINOR #4): zero the slot on free. The previous code left
+    // the old contents in place — a subsequent alloc would return a
+    // pointer to stale data from a previous allocation, which is an
+    // info-leak and can cause subtle bugs if the caller assumed zeroed
+    // memory (e.g. allocating a struct and only initializing some fields).
+    let obj_size = SLAB_SIZES[class];
+    let hdr_size = size_of_slab_header();
+    let slot_ptr = (page_addr + hdr_size + slot as usize * obj_size) as *mut u8;
+    ptr::write_bytes(slot_ptr, 0, obj_size);
     if hdr.free_count == hdr.capacity {
         let mut cur = (*(&raw const G_PMM)).slab_heads[class];
         let mut prev: *mut SlabHeader = ptr::null_mut();

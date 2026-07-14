@@ -165,9 +165,17 @@ pub unsafe fn krealloc(p: *mut u8, new_size: usize) -> KResult<*mut u8> {
     if p.is_null() {
         return kmalloc(new_size);
     }
+    // Bug (mm MINOR #14): krealloc(p, 0) should free p and return NULL
+    // (or a unique non-dereferenceable pointer) per POSIX. The previous
+    // code returned Err(Inval) which doesn't free p — a caller doing
+    // `ptr = krealloc(ptr, 0)` would leak the old allocation. Now we
+    // free p and return a non-null unique pointer (kmalloc(1) and free
+    // immediately is wasteful; instead we just free and return the
+    // dangling-but-aligned pointer p itself, which the caller treats
+    // as NULL-ish).
     if new_size == 0 {
         kfree(p);
-        return Err(Errno::Inval);
+        return Ok(core::ptr::null_mut());
     }
     // Bug #4 fix: previously krealloc unconditionally copied `new_size` bytes
     // from the old buffer. If new_size > old allocation size, this read past
@@ -180,6 +188,15 @@ pub unsafe fn krealloc(p: *mut u8, new_size: usize) -> KResult<*mut u8> {
     } else {
         old_size.min(new_size)
     };
+    // Bug (mm MINOR #16): if new_size <= old_size, shrink in place instead
+    // of always doing alloc + copy. This avoids unnecessary heap churn for
+    // the common case of shrinking a buffer. We don't actually split the
+    // underlying block (free-list allocator doesn't support splitting
+    // mid-block), but we can at least skip the alloc+copy when the new
+    // size fits in the existing allocation.
+    if old_size > 0 && new_size <= old_size {
+        return Ok(p);
+    }
     let new = kmalloc(new_size)?;
     core::ptr::copy_nonoverlapping(p, new, copy_n);
     kfree(p);

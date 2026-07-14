@@ -80,6 +80,12 @@ pub unsafe fn destroy_root(root_pa: u64) {
     // pmm::free takes the PMM lock internally; do it outside the VMM lock
     // to keep lock ordering consistent (VMM -> PMM, never PMM -> VMM).
     pmm::free(root_pa);
+    // Bug (mm MINOR #7): flush TLB after destroying a page table. Other
+    // harts may have cached TLB entries pointing at the now-freed pages,
+    // and a subsequent allocation could reuse those physical pages for
+    // something else — leading to silent corruption if the stale TLB
+    // entry is still used.
+    csr::sfence_vma_all();
 }
 
 unsafe fn free_subtree(table: *mut u64, level: u32) {
@@ -91,7 +97,13 @@ unsafe fn free_subtree(table: *mut u64, level: u32) {
         let is_leaf = pte & PTE_LEAF != 0;
         let child_pa = (pte & PTE_PPN_MASK) >> PTE_PPN_SHIFT << 12;
         if is_leaf {
-            if pte & PTE_U != 0 && pmm::is_managed(child_pa) {
+            // Bug (mm MINOR #10): free kernel pages too, not just user
+            // pages. The previous code only freed pages with PTE_U set,
+            // which meant kernel pages (identity-mapped, no PTE_U) were
+            // leaked when a page table was destroyed. We now free any
+            // managed physical page regardless of PTE_U — the PMM's
+            // is_managed check is the gatekeeper.
+            if pmm::is_managed(child_pa) {
                 pmm::free(child_pa);
             }
         } else if level > 0 {

@@ -85,7 +85,13 @@ pub(super) unsafe fn alloc_n_unlocked(n: usize) -> KResult<u64> {
                 for k in start..start + n {
                     bm_set(k);
                 }
-                return Ok(idx_to_pa(start) as u64);
+                let pa = idx_to_pa(start);
+                // Bug (mm MINOR #1): zero every page in the run. The
+                // previous code returned uninitialized physical memory —
+                // callers (e.g. large alloc_zero requests) expected zeroed
+                // pages and would read stale kernel data.
+                ptr::write_bytes(pa as *mut u8, 0, n * PAGE_SIZE);
+                return Ok(pa as u64);
             }
         } else {
             run = 0;
