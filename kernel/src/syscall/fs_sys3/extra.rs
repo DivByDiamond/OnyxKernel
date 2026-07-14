@@ -319,7 +319,12 @@ pub unsafe fn sys_waitpid(tf: &mut TrapFrame, pid: u64, status_out: u64, options
     }
     proc_list_unlock();
     if !has_child {
-        return Errno::NoEnt.as_i64();
+        // Bug (proc MINOR #5): waitpid should return ECHILD, not ENOENT,
+        // when the caller has no children. POSIX distinguishes the two:
+        // ENOENT is for 'no such file', ECHILD is for 'no children to wait
+        // for'. libc's waitpid wrapper translates ECHILD to setting errno
+        // = ECHILD and returning -1.
+        return Errno::Child.as_i64();
     }
 
     // WNOHANG: return immediately with 0.

@@ -17,6 +17,8 @@ pub enum Errno {
     Exist = -13,
     Pipe = -14,
     Overflow = -15,
+    Child = -16,
+    NotEmpty = -17,
 }
 
 impl Errno {
@@ -43,6 +45,8 @@ impl Errno {
             Self::Exist => "EEXIST",
             Self::Pipe => "EPIPE",
             Self::Overflow => "EOVERFLOW",
+            Self::Child => "ECHILD",
+            Self::NotEmpty => "ENOTEMPTY",
         }
     }
 }

@@ -83,6 +83,19 @@ pub unsafe fn sched_yield(tf: &mut TrapFrame) {
 
     let mut next = dequeue(hartid);
 
+    // Bug (proc MINOR #6): if dequeue returns the same process we just
+    // enqueued (the only runnable process on this hart), don't bother
+    // doing a context switch to ourselves — that's wasted work (save
+    // trap frame, switch stack, restore the same trap frame). Just
+    // promote it back to Running and return. This is a very common
+    // case when a single process is running on a hart.
+    if next == current && !next.is_null() {
+        (*next).state = ProcState::Running;
+        rq_unlock(hartid);
+        G_NEED_RESCHED[hartid].store(false, Ordering::Release);
+        return;
+    }
+
     if !next.is_null() {
         let affinity = (*next).affinity;
         if affinity >= 0 && (affinity as usize) != hartid {

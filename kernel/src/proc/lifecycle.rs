@@ -28,6 +28,13 @@ pub(super) unsafe fn alloc_proc() -> KResult<*mut Proc> {
     (*p).mmap_brk = 0x3000_0000;
     (*p).uid = 0;
     (*p).gid = 0;
+    // Bug (proc MINOR #1): initialize cwd to "/" so newly-created processes
+    // start at the root directory. The previous code left cwd as an empty
+    // array — getcwd would return an empty string, and relative path
+    // resolution would fail until the process explicitly called chdir.
+    (*p).cwd[0] = b'/';
+    (*p).cwd[1] = 0;
+    (*p).cwd_len = 1;
     (*p).tf = TrapFrame::zero();
     (*p).pending_signals = 0;
     (*p).signal_mask = 0;
