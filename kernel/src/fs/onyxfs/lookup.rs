@@ -115,6 +115,10 @@ pub unsafe fn lookup_in(dir_ino: u32, name: &[u8], out: &mut OnyfsStat) -> KResu
 }
 
 /// Lookup full path (supports subdirectories like "service/fs.bin").
+///
+/// Bug (fs MINOR #17): the previous code called stat(cur_ino, out) at every
+/// step of the path walk AND once more at the end — a 3-step path (e.g.
+/// "/service/fs.bin") would stat 4 times. We now stat only at the end.
 pub unsafe fn lookup(path: &[u8], out: &mut OnyfsStat) -> KResult<u32> {
     let mut cur_ino = ONYFS_ROOT_INO;
     let mut remaining = path;
@@ -134,12 +138,18 @@ pub unsafe fn lookup(path: &[u8], out: &mut OnyfsStat) -> KResult<u32> {
         if component.is_empty() {
             break;
         }
-        cur_ino = lookup_in(cur_ino, component, out)?;
+        // Bug (fs MINOR #17): don't pass `out` to lookup_in — it calls
+        // stat() internally which overwrites `out` on every step. We
+        // use a throwaway stat buffer for intermediate steps and only
+        // stat the final component into `out`.
+        let mut tmp = OnyfsStat::default();
+        cur_ino = lookup_in(cur_ino, component, &mut tmp)?;
         match remaining.iter().position(|&b| b == b'/') {
             Some(idx) => remaining = &remaining[idx + 1..],
             None => break,
         }
     }
+    // Stat only the final inode once.
     stat(cur_ino, out)?;
     Ok(cur_ino)
 }

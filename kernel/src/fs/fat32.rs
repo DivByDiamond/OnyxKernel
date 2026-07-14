@@ -37,6 +37,21 @@ unsafe fn is_eoc(v: u32) -> bool {
     v >= FAT32_EOC
 }
 
+/// Bug (fs MINOR #13): validate a cluster number before following it.
+/// A corrupted FAT chain can contain cluster 0 (invalid), cluster 1
+/// (reserved), or a cluster pointing past the data region. Without
+/// this check, the FAT32 driver would loop forever following such
+/// chains, hanging the kernel. We cap the cluster at a sane upper
+/// bound derived from the partition size.
+unsafe fn is_valid_cluster(cluster: u32) -> bool {
+    // Cluster 0 and 1 are reserved in FAT32. Valid clusters start at 2.
+    // Upper bound: we don't have the total cluster count handy here,
+    // so we use a generous cap of 0x0FFFFFF7 (just below EOC range).
+    // A corrupted entry pointing past the data region will fail the
+    // read_cluster_sector call below anyway.
+    cluster >= 2 && cluster < FAT32_EOC
+}
+
 unsafe fn read_cluster_sector(
     cluster: u32,
     sector_in_cluster: u32,
@@ -76,10 +91,20 @@ unsafe fn scan_dir_entries(
     buf: &mut [u8; 512],
 ) -> KResult<()> {
     let mut cluster = dir_cluster;
-    if cluster == 0 {
+    if !is_valid_cluster(cluster) {
         return Err(Errno::NoEnt);
     }
+    // Bug (fs MINOR #13): cap the number of cluster hops to prevent an
+    // unbounded loop on a corrupted FAT chain (circular chain, or chain
+    // that never reaches EOC). 65536 clusters × 8 sectors × 16 entries
+    // = ~8 million directory entries — way more than any real FAT32 dir.
+    let mut hop = 0u32;
+    const MAX_HOPS: u32 = 65536;
     loop {
+        if hop >= MAX_HOPS {
+            return Err(Errno::Io);
+        }
+        hop += 1;
         for si in 0..G_SPC {
             read_cluster_sector(cluster, si, buf)?;
             for ei in 0..ENTRIES_PER_SECTOR {
@@ -115,6 +140,10 @@ unsafe fn scan_dir_entries(
         if is_eoc(next) {
             return Err(Errno::NoEnt);
         }
+        // Bug (fs MINOR #13): validate the next cluster before following.
+        if !is_valid_cluster(next) {
+            return Err(Errno::Io);
+        }
         cluster = next;
     }
 }
@@ -130,13 +159,29 @@ pub unsafe fn mount(dev: usize) -> KResult<()> {
     if bps != 512 {
         return Err(Errno::Inval);
     }
+    // Bug (fs MINOR #12): validate the BPB fields that we actually use.
+    // A corrupted BPB with SPC=0 or reserved_sectors=0 or FAT_size=0
+    // would cause division-by-zero or infinite loops later. Reject
+    // obvious garbage values upfront.
     G_SPC = bpb[13] as u32;
+    if G_SPC == 0 || G_SPC > 128 {
+        return Err(Errno::Inval);
+    }
     G_RESVD = u16::from_le_bytes([bpb[14], bpb[15]]) as u32;
+    if G_RESVD == 0 {
+        return Err(Errno::Inval);
+    }
     G_FAT_SZ = u16::from_le_bytes([bpb[22], bpb[23]]) as u32;
     if G_FAT_SZ == 0 {
         G_FAT_SZ = u32::from_le_bytes([bpb[36], bpb[37], bpb[38], bpb[39]]);
     }
+    if G_FAT_SZ == 0 {
+        return Err(Errno::Inval);
+    }
     G_ROOT_CLUSTER = u32::from_le_bytes([bpb[44], bpb[45], bpb[46], bpb[47]]);
+    if G_ROOT_CLUSTER < 2 {
+        return Err(Errno::Inval);
+    }
     G_DATA_LBA = G_RESVD + 2 * G_FAT_SZ;
     Ok(())
 }
@@ -215,6 +260,10 @@ pub unsafe fn read(cluster: u32, buf: *mut u8, off: u32, len: u32) -> KResult<u3
         cluster_base += cluster_bytes as u64;
         let next = fat_entry(cluster, &mut sec_buf);
         if is_eoc(next) {
+            return Ok(total_copied);
+        }
+        // Bug (fs MINOR #13): validate the next cluster before following.
+        if !is_valid_cluster(next) {
             return Ok(total_copied);
         }
         cluster = next;

@@ -33,7 +33,12 @@ pub(crate) unsafe fn alloc_fd(perms: u32) -> KResult<usize> {
                 return Ok(i);
             }
         }
-        return Err(Errno::NoMem);
+        // Bug (fs MINOR #3): return BadFd (EMFILE) instead of NoMem when
+        // the FD table is full. POSIX distinguishes EMFILE (per-process FD
+        // limit reached) from ENOMEM (out of memory). The previous code
+        // returned NoMem which made libc report 'Out of memory' instead
+        // of 'Too many open files'.
+        return Err(Errno::BadFd);
     }
     let p = crate::proc::current();
     // Skip fds 0-2 (stdin/stdout/stderr) which are handled by UART directly
@@ -51,7 +56,8 @@ pub(crate) unsafe fn alloc_fd(perms: u32) -> KResult<usize> {
             return Ok(i);
         }
     }
-    Err(Errno::NoMem)
+    // Bug (fs MINOR #3): same as above — EMFILE, not ENOMEM.
+    Err(Errno::BadFd)
 }
 
 pub(crate) unsafe fn fd_check(token: super::vnode::FdToken) -> KResult<usize> {
