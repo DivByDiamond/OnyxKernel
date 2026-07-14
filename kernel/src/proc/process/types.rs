@@ -65,6 +65,11 @@ pub struct Proc {
     pub wait_next: *mut Proc,
     pub affinity: i32,
     pub on_rq: bool,
+    /// If true, sys_read(fd=0) returns raw bytes without line editing
+    /// (no echo, no backspace handling, no Enter translation). Used by
+    /// the shell for tab completion and arrow-key history navigation.
+    /// Set via ioctl(TIOCSRAW), cleared via ioctl(TIOCRRAW).
+    pub raw_stdin: bool,
 }
 
 impl Proc {
@@ -110,6 +115,7 @@ impl Proc {
             wait_next: ptr::null_mut(),
             affinity: -1,
             on_rq: false,
+            raw_stdin: false,
             readdir_ino: 0,
             readdir_idx: 0,
             readdir_active: false,

@@ -124,6 +124,30 @@ pub unsafe fn sys_ioctl(fd: u64, request: u64, arg: u64) -> i64 {
             let _ = (fd, arg);
             0
         }
+        // ── Raw terminal mode (OnyxOS extension) ──────────────────────
+        // TIOCSRAW (0x5421): enable raw mode for fd 0. sys_read(fd=0)
+        // will return raw bytes without echo, backspace handling, or
+        // Enter translation. Used by the shell for tab completion and
+        // arrow-key history navigation.
+        0x5421 /* TIOCSRAW */ => {
+            if fd != 0 {
+                return Errno::Inval.as_i64();
+            }
+            proc::current().raw_stdin = true;
+            0
+        }
+        // TIOCRRAW (0x5422): disable raw mode (restore cooked/line mode).
+        0x5422 /* TIOCRRAW */ => {
+            if fd != 0 {
+                return Errno::Inval.as_i64();
+            }
+            proc::current().raw_stdin = false;
+            0
+        }
+        // TIOCGRAW (0x5423): query raw mode. Returns 1 if raw, 0 if cooked.
+        0x5423 /* TIOCGRAW */ => {
+            if proc::current().raw_stdin { 1 } else { 0 }
+        }
         0x5413 /* TIOCGWINSZ */ => {
             if arg == 0 { return 0; }
             if !user_ptr_ok(arg, 8) { return Errno::Inval.as_i64(); }

@@ -54,6 +54,9 @@ pub(super) unsafe fn alloc_proc() -> KResult<*mut Proc> {
     }
     (*p).wait_next = ptr::null_mut();
     (*p).all_next = G_ALL_PROCS;
+    (*p).affinity = -1;
+    (*p).on_rq = false;
+    (*p).raw_stdin = false;
     G_ALL_PROCS = p;
     Ok(p)
 }

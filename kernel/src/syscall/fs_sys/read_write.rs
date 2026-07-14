@@ -42,6 +42,41 @@ pub(in super::super) unsafe fn sys_read(tf: &mut TrapFrame, _fd: u64, buf: u64, 
             return 0;
         }
         let dst = buf as *mut u8;
+
+        // ── Raw mode: return raw bytes, no echo, no editing ──────────
+        // Used by the shell for tab completion and arrow-key history.
+        // In raw mode we block until at least one byte is available, then
+        // return as many bytes as are available (up to len). This lets
+        // the shell read ESC sequences (3 bytes: ESC [ A) in one call.
+        let p = proc::current();
+        if p.raw_stdin {
+            let mut n: usize = 0;
+            // Block for the first byte.
+            let first = loop {
+                match uart::getc() {
+                    Some(b) => break b,
+                    None => proc::sched_yield(tf),
+                }
+            };
+            *dst.add(0) = first;
+            n = 1;
+            // Drain any additional bytes that are already in the UART
+            // FIFO without blocking. This is essential for ESC sequences
+            // (ESC [ A for Up arrow) — if we blocked after ESC, the
+            // shell would never see the rest of the sequence.
+            while n < len as usize {
+                match uart::getc() {
+                    Some(b) => {
+                        *dst.add(n) = b;
+                        n += 1;
+                    }
+                    None => break,
+                }
+            }
+            return n as i64;
+        }
+
+        // ── Cooked mode: line editing (echo, backspace, Enter) ───────
         let mut n: usize = 0;
         let max = (len - 1) as usize;
         while n < max {
