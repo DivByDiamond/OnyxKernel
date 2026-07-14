@@ -2,7 +2,7 @@
 use crate::arch::regs::*;
 use crate::mm::pmm;
 use core::ptr;
-use onyx_core::errno::KResult;
+use onyx_core::errno::{Errno, KResult};
 
 use super::walk::walk;
 

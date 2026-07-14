@@ -1,6 +1,7 @@
 //! arch — RISC-V 64 архитектурно-зависимый слой.
 
 pub mod asm;
+pub mod bits;
 pub mod csr;
 pub mod mmio;
 pub mod regs;

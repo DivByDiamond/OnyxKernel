@@ -118,7 +118,8 @@ unsafe fn slab_free_unlocked(ptr: *mut u8) -> bool {
     // header itself), `ptr - page_addr - hdr_size` would underflow and
     // produce a huge offset, then `1u64 << slot` with slot >= 64 would
     // be UB. Reject anything that doesn't sit above the header.
-    if ptr as usize < page_addr + hdr_size {
+    let ptr_usize = ptr as usize;
+    if ptr_usize < page_addr + hdr_size {
         return false;
     }
     let offset = ptr as usize - page_addr - hdr_size;

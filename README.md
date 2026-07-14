@@ -316,13 +316,87 @@ osh> _
 - **USB** — реализовать URB-передачу (сейчас только probe/init)
 - **truncate/ftruncate** — обрезание до ненулевого размера
 - **symlink/readlink** — символические ссылки в OnyxFS
-- **O_EXCL** — проверка при создании файлов
+- **O_EXCL** — проверка при создании файлов (✅ реализовано в phase17)
 - **fork** — передача argv/envp родителя
 - **chmod/fchmod** — права доступа в OnyxFS
 - **fsync** — реальный flush на диск
 - **getdents64** — batched directory reading
 - **UDP/DHCP/DNS** — сетевой стек
 - **Юнит-тесты ядра**
+
+----
+
+## 32-bit Support (rv32gc / Sv32)
+
+OnyxKernel was originally written for RISC-V 64-bit (rv64gc, Sv39
+paging). A cfg-gated 32-bit support layer has been added in
+`kernel/src/arch/bits.rs` so the same source can be compiled for both
+targets. The module provides:
+
+- Pointer-sized types (`PteVal`, `Va`, `Pa`) that are `u64` on rv64
+  and `u32` on rv32.
+- SATP mode constants (`SATP_MODE_SV39` for 64-bit, `SATP_MODE_SV32`
+  for 32-bit).
+- PTE constants (V/R/W/X/U/G/A/D, PPN_SHIFT, PPN_MASK, FLAGS_MASK)
+  with the correct width for each target.
+- Page-table geometry (PTES_PER_TABLE = 512 on Sv39, 1024 on Sv32;
+  PAGING_LEVELS = 3 on Sv39, 2 on Sv32).
+- VA index functions (l0_idx, l1_idx, l2_idx) with the correct bit
+  positions for each paging mode.
+- USER_TOP (1 GiB on Sv39, 2 GiB on Sv32).
+
+### What's NOT yet ported
+
+The constants and types are in place, but the actual code paths still
+use 64-bit assumptions. A full 32-bit port would require:
+
+1. **boot.S** — a new boot assembly for rv32 (different register
+   widths, different `li` encoding for large constants).
+2. **VMM walker** — `mm/vmm/walk.rs` assumes 3 levels (L2/L1/L0).
+   Sv32 has only 2 levels (L1/L0). The walker needs a cfg gate.
+3. **SATP encoding** — `install_root()` in `mm/vmm/mod.rs` hardcodes
+   `SATP_MODE_SV39 | (root_pa >> 12)`. On rv32 the mode is bit 31
+   (not bits 60-63) and the PPN is 20 bits (not 44).
+4. **CLINT mtimecmp** — on rv32 the CLINT mtimecmp registers are
+   32-bit. `srv/timer.rs` reads/writes them as 64-bit via two 32-bit
+   halves, which works, but the address calculation differs.
+5. **TrapFrame** — `arch/trap_frame.rs` uses `u64` for all registers.
+   On rv32 they're `u32`. The struct layout needs a cfg gate.
+6. **OnyxExec format** — the `.onx` header uses `u64` for entry/seg
+   offsets. A 32-bit variant would use `u32`.
+7. **libc ABI** — `UserStat` in `syscall/fs_sys/open_close.rs` uses
+   `u64`/`i64` fields matching the rv64 lp64d ABI. rv32 uses `u32`/
+   `i32` (ilp32 ABI).
+
+### How to build for 32-bit (when port is complete)
+
+```bash
+# Add the rv32gc target
+rustup target add riscv32gc-unknown-none-elf
+
+# Build
+cargo build --release --target riscv32gc-unknown-none-elf
+
+# Or set it as the default in .cargo/config.toml:
+# [build]
+# target = "riscv32gc-unknown-none-elf"
+```
+
+The QEMU command for 32-bit testing:
+```bash
+qemu-system-riscv32 -M virt -m 256M -bios bootloader.bin \
+    -drive file=disk.img,format=raw,if=none,id=drive0 \
+    -device virtio-blk-device,drive=drive0 \
+    -nographic -serial mon:stdio
+```
+
+### Migration path
+
+The 32-bit port is being done incrementally. Code that needs to be
+pointer-width-aware should use the types from `arch::bits` instead of
+hardcoding `u64`. Once all the code paths are ported, the cfg gates
+in `bits.rs` will produce a working 32-bit kernel with no further
+changes needed.
 
 ----
 
