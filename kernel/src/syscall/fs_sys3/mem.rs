@@ -54,6 +54,15 @@ pub unsafe fn sys_brk(addr: u64) -> i64 {
     if addr < heap_base || addr > heap_end {
         return Errno::NoMem.as_i64();
     }
+    // Bug (syscall MINOR #17): unmap pages when shrinking the heap.
+    // The previous code just lowered heap_brk without freeing the
+    // underlying physical pages — a process that allocated and then
+    // freed a lot of heap would keep the physical pages mapped,
+    // wasting memory. We now unmap the range [addr, cur) when shrinking.
+    if addr < cur {
+        let size = (cur - addr) as usize;
+        let _ = vmm::unmap(p.root_pa, addr, size);
+    }
     if addr > cur {
         if let Err(e) = ensure_heap_pages(p.root_pa, cur, addr) {
             return e.as_i64();

@@ -170,8 +170,20 @@ pub(in super::super) unsafe fn sys_open(path: u64, flags: u64, mode: u64) -> i64
 
     // Try to open existing file. If O_CREAT and the file does not exist,
     // create it (root-only for now — ring 2 callers will get EPERM).
+    let already_existed: bool;
     let token = match vfs::open(path_bytes, perms) {
-        Ok(t) => t,
+        Ok(t) => {
+            // Bug (syscall MINOR #1): enforce O_EXCL. If both O_CREAT and
+            // O_EXCL are set, POSIX requires open() to fail with EEXIST if
+            // the file already exists. The previous code silently accepted
+            // the existing file, defeating the O_EXCL atomic-create pattern.
+            if (flags32 & O_EXCL) != 0 && (flags32 & O_CREAT) != 0 {
+                let _ = vfs::close(t);
+                return Errno::Exist.as_i64();
+            }
+            already_existed = true;
+            t
+        }
         Err(e) if e == Errno::NoEnt && (flags32 & O_CREAT) != 0 => {
             if ring > proc::PROC_RING_ROOT {
                 return Errno::Perm.as_i64();
@@ -183,19 +195,15 @@ pub(in super::super) unsafe fn sys_open(path: u64, flags: u64, mode: u64) -> i64
                 mode as u32
             };
             match vfs::create(path_bytes, dtype) {
-                Ok(t) => t,
+                Ok(t) => {
+                    already_existed = false;
+                    t
+                }
                 Err(e) => return e.as_i64(),
             }
         }
         Err(e) => return e.as_i64(),
     };
-
-    // O_EXCL: fail if the file existed.
-    if (flags32 & O_EXCL) != 0 && (flags32 & O_CREAT) != 0 {
-        // We can't easily tell if `vfs::open` succeeded vs `vfs::create`
-        // created a new file. Conservatively, accept either case (O_EXCL
-        // enforcement requires a stat-then-create dance — TODO).
-    }
 
     // O_TRUNC: truncate to zero length on opening for write.
     if (flags32 & O_TRUNC) != 0 && (perms & vfs::PERM_WRITE) != 0 {
@@ -207,12 +215,22 @@ pub(in super::super) unsafe fn sys_open(path: u64, flags: u64, mode: u64) -> i64
         let _ = vfs::lseek(token, 0, 2 /* SEEK_END */);
     }
 
-    // O_DIRECTORY: caller requires a directory. Verify by stat-ing the
-    // underlying inode. If it's a regular file, close and return ENOTDIR.
+    // Bug (syscall MINOR #2): enforce O_DIRECTORY. If the caller passed
+    // O_DIRECTORY, POSIX requires open() to fail with ENOTDIR if the
+    // target is not a directory. We stat the file via fstat (which fills
+    // the size) — directories have mode bits 0o040000 in the stat output.
+    // Since our vfs::stat only returns size, we use a heuristic: try
+    // readdir() and if it fails with ENOTDIR, the target is a regular file.
     if (flags32 & O_DIRECTORY) != 0 {
-        // We don't have a portable way to check "is directory" from a token
-        // without extending the VFS API. For now, accept any — the user can
-        // readdir() and find out.
+        let mut name_buf = [0u8; 256];
+        match vfs::readdir(path_bytes, name_buf.as_mut_ptr(), 256) {
+            Ok(_) => { /* it's a directory — good */ }
+            Err(Errno::NotDir) => {
+                let _ = vfs::close(token);
+                return Errno::NotDir.as_i64();
+            }
+            Err(_) => { /* other errors: accept anyway */ }
+        }
     }
 
     token as i64

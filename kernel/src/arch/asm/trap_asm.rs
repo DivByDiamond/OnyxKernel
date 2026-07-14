@@ -138,6 +138,26 @@ drop_to_user:
     li t4, 0
     li t5, 0
     li t6, 0
+    // Bug (syscall MINOR #5): zero the callee-saved registers s0-s11
+    // before entering user space. The previous code left whatever values
+    // the kernel had in these registers — a user program reading them
+    // (e.g. via inline asm) would see kernel stack pointers, frame
+    // pointers, and other sensitive data. Zero them all so user space
+    // starts with a clean register state.
+    li s0, 0
+    li s1, 0
+    li s2, 0
+    li s3, 0
+    li s4, 0
+    li s5, 0
+    li s6, 0
+    li s7, 0
+    li s8, 0
+    li s9, 0
+    li s10, 0
+    li s11, 0
+    li gp, 0
+    li tp, 0
     sret
 "#,
 );

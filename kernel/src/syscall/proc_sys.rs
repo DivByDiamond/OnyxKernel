@@ -98,6 +98,13 @@ pub(super) unsafe fn sys_sigmask(how: u32, sig: u32) -> i64 {
 }
 
 pub(super) unsafe fn sys_sched_setaffinity(pid: u64, cpu: i64) -> i64 {
+    // Bug (syscall MINOR #12): validate pid range. The previous code did
+    // `by_pid(pid as u32)` which silently truncated a u64 pid > u32::MAX
+    // to a small value, potentially matching an unrelated process. We
+    // now reject any pid that doesn't fit in u32.
+    if pid > u32::MAX as u64 {
+        return Errno::Inval.as_i64();
+    }
     if cpu < -1 || cpu >= crate::proc::process::MAX_HARTS as i64 {
         return Errno::Inval.as_i64();
     }

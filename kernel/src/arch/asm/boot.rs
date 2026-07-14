@@ -28,8 +28,26 @@ _start:
     li t0, 0x9F
     csrw pmpcfg0, t0
     // Delegate the standard set of S-mode exceptions, INCLUDING:
+    //   bit 0  — instruction misaligned
     //   bit 1  — instruction access fault
+    //   bit 2  — illegal instruction
+    //   bit 3  — breakpoint
+    //   bit 5  — load access fault
+    //   bit 7  — store access fault
+    //   bit 8  — environment call from U-mode
+    //   bit 9  — environment call from S-mode
     //   bit 11 — instruction page fault
+    //   bit 12 — load page fault
+    //   bit 13 — store page fault
+    //   bit 15 — store/AMO page fault
+    //
+    // Bug (syscall MINOR #6, #7, #8): also delegate misaligned access
+    // faults (bits 0, 4, 6) so that user-space misaligned loads/stores
+    // trap into S-mode and can be handled (or kill the process) instead
+    // of crashing the machine in M-mode. Reserved bits in medeleg are
+    // Read-Only-Zero — writing 1 to them is a no-op, but we avoid them
+    // to be a good citizen.
+    //
     // Without bits 1 and 11 a jump into unmapped or unmapped-execute
     // memory traps into M-mode and hangs/crashes the machine instead of
     // being delivered to the kernel as an S-mode page fault.
