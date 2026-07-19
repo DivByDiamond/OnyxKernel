@@ -35,9 +35,64 @@ pub const fn is_aligned(x: usize) -> bool {
 }
 #[inline]
 pub const fn min(a: usize, b: usize) -> usize {
-    if a < b { a } else { b }
+    if a < b {
+        a
+    } else {
+        b
+    }
 }
 #[inline]
 pub const fn max(a: usize, b: usize) -> usize {
-    if a > b { a } else { b }
+    if a > b {
+        a
+    } else {
+        b
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn test_page_align_down() {
+        assert_eq!(page_align_down(0), 0);
+        assert_eq!(page_align_down(4095), 0);
+        assert_eq!(page_align_down(4096), 4096);
+        assert_eq!(page_align_down(4097), 4096);
+        assert_eq!(page_align_down(8191), 4096);
+        assert_eq!(page_align_down(8192), 8192);
+    }
+    #[test]
+    fn test_page_align_up() {
+        assert_eq!(page_align_up(0), 0);
+        assert_eq!(page_align_up(1), 4096);
+        assert_eq!(page_align_up(4096), 4096);
+        assert_eq!(page_align_up(4097), 8192);
+    }
+    #[test]
+    fn test_is_aligned() {
+        assert!(is_aligned(0));
+        assert!(is_aligned(4096));
+        assert!(is_aligned(8192));
+        assert!(!is_aligned(1));
+        assert!(!is_aligned(4095));
+    }
+    #[test]
+    fn test_min_max() {
+        assert_eq!(min(10, 20), 10);
+        assert_eq!(min(20, 10), 10);
+        assert_eq!(max(10, 20), 20);
+        assert_eq!(max(20, 10), 20);
+        assert_eq!(min(42, 42), 42);
+        assert_eq!(max(42, 42), 42);
+    }
+    #[test]
+    fn test_constants() {
+        assert_eq!(KB, 1024);
+        assert_eq!(MB, 1024 * 1024);
+        assert_eq!(GB, 1024 * 1024 * 1024);
+        assert_eq!(PAGE_SIZE, 4096);
+        assert_eq!(PAGE_SHIFT, 12);
+        assert_eq!(PAGE_MASK, !(PAGE_SIZE - 1));
+    }
 }
