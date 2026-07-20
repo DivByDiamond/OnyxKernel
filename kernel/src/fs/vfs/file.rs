@@ -1,6 +1,6 @@
 use super::{
-    alloc_fd, fd_check, fd_clear, fd_get, fd_set, fd_token, fd_update_pos, FdToken, Fs, G_ROOT_FS,
-    PERM_READ, PERM_SEEK, PERM_WRITE, VFS_MAX_FDS,
+    FdToken, Fs, G_ROOT_FS, PERM_READ, PERM_SEEK, PERM_WRITE, VFS_MAX_FDS, alloc_fd, fd_check,
+    fd_clear, fd_get, fd_set, fd_token, fd_update_pos,
 };
 use crate::fs::{devfs, fat32, ipcfs, onyxfs, procfs};
 use onyx_core::errno::{Errno, KResult};
@@ -24,7 +24,10 @@ pub unsafe fn open(path: &[u8], perms: u32) -> KResult<FdToken> {
         Fs::Proc => {
             let ino = match procfs::lookup(subpath) {
                 Ok(i) => i,
-                Err(e) => { let _ = fd_clear(idx); return Err(e); }
+                Err(e) => {
+                    let _ = fd_clear(idx);
+                    return Err(e);
+                }
             };
             let st = procfs::stat(ino)?;
             (ino, st.size)
@@ -32,7 +35,10 @@ pub unsafe fn open(path: &[u8], perms: u32) -> KResult<FdToken> {
         Fs::Ipc => {
             let ino = match ipcfs::lookup(subpath) {
                 Ok(i) => i,
-                Err(e) => { let _ = fd_clear(idx); return Err(e); }
+                Err(e) => {
+                    let _ = fd_clear(idx);
+                    return Err(e);
+                }
             };
             let st = ipcfs::stat(ino)?;
             (ino, st.size)
@@ -40,7 +46,10 @@ pub unsafe fn open(path: &[u8], perms: u32) -> KResult<FdToken> {
         Fs::Devfs => {
             let ino = match devfs::lookup(subpath) {
                 Ok(i) => i,
-                Err(e) => { let _ = fd_clear(idx); return Err(e); }
+                Err(e) => {
+                    let _ = fd_clear(idx);
+                    return Err(e);
+                }
             };
             let st = devfs::stat(ino)?;
             (ino, st.size)
@@ -64,7 +73,10 @@ pub unsafe fn open(path: &[u8], perms: u32) -> KResult<FdToken> {
                     }
                     (cluster, sz)
                 }
-                _ => { let _ = fd_clear(idx); return Err(Errno::Inval); },
+                _ => {
+                    let _ = fd_clear(idx);
+                    return Err(Errno::Inval);
+                }
             }
         }
     };

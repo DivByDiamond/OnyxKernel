@@ -117,16 +117,20 @@ pub unsafe fn set_input_ctx_ep(input: *mut u8, ep_idx: u8, ep_type: u8, mps: u16
     ep.dw3 = mps as u32;
 }
 
-pub unsafe fn configure_endpoint(
-    slot_id: u8,
-    ep_idx: u8,
-    ep_type: u8,
-    mps: u16,
-    deq: u64,
-) -> KResult<()> {
+pub unsafe fn configure_endpoint(slot_id: u8, ep_idx: u8, ep_type: u8, mps: u16) -> KResult<()> {
+    let xfer_ring = ring::alloc_ring(32)?;
+    let deq = xfer_ring.phys;
+    let dcs = xfer_ring.cycle;
+
+    let ring_ptr = pmm::alloc_zero()? as *mut ring::TrbRing;
+    ptr::write(ring_ptr, xfer_ring);
+    let ctx = &raw mut super::G_XHCI;
+    (*ctx).xfer_rings[ep_idx as usize] = ring_ptr;
+
     let input_pa = pmm::alloc_n(2)? as usize;
     ptr::write_bytes(input_pa as *mut u8, 0, 8192);
-    set_input_ctx_ep(input_pa as *mut u8, ep_idx, ep_type, mps, deq);
+    let deq_val = deq | if dcs { 1 } else { 0 };
+    set_input_ctx_ep(input_pa as *mut u8, ep_idx, ep_type, mps, deq_val);
     let mut trb = ring::Trb::zero();
     trb.params[0] = input_pa as u32;
     trb.params[1] = (input_pa >> 32) as u32;

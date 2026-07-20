@@ -21,6 +21,7 @@ pub mod readdir;
 pub mod rename;
 pub mod snapshot;
 pub mod snapshot_io;
+pub mod symlink;
 pub mod unlink;
 pub mod write;
 
@@ -35,6 +36,7 @@ pub use readdir::*;
 pub use rename::*;
 pub use snapshot::*;
 pub use snapshot_io::*;
+pub use symlink::*;
 pub use unlink::*;
 pub use write::*;
 
@@ -129,5 +131,64 @@ pub(super) unsafe fn dirents_per_block() -> usize {
     match *(&raw const G_VERSION) {
         ONYFS_V1 => ONYFS_BLOCK_SIZE / ONYFS_V1_DIRENT_SIZE, // 113
         _ => ONYFS_BLOCK_SIZE / onyx_core::formats::OnyfsDirent::SIZE, // 102 (v2)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_onyfs_stat_default() {
+        let st = OnyfsStat::default();
+        assert_eq!(st.ino, 0);
+        assert_eq!(st.size, 0);
+        assert_eq!(st.mode, 0);
+        assert_eq!(st.mtime, 0);
+        assert_eq!(st.atime, 0);
+        assert_eq!(st.ctime, 0);
+    }
+
+    #[test]
+    fn test_inode_dirent_per_block_v1() {
+        unsafe {
+            let old = G_VERSION;
+            G_VERSION = ONYFS_V1;
+            assert_eq!(inodes_per_block(), ONYFS_BLOCK_SIZE / ONYFS_V1_INODE_SIZE);
+            assert_eq!(inodes_per_block(), 64);
+            assert_eq!(dirents_per_block(), ONYFS_BLOCK_SIZE / ONYFS_V1_DIRENT_SIZE);
+            assert_eq!(dirents_per_block(), 113);
+            G_VERSION = old;
+        }
+    }
+
+    #[test]
+    fn test_inode_dirent_per_block_v2() {
+        unsafe {
+            let old = G_VERSION;
+            G_VERSION = ONYFS_V2;
+            assert_eq!(
+                inodes_per_block(),
+                ONYFS_BLOCK_SIZE / onyx_core::formats::OnyfsInode::SIZE
+            );
+            assert_eq!(inodes_per_block(), 32);
+            assert_eq!(
+                dirents_per_block(),
+                ONYFS_BLOCK_SIZE / onyx_core::formats::OnyfsDirent::SIZE
+            );
+            assert_eq!(dirents_per_block(), 102);
+            G_VERSION = old;
+        }
+    }
+
+    #[test]
+    fn test_onyxfs_constants() {
+        assert_eq!(ONYFS_V1, 1);
+        assert_eq!(ONYFS_V2, 2);
+        assert_eq!(ONYFS_BLOCK_SIZE, 4096);
+        assert_eq!(ONYFS_V1_INODE_SIZE, 64);
+        assert_eq!(ONYFS_V1_DIRENT_SIZE, 36);
+        assert_eq!(onyx_core::formats::OnyfsInode::SIZE, 128);
+        assert_eq!(onyx_core::formats::OnyfsDirent::SIZE, 40);
     }
 }

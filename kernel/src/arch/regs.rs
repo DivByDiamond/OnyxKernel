@@ -11,9 +11,15 @@ pub const SSTATUS_SPP: u64 = 1 << 8;
 pub const SSTATUS_SUM: u64 = 1 << 18;
 pub const SSTATUS_MXR: u64 = 1 << 19;
 pub const SATP_MODE_BARE: u64 = 0;
+#[cfg(target_pointer_width = "64")]
 pub const SATP_MODE_SV39: u64 = 8 << 60;
+#[cfg(target_pointer_width = "32")]
+pub const SATP_MODE_SV32: u32 = 1 << 31;
 pub const SATP_PPN_MASK: u64 = (1 << 44) - 1;
+#[cfg(target_pointer_width = "64")]
 pub const SCAUSE_INT: u64 = 1 << 63;
+#[cfg(target_pointer_width = "32")]
+pub const SCAUSE_INT: u64 = 1 << 31;
 pub const CAUSE_IAMISS: u64 = 0;
 pub const CAUSE_ILL: u64 = 2;
 pub const CAUSE_BRK: u64 = 3;
@@ -39,15 +45,21 @@ pub const PTE_LEAF: u64 = PTE_R | PTE_X;
 pub const PTE_PPN_SHIFT: u64 = 10;
 pub const PTE_PPN_MASK: u64 = ((1u64 << 44) - 1) << 10;
 pub const PTE_FLAGS_MASK: u64 = 0x3FF;
+#[cfg(target_pointer_width = "64")]
 pub const SV39_PTES_PER_TABLE: usize = 512;
+#[cfg(target_pointer_width = "32")]
+pub const SV32_PTES_PER_TABLE: usize = 1024;
+#[cfg(target_pointer_width = "64")]
 #[inline]
 pub const fn sv39_l2_idx(va: u64) -> usize {
     ((va >> 30) & 0x1FF) as usize
 }
+#[cfg(target_pointer_width = "64")]
 #[inline]
 pub const fn sv39_l1_idx(va: u64) -> usize {
     ((va >> 21) & 0x1FF) as usize
 }
+#[cfg(target_pointer_width = "64")]
 #[inline]
 pub const fn sv39_l0_idx(va: u64) -> usize {
     ((va >> 12) & 0x1FF) as usize
@@ -86,7 +98,10 @@ pub const fn plic_complete(ctx: usize) -> u64 {
 }
 pub const KERNEL_BASE: u64 = 0x8020_0000;
 pub const USER_BASE: u64 = 0x10000;
+#[cfg(target_pointer_width = "64")]
 pub const USER_TOP: u64 = 0x4000_0000;
+#[cfg(target_pointer_width = "32")]
+pub const USER_TOP: u64 = 0x8000_0000;
 pub const USER_STACK_TOP: u64 = USER_TOP - 4096;
 /// Heap region starts at 16 MiB and grows up to ~256 MiB before colliding
 /// with the mmap region at 0x3000_0000. This gives user programs a generous

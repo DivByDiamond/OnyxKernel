@@ -18,6 +18,7 @@
 //!   physical RAM is typically <= 4 GiB on rv32)
 //!
 //! This module is compiled only when target_pointer_width = "32".
+use crate::arch::bits;
 use crate::arch::regs::*;
 use crate::mm::pmm;
 use core::ptr;
@@ -40,7 +41,7 @@ pub(super) unsafe fn walk(
     // Iterate from the level above leaf_level down to leaf_level.
     for level in (leaf_level + 1..=1).rev() {
         let idx = match level {
-            1 => sv39_l1_idx(vaddr), // reuse — Sv32 L1 index is bits 22-31
+            1 => bits::l1_idx(vaddr),
             _ => return Err(Errno::Inval),
         };
         let pte_ptr = (table_pa as usize + idx * 8) as *mut u64;
@@ -64,8 +65,8 @@ pub(super) unsafe fn walk(
         }
     }
     let idx = match leaf_level {
-        0 => sv39_l0_idx(vaddr), // reuse — Sv32 L0 index is bits 12-21
-        1 => sv39_l1_idx(vaddr),
+        0 => bits::l0_idx(vaddr),
+        1 => bits::l1_idx(vaddr),
         _ => return Err(Errno::Inval),
     };
     Ok((table_pa as usize + idx * 8) as *mut u64)

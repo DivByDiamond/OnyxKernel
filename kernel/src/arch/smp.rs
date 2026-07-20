@@ -82,7 +82,14 @@ pub unsafe extern "Rust" fn secondary_entry() -> ! {
     let entry = secondary_kmain as *const () as usize;
     let root_pa = core::ptr::read_volatile(&raw const G_KERNEL_ROOT_PA);
     let satp = if root_pa != 0 {
-        (8u64 << 60) | (root_pa >> 12)
+        #[cfg(target_pointer_width = "64")]
+        {
+            (8u64 << 60) | (root_pa >> 12)
+        }
+        #[cfg(target_pointer_width = "32")]
+        {
+            (crate::arch::bits::SATP_MODE_SV32 as u64) | ((root_pa >> 12) & 0x3FFFFF)
+        }
     } else {
         0
     };

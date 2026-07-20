@@ -19,6 +19,7 @@ pub enum Errno {
     Overflow = -15,
     Child = -16,
     NotEmpty = -17,
+    Loop = -18,
 }
 
 impl Errno {
@@ -47,6 +48,7 @@ impl Errno {
             Self::Overflow => "EOVERFLOW",
             Self::Child => "ECHILD",
             Self::NotEmpty => "ENOTEMPTY",
+            Self::Loop => "ELOOP",
         }
     }
 }
@@ -106,6 +108,7 @@ mod tests {
             (Errno::Overflow, -15, "EOVERFLOW"),
             (Errno::Child, -16, "ECHILD"),
             (Errno::NotEmpty, -17, "ENOTEMPTY"),
+            (Errno::Loop, -18, "ELOOP"),
         ];
         for (e, code, name) in variants {
             assert_eq!(e.as_i64(), code, "{} code mismatch", name);

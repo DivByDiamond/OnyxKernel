@@ -4,12 +4,19 @@
 //! - trap_entry does NOT switch satp (keeps user satp + SUM bit)
 //! - drop_to_user does NOT zero gp/tp
 //! - sscratch initialized to __stack_top in trap::init
+#[cfg(target_pointer_width = "64")]
 pub mod boot;
 #[cfg(target_pointer_width = "32")]
 pub mod boot_32;
+#[cfg(target_pointer_width = "64")]
 pub mod trap_asm;
+#[cfg(target_pointer_width = "32")]
+pub mod trap_asm_32;
 
+#[cfg(target_pointer_width = "64")]
 pub use trap_asm::{drop_to_user, sched_switch, trap_entry, trap_return};
+#[cfg(target_pointer_width = "32")]
+pub use trap_asm_32::{drop_to_user, sched_switch, trap_entry, trap_return};
 
 #[unsafe(no_mangle)]
 pub extern "C" fn trap_handler(tf: *mut crate::arch::trap_frame::TrapFrame) {

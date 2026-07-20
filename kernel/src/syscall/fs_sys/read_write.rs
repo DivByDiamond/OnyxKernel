@@ -50,7 +50,6 @@ pub(in super::super) unsafe fn sys_read(tf: &mut TrapFrame, _fd: u64, buf: u64, 
         // the shell read ESC sequences (3 bytes: ESC [ A) in one call.
         let p = proc::current();
         if p.raw_stdin {
-            let mut n: usize = 0;
             // Block for the first byte.
             let first = loop {
                 match uart::getc() {
@@ -59,7 +58,7 @@ pub(in super::super) unsafe fn sys_read(tf: &mut TrapFrame, _fd: u64, buf: u64, 
                 }
             };
             *dst.add(0) = first;
-            n = 1;
+            let mut n = 1usize;
             // Drain any additional bytes that are already in the UART
             // FIFO without blocking. This is essential for ESC sequences
             // (ESC [ A for Up arrow) — if we blocked after ESC, the

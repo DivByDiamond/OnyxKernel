@@ -112,7 +112,10 @@ pub fn kernel_root() -> u64 {
 pub unsafe fn destroy_root(root_pa: u64) {
     vmm_lock();
     let root = root_pa as *mut u64;
+    #[cfg(target_pointer_width = "64")]
     free_subtree(root, 2);
+    #[cfg(target_pointer_width = "32")]
+    free_subtree(root, 1);
     vmm_unlock();
     // pmm::free takes the PMM lock internally; do it outside the VMM lock
     // to keep lock ordering consistent (VMM -> PMM, never PMM -> VMM).
@@ -126,7 +129,11 @@ pub unsafe fn destroy_root(root_pa: u64) {
 }
 
 unsafe fn free_subtree(table: *mut u64, level: u32) {
-    for i in 0..SV39_PTES_PER_TABLE {
+    #[cfg(target_pointer_width = "64")]
+    let entries = SV39_PTES_PER_TABLE;
+    #[cfg(target_pointer_width = "32")]
+    let entries = crate::arch::bits::PTES_PER_TABLE;
+    for i in 0..entries {
         let pte = ptr::read_volatile(table.add(i));
         if pte & PTE_V == 0 {
             continue;
@@ -150,6 +157,7 @@ unsafe fn free_subtree(table: *mut u64, level: u32) {
     }
 }
 
+#[cfg(target_pointer_width = "64")]
 pub unsafe fn translate(root_pa: u64, vaddr: u64) -> u64 {
     let mut pa = root_pa;
     for level in (0..=2).rev() {
@@ -178,6 +186,34 @@ pub unsafe fn translate(root_pa: u64, vaddr: u64) -> u64 {
     0
 }
 
+#[cfg(target_pointer_width = "32")]
+pub unsafe fn translate(root_pa: u64, vaddr: u64) -> u64 {
+    let mut pa = root_pa;
+    for level in (0..=1).rev() {
+        let idx = match level {
+            1 => crate::arch::bits::l1_idx(vaddr),
+            0 => crate::arch::bits::l0_idx(vaddr),
+            _ => return 0,
+        };
+        let pte = ptr::read_volatile((pa as usize + idx * 8) as *const u64);
+        if pte & PTE_V == 0 {
+            return 0;
+        }
+        if pte & PTE_LEAF != 0 {
+            let leaf_ppn = (pte & PTE_PPN_MASK) >> PTE_PPN_SHIFT;
+            let off = match level {
+                1 => vaddr & ((1u64 << 22) - 1),
+                0 => vaddr & ((1u64 << 12) - 1),
+                _ => return 0,
+            };
+            return (leaf_ppn << 12) + off;
+        }
+        pa = (pte & PTE_PPN_MASK) >> PTE_PPN_SHIFT << 12;
+    }
+    0
+}
+
+#[cfg(target_pointer_width = "64")]
 pub unsafe fn translate_user(root_pa: u64, vaddr: u64) -> u64 {
     let mut pa = root_pa;
     for level in (0..=2).rev() {
@@ -209,8 +245,39 @@ pub unsafe fn translate_user(root_pa: u64, vaddr: u64) -> u64 {
     0
 }
 
+#[cfg(target_pointer_width = "32")]
+pub unsafe fn translate_user(root_pa: u64, vaddr: u64) -> u64 {
+    let mut pa = root_pa;
+    for level in (0..=1).rev() {
+        let idx = match level {
+            1 => crate::arch::bits::l1_idx(vaddr),
+            0 => crate::arch::bits::l0_idx(vaddr),
+            _ => return 0,
+        };
+        let pte = ptr::read_volatile((pa as usize + idx * 8) as *const u64);
+        if pte & PTE_V == 0 {
+            return 0;
+        }
+        if pte & PTE_LEAF != 0 {
+            if pte & PTE_U == 0 {
+                return 0;
+            }
+            let leaf_ppn = (pte & PTE_PPN_MASK) >> PTE_PPN_SHIFT;
+            let off = match level {
+                1 => vaddr & ((1u64 << 22) - 1),
+                0 => vaddr & ((1u64 << 12) - 1),
+                _ => return 0,
+            };
+            return (leaf_ppn << 12) + off;
+        }
+        pa = (pte & PTE_PPN_MASK) >> PTE_PPN_SHIFT << 12;
+    }
+    0
+}
+
 /// Like `translate_user` but also requires `PTE_W` (writable).  Returns 0 if
 /// the page is not both user-accessible and writable.
+#[cfg(target_pointer_width = "64")]
 pub unsafe fn translate_user_write(root_pa: u64, vaddr: u64) -> u64 {
     let mut pa = root_pa;
     for level in (0..=2).rev() {
@@ -242,6 +309,36 @@ pub unsafe fn translate_user_write(root_pa: u64, vaddr: u64) -> u64 {
     0
 }
 
+#[cfg(target_pointer_width = "32")]
+pub unsafe fn translate_user_write(root_pa: u64, vaddr: u64) -> u64 {
+    let mut pa = root_pa;
+    for level in (0..=1).rev() {
+        let idx = match level {
+            1 => crate::arch::bits::l1_idx(vaddr),
+            0 => crate::arch::bits::l0_idx(vaddr),
+            _ => return 0,
+        };
+        let pte = ptr::read_volatile((pa as usize + idx * 8) as *const u64);
+        if pte & PTE_V == 0 {
+            return 0;
+        }
+        if pte & PTE_LEAF != 0 {
+            if pte & (PTE_U | PTE_W) != (PTE_U | PTE_W) {
+                return 0;
+            }
+            let leaf_ppn = (pte & PTE_PPN_MASK) >> PTE_PPN_SHIFT;
+            let off = match level {
+                1 => vaddr & ((1u64 << 22) - 1),
+                0 => vaddr & ((1u64 << 12) - 1),
+                _ => return 0,
+            };
+            return (leaf_ppn << 12) + off;
+        }
+        pa = (pte & PTE_PPN_MASK) >> PTE_PPN_SHIFT << 12;
+    }
+    0
+}
+
 /// Return the current PTE flags for `vaddr` in the page table rooted at
 /// `root_pa`, but ONLY if the page is a user page (PTE_U set). Returns 0
 /// otherwise. This lets callers distinguish:
@@ -254,6 +351,7 @@ pub unsafe fn translate_user_write(root_pa: u64, vaddr: u64) -> u64 {
 /// 3 GiB of VA == PA. When `map_segment_data` later maps a user segment
 /// that falls inside one of those 1 GiB regions, we must NOT try to
 /// "upgrade" the identity PTE — we must allocate a fresh user page.
+#[cfg(target_pointer_width = "64")]
 pub unsafe fn pte_user_flags(root_pa: u64, vaddr: u64) -> u64 {
     let mut pa = root_pa;
     for level in (0..=2).rev() {
@@ -279,8 +377,33 @@ pub unsafe fn pte_user_flags(root_pa: u64, vaddr: u64) -> u64 {
     0
 }
 
+#[cfg(target_pointer_width = "32")]
+pub unsafe fn pte_user_flags(root_pa: u64, vaddr: u64) -> u64 {
+    let mut pa = root_pa;
+    for level in (0..=1).rev() {
+        let idx = match level {
+            1 => crate::arch::bits::l1_idx(vaddr),
+            0 => crate::arch::bits::l0_idx(vaddr),
+            _ => return 0,
+        };
+        let pte = ptr::read_volatile((pa as usize + idx * 8) as *const u64);
+        if pte & PTE_V == 0 {
+            return 0;
+        }
+        if pte & PTE_LEAF != 0 {
+            if pte & PTE_U == 0 {
+                return 0;
+            }
+            return pte & PTE_FLAGS_MASK;
+        }
+        pa = (pte & PTE_PPN_MASK) >> PTE_PPN_SHIFT << 12;
+    }
+    0
+}
+
 pub mod map;
 pub mod unmap;
+#[cfg(target_pointer_width = "64")]
 pub mod walk;
 #[cfg(target_pointer_width = "32")]
 pub mod walk_32;

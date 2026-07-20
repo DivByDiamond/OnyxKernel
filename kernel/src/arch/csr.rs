@@ -1,111 +1,86 @@
 //! CSR access via inline asm.
+//! Functions return/take u64 on all targets. On 32-bit (rv32), CSRs are
+//! 32-bit wide so the assembly operands use u32 with implicit casts.
 use core::arch::asm;
 
-#[inline]
-pub unsafe fn read_sstatus() -> u64 {
-    let v: u64;
-    asm!("csrr {0}, sstatus", out(reg) v, options(nomem, nostack));
-    v
+macro_rules! csr_read_u64 {
+    ($name:ident, $csr:literal) => {
+        #[inline]
+        pub unsafe fn $name() -> u64 {
+            #[cfg(target_pointer_width = "64")]
+            { let v: u64; asm!(concat!("csrr {0}, ", $csr), out(reg) v, options(nomem, nostack)); v }
+            #[cfg(target_pointer_width = "32")]
+            { let v: u32; asm!(concat!("csrr {0}, ", $csr), out(reg) v, options(nomem, nostack)); v as u64 }
+        }
+    };
 }
-#[inline]
-pub unsafe fn write_sstatus(v: u64) {
-    asm!("csrw sstatus, {0}", in(reg) v, options(nomem, nostack));
+macro_rules! csr_write_u64 {
+    ($name:ident, $csr:literal) => {
+        #[inline]
+        pub unsafe fn $name(v: u64) {
+            #[cfg(target_pointer_width = "64")]
+            asm!(concat!("csrw ", $csr, ", {0}"), in(reg) v, options(nomem, nostack));
+            #[cfg(target_pointer_width = "32")]
+            asm!(concat!("csrw ", $csr, ", {0}"), in(reg) (v as u32), options(nomem, nostack));
+        }
+    };
 }
-#[inline]
-pub unsafe fn set_sstatus(m: u64) {
-    asm!("csrs sstatus, {0}", in(reg) m, options(nomem, nostack));
+macro_rules! csr_set_u64 {
+    ($name:ident, $csr:literal) => {
+        #[inline]
+        pub unsafe fn $name(m: u64) {
+            #[cfg(target_pointer_width = "64")]
+            asm!(concat!("csrs ", $csr, ", {0}"), in(reg) m, options(nomem, nostack));
+            #[cfg(target_pointer_width = "32")]
+            asm!(concat!("csrs ", $csr, ", {0}"), in(reg) (m as u32), options(nomem, nostack));
+        }
+    };
 }
-#[inline]
-pub unsafe fn clear_sstatus(m: u64) {
-    asm!("csrc sstatus, {0}", in(reg) m, options(nomem, nostack));
+macro_rules! csr_clear_u64 {
+    ($name:ident, $csr:literal) => {
+        #[inline]
+        pub unsafe fn $name(m: u64) {
+            #[cfg(target_pointer_width = "64")]
+            asm!(concat!("csrc ", $csr, ", {0}"), in(reg) m, options(nomem, nostack));
+            #[cfg(target_pointer_width = "32")]
+            asm!(concat!("csrc ", $csr, ", {0}"), in(reg) (m as u32), options(nomem, nostack));
+        }
+    };
 }
-#[inline]
-pub unsafe fn read_sepc() -> u64 {
-    let v: u64;
-    asm!("csrr {0}, sepc", out(reg) v, options(nomem, nostack));
-    v
-}
-#[inline]
-pub unsafe fn write_sepc(v: u64) {
-    asm!("csrw sepc, {0}", in(reg) v, options(nomem, nostack));
-}
-#[inline]
-pub unsafe fn read_scause() -> u64 {
-    let v: u64;
-    asm!("csrr {0}, scause", out(reg) v, options(nomem, nostack));
-    v
-}
-#[inline]
-pub unsafe fn read_stval() -> u64 {
-    let v: u64;
-    asm!("csrr {0}, stval", out(reg) v, options(nomem, nostack));
-    v
-}
-#[inline]
-pub unsafe fn read_satp() -> u64 {
-    let v: u64;
-    asm!("csrr {0}, satp", out(reg) v, options(nomem, nostack));
-    v
-}
-#[inline]
-pub unsafe fn write_satp(v: u64) {
-    asm!("csrw satp, {0}", in(reg) v, options(nomem, nostack));
-}
-#[inline]
-pub unsafe fn write_stvec(v: u64) {
-    asm!("csrw stvec, {0}", in(reg) v, options(nomem, nostack));
-}
-#[inline]
-pub unsafe fn read_sie() -> u64 {
-    let v: u64;
-    asm!("csrr {0}, sie", out(reg) v, options(nomem, nostack));
-    v
-}
-#[inline]
-pub unsafe fn set_sie(m: u64) {
-    asm!("csrs sie, {0}", in(reg) m, options(nomem, nostack));
-}
-#[inline]
-pub unsafe fn clear_sie(m: u64) {
-    asm!("csrc sie, {0}", in(reg) m, options(nomem, nostack));
-}
-#[inline]
-pub unsafe fn write_sscratch(v: u64) {
-    asm!("csrw sscratch, {0}", in(reg) v, options(nomem, nostack));
-}
-#[inline]
-pub unsafe fn read_mhartid() -> u64 {
-    let v: u64;
-    asm!("csrr {0}, mhartid", out(reg) v, options(nomem, nostack));
-    v
-}
+
+csr_read_u64!(read_sstatus, "sstatus");
+csr_write_u64!(write_sstatus, "sstatus");
+csr_set_u64!(set_sstatus, "sstatus");
+csr_clear_u64!(clear_sstatus, "sstatus");
+csr_read_u64!(read_sepc, "sepc");
+csr_write_u64!(write_sepc, "sepc");
+csr_read_u64!(read_scause, "scause");
+csr_read_u64!(read_stval, "stval");
+csr_read_u64!(read_satp, "satp");
+csr_write_u64!(write_satp, "satp");
+csr_write_u64!(write_stvec, "stvec");
+csr_read_u64!(read_sie, "sie");
+csr_set_u64!(set_sie, "sie");
+csr_clear_u64!(clear_sie, "sie");
+csr_write_u64!(write_sscratch, "sscratch");
+csr_read_u64!(read_mhartid, "mhartid");
+
 #[inline]
 pub unsafe fn sfence_vma_all() {
     asm!("sfence.vma zero, zero", options(nostack));
 }
 #[inline]
 pub unsafe fn sfence_vma(va: u64, asid: u64) {
+    #[cfg(target_pointer_width = "64")]
     asm!("sfence.vma {0}, {1}", in(reg) va, in(reg) asid, options(nostack));
+    #[cfg(target_pointer_width = "32")]
+    asm!("sfence.vma {0}, {1}", in(reg) (va as u32), in(reg) (asid as u32), options(nostack));
 }
 #[inline]
 pub unsafe fn wfi() {
     asm!("wfi", options(nostack));
 }
-#[inline]
-pub unsafe fn read_cycle() -> u64 {
-    let v: u64;
-    asm!("csrr {0}, cycle", out(reg) v, options(nomem, nostack));
-    v
-}
-#[inline]
-pub unsafe fn read_time() -> u64 {
-    let v: u64;
-    asm!("csrr {0}, time", out(reg) v, options(nomem, nostack));
-    v
-}
-#[inline]
-pub unsafe fn read_instret() -> u64 {
-    let v: u64;
-    asm!("csrr {0}, instret", out(reg) v, options(nomem, nostack));
-    v
-}
+
+csr_read_u64!(read_cycle, "cycle");
+csr_read_u64!(read_time, "time");
+csr_read_u64!(read_instret, "instret");

@@ -5,8 +5,8 @@
 //! is SYS_wait: it blocks the caller until a child exits, then reaps it.
 use super::lifecycle::{alloc_proc, free_proc};
 use super::process::{
-    alloc_pid, by_pid, current_for_hart, current_pid, hart_id, proc_list_lock, proc_list_unlock,
-    ProcState, G_ALL_PROCS, PROC_RING_ROOT, PROC_RING_USER,
+    G_ALL_PROCS, PROC_RING_ROOT, PROC_RING_USER, ProcState, alloc_pid, by_pid, current_for_hart,
+    current_pid, hart_id, proc_list_lock, proc_list_unlock,
 };
 use crate::arch::regs::*;
 use crate::arch::trap_frame::TrapFrame;
@@ -64,7 +64,13 @@ pub unsafe fn create_user(
     (*p).tf.a0 = argc as u64;
     (*p).tf.a1 = if argc > 0 { argv_sp + 8 } else { 0 };
     (*p).tf.sstatus = SSTATUS_SPIE;
-    (*p).tf.satp = SATP_MODE_SV39 | (root_pa >> 12);
+    if cfg!(target_pointer_width = "64") {
+        (*p).tf.satp = SATP_MODE_SV39 | (root_pa >> 12);
+    } else {
+        (*p).tf.satp = (crate::arch::bits::SATP_MODE_SV32 as u32
+            | ((root_pa >> 12) & 0x3FFFFF) as u32)
+            as crate::arch::trap_frame::Reg;
+    }
     // Bug #11 fix: hold the caller's rq_lock around enqueue. The previous
     // code called enqueue(hart_id(), p) with no lock, racing with the
     // scheduler on the same hart and producing orphaned/duplicated entries.

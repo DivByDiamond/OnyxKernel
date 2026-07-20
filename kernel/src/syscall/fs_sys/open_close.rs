@@ -7,7 +7,7 @@
 use crate::fs::vfs;
 use crate::proc;
 use crate::syscall::abi::{
-    FD_CLOEXEC, F_DUPFD, F_GETFD, F_GETFL, F_SETFD, F_SETFL, O_ACCMODE, O_APPEND, O_CREAT,
+    F_DUPFD, F_GETFD, F_GETFL, F_SETFD, F_SETFL, FD_CLOEXEC, O_ACCMODE, O_APPEND, O_CREAT,
     O_DIRECTORY, O_EXCL, O_NONBLOCK, O_RDONLY, O_RDWR, O_TRUNC, O_WRONLY,
 };
 use onyx_core::errno::Errno;
@@ -170,7 +170,6 @@ pub(in super::super) unsafe fn sys_open(path: u64, flags: u64, mode: u64) -> i64
 
     // Try to open existing file. If O_CREAT and the file does not exist,
     // create it (root-only for now — ring 2 callers will get EPERM).
-    let already_existed: bool;
     let token = match vfs::open(path_bytes, perms) {
         Ok(t) => {
             // Bug (syscall MINOR #1): enforce O_EXCL. If both O_CREAT and
@@ -181,7 +180,6 @@ pub(in super::super) unsafe fn sys_open(path: u64, flags: u64, mode: u64) -> i64
                 let _ = vfs::close(t);
                 return Errno::Exist.as_i64();
             }
-            already_existed = true;
             t
         }
         Err(e) if e == Errno::NoEnt && (flags32 & O_CREAT) != 0 => {
@@ -195,10 +193,7 @@ pub(in super::super) unsafe fn sys_open(path: u64, flags: u64, mode: u64) -> i64
                 mode as u32
             };
             match vfs::create(path_bytes, dtype) {
-                Ok(t) => {
-                    already_existed = false;
-                    t
-                }
+                Ok(t) => t,
                 Err(e) => return e.as_i64(),
             }
         }

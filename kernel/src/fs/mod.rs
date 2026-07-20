@@ -4,3 +4,6 @@ pub mod ipcfs;
 pub mod onyxfs;
 pub mod procfs;
 pub mod vfs;
+
+#[cfg(test)]
+mod tests;

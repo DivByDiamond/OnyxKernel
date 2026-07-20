@@ -99,7 +99,12 @@ pub(super) unsafe fn sys_exec(tf: &mut TrapFrame, path: u64, argv: u64) -> i64 {
     tf.a0 = argc as u64;
     tf.a1 = if argc > 0 { argv_sp + 8 } else { 0 };
     tf.sstatus = crate::arch::regs::SSTATUS_SPIE;
-    tf.satp = crate::arch::regs::SATP_MODE_SV39 | (r.root_pa >> 12);
+    if cfg!(target_pointer_width = "64") {
+        tf.satp = crate::arch::regs::SATP_MODE_SV39 | (r.root_pa >> 12);
+    } else {
+        tf.satp = (crate::arch::bits::SATP_MODE_SV32 as u32 | ((r.root_pa >> 12) & 0x3FFFFF) as u32)
+            as crate::arch::trap_frame::Reg;
+    }
     argc as i64
 }
 

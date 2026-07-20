@@ -1,5 +1,5 @@
 //! File creation — `create` (regular file) and `mkdir` (directory).
-use super::{alloc_fd, fd_token, resolve_mount, FdToken, Fs, PERM_READ, PERM_SEEK, PERM_WRITE};
+use super::{FdToken, Fs, PERM_READ, PERM_SEEK, PERM_WRITE, alloc_fd, fd_token, resolve_mount};
 use crate::fs::onyxfs;
 use crate::proc;
 use onyx_core::errno::{Errno, KResult};
@@ -71,4 +71,72 @@ pub unsafe fn mkdir(path: &[u8]) -> KResult<()> {
     };
     onyxfs::mkdir(parent_ino, dirname)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_split_parent_root() {
+        unsafe {
+            let (parent, name) = split_parent(b"/foo");
+            assert_eq!(parent, b"");
+            assert_eq!(name, b"foo");
+        }
+    }
+
+    #[test]
+    fn test_split_parent_nested() {
+        unsafe {
+            let (parent, name) = split_parent(b"/foo/bar/baz");
+            assert_eq!(parent, b"foo/bar");
+            assert_eq!(name, b"baz");
+        }
+    }
+
+    #[test]
+    fn test_split_parent_no_slash() {
+        unsafe {
+            let (parent, name) = split_parent(b"foo");
+            assert_eq!(parent, b"");
+            assert_eq!(name, b"foo");
+        }
+    }
+
+    #[test]
+    fn test_split_parent_trailing_slash() {
+        unsafe {
+            let (parent, name) = split_parent(b"/foo/bar/");
+            assert_eq!(parent, b"foo/bar");
+            assert_eq!(name, b"");
+        }
+    }
+
+    #[test]
+    fn test_split_parent_single_component() {
+        unsafe {
+            let (parent, name) = split_parent(b"/");
+            assert_eq!(parent, b"");
+            assert_eq!(name, b"");
+        }
+    }
+
+    #[test]
+    fn test_split_parent_deep_nested() {
+        unsafe {
+            let (parent, name) = split_parent(b"/a/b/c/d/e/f");
+            assert_eq!(parent, b"a/b/c/d/e");
+            assert_eq!(name, b"f");
+        }
+    }
+
+    #[test]
+    fn test_split_parent_empty() {
+        unsafe {
+            let (parent, name) = split_parent(b"");
+            assert_eq!(parent, b"");
+            assert_eq!(name, b"");
+        }
+    }
 }

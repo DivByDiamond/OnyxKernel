@@ -216,45 +216,76 @@ pub unsafe fn sys_getentropy(buf: u64, len: u64) -> i64 {
     0
 }
 
-/// fsync(fd) — flush file to disk. OnyxFS doesn't buffer writes (every
-/// write goes through virtio immediately), so this is a no-op success.
+/// fsync(fd) — flush file to disk. Delegates to VFS which forces a journal
+/// commit and a cache flush on the underlying filesystem.
 pub unsafe fn sys_fsync(fd: u64) -> i64 {
-    let _ = fd;
-    0
+    match vfs::fsync(fd) {
+        Ok(()) => 0,
+        Err(e) => e.as_i64(),
+    }
 }
 
 /// readlink(path, buf, bufsiz) — read target of a symbolic link.
-///
-/// OnyxFS does not yet support symlinks. We return EINVAL (POSIX "not a
-/// symlink" / "not implemented" indicator) for any path.
 pub unsafe fn sys_readlink(path: u64, buf: u64, bufsiz: u64) -> i64 {
-    let mut _path_buf = [0u8; 256];
-    let _ = (
-        parse_user_path(path, &mut _path_buf),
-        user_ptr_ok(buf, bufsiz),
-    );
-    Errno::Inval.as_i64()
+    let mut path_buf = [0u8; 256];
+    let path_len = match parse_user_path(path, &mut path_buf) {
+        Some(l) => l,
+        None => return Errno::Inval.as_i64(),
+    };
+    if buf == 0 || bufsiz == 0 || !user_ptr_ok(buf, bufsiz) {
+        return Errno::Inval.as_i64();
+    }
+    let pa = crate::mm::vmm::translate(proc::current().root_pa, buf);
+    if pa == 0 {
+        return Errno::Inval.as_i64();
+    }
+    let path_bytes = &path_buf[..path_len];
+    match vfs::readlink(path_bytes, pa as *mut u8, bufsiz as u32) {
+        Ok(n) => n as i64,
+        Err(e) => e.as_i64(),
+    }
 }
 
 /// symlink(target, linkpath) — create a symbolic link.
-///
-/// Not yet supported by OnyxFS. Returns ENOSYS so libc callers fall back
-/// gracefully (or fail loudly — but at least with a meaningful errno).
-pub unsafe fn sys_symlink(_target: u64, _linkpath: u64) -> i64 {
-    Errno::NoSys.as_i64()
+pub unsafe fn sys_symlink(target: u64, linkpath: u64) -> i64 {
+    let mut target_buf = [0u8; 256];
+    let target_len = match parse_user_path(target, &mut target_buf) {
+        Some(l) => l,
+        None => return Errno::Inval.as_i64(),
+    };
+    let mut linkpath_buf = [0u8; 256];
+    let linkpath_len = match parse_user_path(linkpath, &mut linkpath_buf) {
+        Some(l) => l,
+        None => return Errno::Inval.as_i64(),
+    };
+    let target_bytes = &target_buf[..target_len];
+    let linkpath_bytes = &linkpath_buf[..linkpath_len];
+    match vfs::symlink(target_bytes, linkpath_bytes) {
+        Ok(()) => 0,
+        Err(e) => e.as_i64(),
+    }
 }
 
-/// chmod(path, mode) — change file mode bits. OnyxFS does not yet enforce
-/// permissions, so we accept and ignore the mode. Returns 0.
-pub unsafe fn sys_chmod(path: u64, _mode: u64) -> i64 {
-    let mut _path_buf = [0u8; 256];
-    let _ = parse_user_path(path, &mut _path_buf);
-    0
+/// chmod(path, mode) — change file mode bits.
+pub unsafe fn sys_chmod(path: u64, mode: u64) -> i64 {
+    let mut path_buf = [0u8; 256];
+    let path_len = match parse_user_path(path, &mut path_buf) {
+        Some(l) => l,
+        None => return Errno::Inval.as_i64(),
+    };
+    let path_bytes = &path_buf[..path_len];
+    match vfs::chmod(path_bytes, mode as u32) {
+        Ok(()) => 0,
+        Err(e) => e.as_i64(),
+    }
 }
 
-/// fchmod(fd, mode) — same as chmod but takes an fd.
-pub unsafe fn sys_fchmod(_fd: u64, _mode: u64) -> i64 {
-    0
+/// fchmod(fd, mode) — change file mode bits via fd.
+pub unsafe fn sys_fchmod(fd: u64, mode: u64) -> i64 {
+    match vfs::fchmod(fd, mode as u32) {
+        Ok(()) => 0,
+        Err(e) => e.as_i64(),
+    }
 }
 
 /// waitpid(pid, status, options) — wait for a specific child or any child.
@@ -454,7 +485,12 @@ pub unsafe fn sys_execve(tf: &mut TrapFrame, path: u64, argv: u64, envp: u64) ->
     tf.a0 = argc as u64;
     tf.a1 = argv_sp + 8;
     tf.sstatus = crate::arch::regs::SSTATUS_SPIE;
-    tf.satp = crate::arch::regs::SATP_MODE_SV39 | (r.root_pa >> 12);
+    if cfg!(target_pointer_width = "64") {
+        tf.satp = crate::arch::regs::SATP_MODE_SV39 | (r.root_pa >> 12);
+    } else {
+        tf.satp = (crate::arch::bits::SATP_MODE_SV32 as u32 | ((r.root_pa >> 12) & 0x3FFFFF) as u32)
+            as crate::arch::trap_frame::Reg;
+    }
     argc as i64
 }
 
@@ -512,7 +548,7 @@ pub unsafe fn sys_fork(tf: &mut TrapFrame) -> i64 {
         parent_pid,
         parent.heap_brk,
         ring,
-        0, // argc for child — TODO: pass parent's argc/argv
+        tf.a0 as usize, // pass parent's argc — child inherits argv/envp from shared stack
         parent.ustack,
         refcount,
     );

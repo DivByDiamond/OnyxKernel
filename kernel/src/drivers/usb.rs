@@ -2,6 +2,9 @@
 //!
 //! Provides EHCI async list scheduler and xHCI controller driver
 //! with mass storage class support.
+pub mod core;
+pub mod hcd_ehci;
+pub mod hcd_ohci;
 pub mod xhci;
 
 use crate::arch::mmio::Mmio;
@@ -202,7 +205,7 @@ struct QH {
     overlay_token: u32,
     overlay_buf: [u32; 5],
 }
-const QH_SIZE: usize = core::mem::size_of::<QH>();
+const QH_SIZE: usize = ::core::mem::size_of::<QH>();
 
 #[repr(C)]
 struct QTD {
@@ -211,7 +214,7 @@ struct QTD {
     token: u32,
     buf: [u32; 5],
 }
-const QTD_SIZE: usize = core::mem::size_of::<QTD>();
+const QTD_SIZE: usize = ::core::mem::size_of::<QTD>();
 
 static mut G_QH_OFFSETS: [usize; MAX_QH] = [0; MAX_QH];
 static mut G_QH_COUNT: usize = 0;
@@ -241,7 +244,7 @@ unsafe fn alloc_dma(size: usize) -> KResult<usize> {
         return Err(Errno::NoMem);
     }
     G_DMA_USED = off + aligned;
-    core::ptr::write_bytes(G_DMA.data.as_mut_ptr().add(off), 0, aligned);
+    ::core::ptr::write_bytes(G_DMA.data.as_mut_ptr().add(off), 0, aligned);
     Ok(off)
 }
 
@@ -311,7 +314,7 @@ unsafe fn ohci_alloc_dma(size: usize) -> KResult<usize> {
         return Err(Errno::NoMem);
     }
     G_OHCI_DMA_USED = off + aligned;
-    core::ptr::write_bytes(G_OHCI_DMA.data.as_mut_ptr().add(off), 0, aligned);
+    ::core::ptr::write_bytes(G_OHCI_DMA.data.as_mut_ptr().add(off), 0, aligned);
     Ok(off)
 }
 
@@ -588,6 +591,111 @@ unsafe fn ehci_control_transfer(
                     return Ok(bytes_xfered);
                 }
             }
+        }
+        if timeout == 0 {
+            qh_remove(qh_idx);
+            return Err(Errno::Io);
+        }
+        timeout -= 1;
+    }
+}
+
+/// Submit a bulk transfer (no setup/status stages, just data).
+pub unsafe fn ehci_bulk_transfer(
+    dev_addr: u8,
+    mut data: Option<&mut [u8]>,
+    data_in: bool,
+    max_pkt: u32,
+) -> KResult<u32> {
+    if !G_ASYNCLIST_ENABLED {
+        init_async_list()?;
+    }
+
+    let data_len = data.as_ref().map(|d| d.len() as u32).unwrap_or(0);
+    if data_len == 0 {
+        return Ok(0);
+    }
+    let data_qtds = (data_len + QTD_BUF_SIZE - 1) / QTD_BUF_SIZE;
+    if data_qtds > MAX_QTD as u32 {
+        return Err(Errno::NoMem);
+    }
+
+    let qh_idx = alloc_qh()?;
+    let qh = qh_ptr(qh_idx);
+    let data_pid = if data_in { QTD_PID_IN } else { QTD_PID_OUT };
+
+    let mut qtd_indices = [0usize; 64];
+    for i in 0..data_qtds as usize {
+        qtd_indices[i] = alloc_qtd()?;
+    }
+
+    let mut buf_pos = 0u32;
+    for i in 0..data_qtds as usize {
+        let dqtd = qtd_ptr(qtd_indices[i]);
+        let remaining = data_len - buf_pos;
+        let chunk = remaining.min(QTD_BUF_SIZE);
+        let buf_phys = if let Some(ref mut db) = data {
+            db.as_mut_ptr().add(buf_pos as usize) as u32
+        } else {
+            0
+        };
+        let next_d = if i + 1 < data_qtds as usize {
+            qtd_phys(qtd_indices[i + 1])
+        } else {
+            QH_TERMINATE
+        };
+        (*dqtd).next = next_d;
+        (*dqtd).alt_next = QH_TERMINATE;
+        (*dqtd).token = data_pid | QTD_CERR_3 | (chunk << QTD_TOTAL_LEN_SHIFT) | QTD_ACTIVE;
+        (*dqtd).buf = [buf_phys, 0, 0, 0, 0];
+        buf_pos += chunk;
+    }
+    let mpl_val = max_pkt.min(512) << QH_MPL_SHIFT;
+    let eps = QH_EPS_HIGH;
+    let dev_addr_bits = (dev_addr as u32) << QH_DEV_ADDR_SHIFT;
+    (*qh).horz_link = 0;
+    (*qh).ep_chars = dev_addr_bits | eps | QH_DTC | mpl_val;
+    (*qh).eps_bits = 0;
+    (*qh).current_link = qtd_phys(qtd_indices[0]);
+    (*qh).overlay_next = qtd_phys(qtd_indices[0]);
+    (*qh).overlay_alt_next = QH_TERMINATE;
+    (*qh).overlay_token =
+        data_pid | QTD_CERR_3 | (data_len.min(QTD_BUF_SIZE) << QTD_TOTAL_LEN_SHIFT) | QTD_ACTIVE;
+    (*qh).overlay_buf = [0, 0, 0, 0, 0];
+
+    qh_insert(qh_idx);
+
+    let mut timeout = 500_000u32;
+    let mut bytes_xfered = 0u32;
+    loop {
+        let status = op_rd(OP_USBSTS);
+        if (status & STS_HCHALTED) != 0 {
+            qh_remove(qh_idx);
+            return Err(Errno::Io);
+        }
+        let mut all_done = true;
+        for i in 0..data_qtds as usize {
+            let dqtd = qtd_ptr(qtd_indices[i]);
+            let dt = (*dqtd).token;
+            if (dt & QTD_ACTIVE) != 0 {
+                all_done = false;
+                break;
+            }
+            if (dt & QTD_ERROR) != 0 {
+                qh_remove(qh_idx);
+                return Err(Errno::Io);
+            }
+            let remain = dt >> QTD_TOTAL_LEN_SHIFT;
+            let this_chunk = if i + 1 < data_qtds as usize {
+                QTD_BUF_SIZE
+            } else {
+                data_len - (data_qtds - 1) * QTD_BUF_SIZE
+            };
+            bytes_xfered += this_chunk - remain;
+        }
+        if all_done {
+            qh_remove(qh_idx);
+            return Ok(bytes_xfered);
         }
         if timeout == 0 {
             qh_remove(qh_idx);
@@ -909,6 +1017,97 @@ pub unsafe fn ohci_control_transfer(
         if timeout == 0 {
             ohci_wr(OHCI_HC_CONTROL_HEAD_ED, 0);
             ohci_wr(OHCI_HC_CONTROL_CURRENT_ED, 0);
+            return Err(Errno::Io);
+        }
+        timeout -= 1;
+    }
+}
+
+/// Submit an OHCI bulk transfer (data-only, no setup/status).
+pub unsafe fn ohci_bulk_transfer(
+    dev_addr: u8,
+    mut data: Option<&mut [u8]>,
+    data_in: bool,
+    max_pkt: u32,
+    speed: u8,
+) -> KResult<u32> {
+    let data_len = data.as_ref().map(|d| d.len() as u32).unwrap_or(0);
+    if data_len == 0 {
+        return Ok(0);
+    }
+
+    if 1 > MAX_OHCI_TD as u32 {
+        return Err(Errno::NoMem);
+    }
+
+    let ed_idx = ohci_alloc_ed()?;
+    let data_td_idx = ohci_alloc_td()?;
+
+    let ed = ohci_ed_ptr(ed_idx);
+    let dt = ohci_td_ptr(data_td_idx);
+
+    let buf_phys = if let Some(ref mut db) = data {
+        db.as_mut_ptr() as u32
+    } else {
+        0
+    };
+    let dp = if data_in { TD_DP_IN } else { TD_DP_OUT };
+    (*dt).control = TD_CC_NOT_ACCESSED | TD_T_DATA0 | TD_DI_NO_INTR | dp | TD_R_3;
+    (*dt).cbp = buf_phys;
+    (*dt).next_td = TD_TERMINATE;
+    (*dt).be = buf_phys + data_len - 1;
+
+    let speed_bits = if speed != 0 {
+        ED_SPEED_LOW
+    } else {
+        ED_SPEED_FULL
+    };
+    let mps = max_pkt.min(255) << ED_MPS_SHIFT;
+    let fa = (dev_addr as u32) << ED_FA_SHIFT;
+    (*ed).control = fa | speed_bits | mps;
+    (*ed).tail_td = TD_TERMINATE;
+    (*ed).head_td = ohci_td_phys(data_td_idx);
+    (*ed).next_ed = ED_TERMINATE;
+
+    ohci_wr(OHCI_HC_BULK_HEAD_ED, ohci_ed_phys(ed_idx));
+    ohci_wr(OHCI_HC_BULK_CURRENT_ED, ohci_ed_phys(ed_idx));
+
+    ohci_wr(OHCI_HC_CONTROL, ohci_rd(OHCI_HC_CONTROL) | OHCI_CTRL_BLE);
+
+    ohci_wr(OHCI_HC_COMMAND_STATUS, OHCI_CMD_CLF);
+
+    let mut timeout = 500_000u32;
+    loop {
+        let ctrl = ohci_rd(OHCI_HC_CONTROL);
+        if (ctrl & OHCI_CTRL_HCFS_MASK) != OHCI_CTRL_HCFS_OPER {
+            ohci_wr(OHCI_HC_BULK_HEAD_ED, 0);
+            ohci_wr(OHCI_HC_BULK_CURRENT_ED, 0);
+            return Err(Errno::Io);
+        }
+
+        if (*ed).head_td & 1 != 0 {
+            ohci_wr(OHCI_HC_BULK_HEAD_ED, 0);
+            ohci_wr(OHCI_HC_BULK_CURRENT_ED, 0);
+            return Err(Errno::Io);
+        }
+
+        let head_p = (*ed).head_td & !1;
+        let tail_p = (*ed).tail_td & !0xF;
+        if head_p == tail_p {
+            let data_cc = (*dt).control & TD_CC_MASK;
+            if data_cc != 0 {
+                ohci_wr(OHCI_HC_BULK_HEAD_ED, 0);
+                ohci_wr(OHCI_HC_BULK_CURRENT_ED, 0);
+                return Err(Errno::Io);
+            }
+            ohci_wr(OHCI_HC_BULK_HEAD_ED, 0);
+            ohci_wr(OHCI_HC_BULK_CURRENT_ED, 0);
+            return Ok(data_len);
+        }
+
+        if timeout == 0 {
+            ohci_wr(OHCI_HC_BULK_HEAD_ED, 0);
+            ohci_wr(OHCI_HC_BULK_CURRENT_ED, 0);
             return Err(Errno::Io);
         }
         timeout -= 1;

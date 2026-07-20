@@ -1,4 +1,4 @@
-use crate::proc::process::{Proc, MAX_HARTS};
+use crate::proc::process::{MAX_HARTS, Proc};
 use core::hint::spin_loop;
 use core::mem::MaybeUninit;
 use core::sync::atomic::{AtomicBool, Ordering};

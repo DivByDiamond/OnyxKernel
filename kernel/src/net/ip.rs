@@ -6,6 +6,7 @@ use onyx_core::errno::{Errno, KResult};
 pub const IP_HLEN: usize = 20;
 pub const IP_PROTO_TCP: u8 = 6;
 pub const IP_PROTO_ICMP: u8 = 1;
+pub const IP_PROTO_UDP: u8 = 17;
 
 static mut IP_ID: u16 = 0;
 
@@ -26,21 +27,25 @@ pub fn checksum(data: &[u8]) -> u16 {
 }
 
 pub unsafe fn send_packet(dst_ip: [u8; 4], protocol: u8, payload: &[u8]) -> KResult<()> {
-    let dst_mac = match eth::arp_lookup(dst_ip) {
-        Some(m) => m,
-        None => {
-            eth::arp_request(dst_ip);
-            let mut found = None;
-            for _ in 0..1000 {
-                crate::net::poll();
-                if let Some(m) = eth::arp_lookup(dst_ip) {
-                    found = Some(m);
-                    break;
+    let dst_mac = if dst_ip == [255, 255, 255, 255] {
+        [0xFF; 6]
+    } else {
+        match eth::arp_lookup(dst_ip) {
+            Some(m) => m,
+            None => {
+                eth::arp_request(dst_ip);
+                let mut found = None;
+                for _ in 0..1000 {
+                    crate::net::poll();
+                    if let Some(m) = eth::arp_lookup(dst_ip) {
+                        found = Some(m);
+                        break;
+                    }
                 }
-            }
-            match found {
-                Some(m) => m,
-                None => return Err(Errno::Io),
+                match found {
+                    Some(m) => m,
+                    None => return Err(Errno::Io),
+                }
             }
         }
     };
@@ -82,6 +87,7 @@ pub unsafe fn handle_ip(frame: &[u8]) {
     match protocol {
         IP_PROTO_ICMP => unsafe { handle_icmp(frame, ip_start, ihl, total_len) },
         IP_PROTO_TCP => unsafe { crate::net::tcp::handle_tcp(frame, ip_start, ihl, total_len) },
+        IP_PROTO_UDP => unsafe { crate::net::udp::handle_udp(frame, ip_start) },
         _ => {}
     }
 }

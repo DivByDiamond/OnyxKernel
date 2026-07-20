@@ -13,7 +13,10 @@ use onyx_core::errno::Errno;
 use super::{fs_sys, fs_sys2, fs_sys3, ipc_sys, net_sys, proc_sys, ring_sys, snap_sys};
 
 const USER_BASE: u64 = 0x10000;
+#[cfg(target_pointer_width = "64")]
 const USER_TOP: u64 = 0x4000_0000;
+#[cfg(target_pointer_width = "32")]
+const USER_TOP: u64 = 0x8000_0000;
 
 pub(super) fn user_ptr_ok(p: u64, len: u64) -> bool {
     p >= USER_BASE && p.checked_add(len).is_some_and(|end| end <= USER_TOP)

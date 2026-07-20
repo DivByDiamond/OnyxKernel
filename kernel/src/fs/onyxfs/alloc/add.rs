@@ -1,13 +1,13 @@
 use super::super::inode;
 use super::super::journal::journal_log;
 use super::super::{
-    dirents_per_block, read_block, write_block, G_BUF, G_SB, G_VERSION, ONYFS_V1,
-    ONYFS_V1_DIRENT_SIZE,
+    G_BUF, G_SB, G_VERSION, ONYFS_V1, ONYFS_V1_DIRENT_SIZE, dirents_per_block, read_block,
+    write_block,
 };
 use super::bitmap::alloc_data_block;
 use onyx_core::errno::{Errno, KResult};
 use onyx_core::formats::{
-    OnyfsDirent, OnyfsInode, ONYFS_BLOCK_SIZE, ONYFS_DIRECT_BLKS, ONYFS_NAME_MAX,
+    ONYFS_BLOCK_SIZE, ONYFS_DIRECT_BLKS, ONYFS_NAME_MAX, OnyfsDirent, OnyfsInode,
 };
 
 /// Add (or update) a dirent in a directory inode.

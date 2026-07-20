@@ -1,7 +1,7 @@
 use crate::arch::csr;
 use crate::arch::regs::*;
 use crate::drivers::{
-    gpio, hwrand, i2c, led, plic, rtc, sdhci, spi, uart, virtio, virtio_console, virtio_input,
+    gpio, hwrand, i2c, led, plic, rtc, sdhci, spi, uart, usb, virtio, virtio_console, virtio_input,
     virtio_net, virtio_rng, watchdog,
 };
 use crate::libfdt::fdt;
@@ -116,6 +116,13 @@ pub(crate) unsafe fn probe_peripherals() {
             Arg::from(rtc_info.base),
             Arg::from(hwrand::source_name())
         );
+    }
+    unsafe {
+        if usb::init_usb().is_ok() {
+            crate::kinf!("usb", "host controller initialized");
+        } else {
+            crate::kwrn!("usb", "no host controller found");
+        }
     }
     if let Some(gpio_info) = periph::find_gpio() {
         gpio::init(gpio_info.base as usize);

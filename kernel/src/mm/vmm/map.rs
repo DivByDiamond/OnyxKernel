@@ -4,7 +4,10 @@ use crate::mm::pmm;
 use core::ptr;
 use onyx_core::errno::{Errno, KResult};
 
+#[cfg(target_pointer_width = "64")]
 use super::walk::walk;
+#[cfg(target_pointer_width = "32")]
+use super::walk_32::walk;
 
 pub unsafe fn map(root_pa: u64, vaddr: u64, paddr: u64, size: usize, flags: u64) -> KResult<()> {
     super::vmm_lock();
@@ -19,10 +22,17 @@ unsafe fn map_impl(root_pa: u64, vaddr: u64, paddr: u64, size: usize, flags: u64
     let mut remaining = size as u64;
     while remaining > 0 {
         let level = best_level(va, pa, remaining);
-        let chunk = if level == 2 {
+        let chunk: u64 = if level == 2 {
             1u64 << 30
         } else if level == 1 {
-            1u64 << 21
+            #[cfg(target_pointer_width = "64")]
+            {
+                1u64 << 21
+            }
+            #[cfg(target_pointer_width = "32")]
+            {
+                1u64 << 22
+            }
         } else {
             1u64 << 12
         };
@@ -88,10 +98,15 @@ unsafe fn map_anon_impl(root_pa: u64, vaddr: u64, size: usize, flags: u64) -> KR
 
 unsafe fn map_one(root_pa: u64, vaddr: u64, paddr: u64, flags: u64, level: u32) -> KResult<()> {
     // Bug (mm SERIOUS #16): for huge leaves (level 1 or 2), the physical
-    // address MUST be naturally aligned to the leaf size (2 MiB / 1 GiB).
-    // The Sv39 spec requires this for huge leaves — an unaligned PA
-    // silently produces a corrupted mapping. Reject early instead.
+    // address MUST be naturally aligned to the leaf size.
+    // Sv39: level 1 = 2 MiB, level 2 = 1 GiB
+    // Sv32: level 1 = 4 MiB (no level 2)
+    #[cfg(target_pointer_width = "64")]
     if level == 1 && paddr & ((1u64 << 21) - 1) != 0 {
+        return Err(Errno::Inval);
+    }
+    #[cfg(target_pointer_width = "32")]
+    if level == 1 && paddr & ((1u64 << 22) - 1) != 0 {
         return Err(Errno::Inval);
     }
     if level == 2 && paddr & ((1u64 << 30) - 1) != 0 {
@@ -129,12 +144,22 @@ pub unsafe fn map_one_pub(
     r
 }
 
+#[cfg(target_pointer_width = "64")]
 fn best_level(va: u64, pa: u64, remaining: u64) -> u32 {
     if remaining >= (1u64 << 30) && (va & ((1u64 << 30) - 1)) == 0 && (pa & ((1u64 << 30) - 1)) == 0
     {
         return 2;
     }
     if remaining >= (1u64 << 21) && (va & ((1u64 << 21) - 1)) == 0 && (pa & ((1u64 << 21) - 1)) == 0
+    {
+        return 1;
+    }
+    0
+}
+
+#[cfg(target_pointer_width = "32")]
+fn best_level(va: u64, pa: u64, remaining: u64) -> u32 {
+    if remaining >= (1u64 << 22) && (va & ((1u64 << 22) - 1)) == 0 && (pa & ((1u64 << 22) - 1)) == 0
     {
         return 1;
     }

@@ -40,20 +40,20 @@
 //! let pte: PteVal = PTE_V | PTE_R | ((pa >> 12) << PTE_PPN_SHIFT);
 //! ```
 //!
-//! ## What's NOT yet ported
+//! ## 32-bit port status — COMPLETE
 //!
-//! This module provides the constants and types. The actual code paths
-//! (VMM walker, trap handler, boot.S) still use 64-bit assumptions.
-//! A full 32-bit port would require:
-//!   1. A new boot.S for rv32 (different register widths)
-//!   2. A new VMM walker for Sv32 (2 levels, not 3)
-//!   3. Different SATP encoding in install_root()
-//!   4. Different CLINT mtimecmp width (32-bit on rv32)
-//!   5. Different TrapFrame layout (registers are u32, not u64)
+//! All architecture-dependent subsystems have been ported:
+//!   ✅ boot_32.rs — rv32 boot entry with sw/lw, 32-bit PMP, BSS clear, mret
+//!   ✅ trap_asm_32.rs — rv32 trap entry/return/sched_switch/drop_to_user
+//!   ✅ walk_32.rs — Sv32 page-table walker with split_leaf (1024 entries)
+//!   ✅ trap_frame.rs — 32-bit TrapFrame (u32 registers, 144 bytes)
+//!   ✅ vmm/mod.rs — Sv32 init, install_root, translate, free_subtree
+//!   ✅ map.rs/unmap.rs — Sv32 chunk sizes, alignment, walk selection
+//!   ✅ smp.rs — Sv32 SATP encoding for secondary harts
+//!   ✅ csr.rs — u32 CSR operands on rv32
+//!   ✅ spawn.rs, fs_sys2.rs, extra.rs — Sv32 SATP in exec/fork
 //!
-//! Those changes are large and would break the existing 64-bit build.
-//! For now, this module documents the differences and provides the
-//! cfg-gated constants so future work can incrementally port.
+//! Build: `cargo kbuild32` (requires riscv32imac-unknown-none-elf target).
 
 #![allow(non_upper_case_globals)]
 
@@ -82,7 +82,6 @@ pub type Pa = usize_val;
 pub const SATP_MODE_SV39: u64 = 8 << 60;
 
 /// SATP mode field for Sv32 (32-bit only): bit 31 = 0x1.
-#[cfg(target_pointer_width = "32")]
 pub const SATP_MODE_SV32: u32 = 1 << 31;
 
 /// SATP mode for the current target (Sv39 on 64-bit, Sv32 on 32-bit).

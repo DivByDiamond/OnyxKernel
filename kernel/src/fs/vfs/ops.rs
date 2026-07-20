@@ -1,6 +1,6 @@
 use onyx_core::errno::{Errno, KResult};
 
-use super::vnode::{fd_token_epoch, fd_token_idx, Fs, VfsFd, VFS_MAX_FDS};
+use super::vnode::{Fs, VFS_MAX_FDS, VfsFd, fd_token_epoch, fd_token_idx};
 
 pub(crate) unsafe fn is_kernel_boot() -> bool {
     crate::proc::current_pid() == 0

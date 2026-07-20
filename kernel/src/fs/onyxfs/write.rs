@@ -3,10 +3,16 @@
 use super::alloc::{add_dirent, alloc_data_block, alloc_inode, free_data_block};
 use super::inode::{read_inode, write_inode};
 use super::journal::{journal_commit, journal_log};
-use super::{read_block, write_block, G_BUF, G_VERSION, ONYFS_V1};
+use super::{G_BUF, G_VERSION, ONYFS_V1, read_block, write_block};
 use crate::srv::timer;
 use onyx_core::errno::{Errno, KResult};
-use onyx_core::formats::{OnyfsInode, ONYFS_BLOCK_SIZE, ONYFS_DIRECT_BLKS, ONYFS_NAME_MAX};
+use onyx_core::formats::{ONYFS_BLOCK_SIZE, ONYFS_DIRECT_BLKS, ONYFS_NAME_MAX, OnyfsInode};
+
+/// Flush pending journal entries to disk. For OnyxFS this forces a journal
+/// commit and a cache flush on the virtio device.
+pub unsafe fn fsync(_ino: u32) -> KResult<()> {
+    journal_commit()
+}
 
 /// Write data to a file at a given offset. Grows the file if needed.
 /// Allocates new data blocks lazily for any block touched by the write that
