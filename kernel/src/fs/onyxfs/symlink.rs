@@ -1,11 +1,11 @@
 use super::alloc::{add_dirent, alloc_data_block, alloc_inode};
 use super::inode::{read_inode, write_inode};
 use super::journal::{journal_commit, journal_log};
-use super::{G_BUF, G_VERSION, ONYFS_V1, read_block, write_block};
+use super::{read_block, write_block, G_BUF, G_VERSION, ONYFS_V1};
 use crate::srv::timer;
 use onyx_core::errno::{Errno, KResult};
 use onyx_core::formats::{
-    ONYFS_BLOCK_SIZE, ONYFS_DIRECT_BLKS, ONYFS_DT_LNK, ONYFS_NAME_MAX, OnyfsInode,
+    OnyfsInode, ONYFS_BLOCK_SIZE, ONYFS_DIRECT_BLKS, ONYFS_DT_LNK, ONYFS_NAME_MAX,
 };
 
 pub unsafe fn symlink(dir_ino: u32, name: &[u8], target: &[u8]) -> KResult<u32> {

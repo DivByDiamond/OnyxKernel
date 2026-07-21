@@ -1,4 +1,4 @@
-use super::{FdToken, Fs, PERM_READ, PERM_WRITE, fd_check, fd_check_perm, fd_get, fd_update_pos};
+use super::{fd_check, fd_check_perm, fd_get, fd_update_pos, FdToken, Fs, PERM_READ, PERM_WRITE};
 use crate::fs::{devfs, fat32, ipcfs, onyxfs, procfs};
 use onyx_core::errno::{Errno, KResult};
 

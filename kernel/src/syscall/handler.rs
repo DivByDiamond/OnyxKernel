@@ -65,7 +65,8 @@ fn syscall_allowed(nr: u64, ring: u8) -> bool {
         | SYS_getentropy | SYS_waitpid | SYS_fork | SYS_ftruncate | SYS_truncate2
         | SYS_readlink | SYS_setsid | SYS_getpgid | SYS_setpgid
         | SYS_sched_setaffinity | SYS_sched_getaffinity
-        | SYS_net_connect | SYS_net_send | SYS_net_recv | SYS_net_close => true,
+        | SYS_net_connect | SYS_net_send | SYS_net_recv | SYS_net_close
+        | SYS_setuid | SYS_setgid => true,
         // Root-only (ring 0 or 1):
         SYS_spawn
         | SYS_wait
@@ -79,7 +80,8 @@ fn syscall_allowed(nr: u64, ring: u8) -> bool {
         | SYS_chan_create_named
         | SYS_unlink | SYS_rename | SYS_truncate | SYS_utimens | SYS_pipe
         // v0.4 root-only:
-        | SYS_setuid | SYS_setgid | SYS_fsync | SYS_symlink | SYS_chmod | SYS_fchmod => ring <= proc::PROC_RING_ROOT,
+        | SYS_fsync | SYS_symlink | SYS_chmod | SYS_fchmod
+        | SYS_chown | SYS_fchown => ring <= proc::PROC_RING_ROOT,
         _ => false,
     }
 }
@@ -192,6 +194,8 @@ pub unsafe fn handle(tf: &mut TrapFrame) -> i64 {
         SYS_net_send => net_sys::sys_net_send(a0, a1, a2),
         SYS_net_recv => net_sys::sys_net_recv(a0, a1, a2),
         SYS_net_close => net_sys::sys_net_close(a0),
+        SYS_chown => fs_sys3::sys_chown(a0, a1 as u32, a2 as u32),
+        SYS_fchown => fs_sys3::sys_fchown(a0, a1 as u32, a2 as u32),
         _ => Errno::NoSys.as_i64(),
     }
 }

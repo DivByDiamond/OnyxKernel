@@ -11,10 +11,10 @@
 use super::compress::rle_decompress;
 use super::journal::{journal_commit, journal_log};
 use super::{
-    G_BUF, G_SB, SNAPSHOT_BLOCKS_EACH, SNAPSHOT_SLOT_BLKS, SNAPSHOT_SLOTS, read_block, write_block,
+    read_block, write_block, G_BUF, G_SB, SNAPSHOT_BLOCKS_EACH, SNAPSHOT_SLOTS, SNAPSHOT_SLOT_BLKS,
 };
 use onyx_core::errno::{Errno, KResult};
-use onyx_core::formats::{ONYFS_BLOCK_SIZE, SnapshotMeta};
+use onyx_core::formats::{SnapshotMeta, ONYFS_BLOCK_SIZE};
 
 /// Restore filesystem state from a snapshot.
 ///

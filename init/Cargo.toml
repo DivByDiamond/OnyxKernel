@@ -40,3 +40,11 @@ path = "src/fb_draw.rs"
 name = "onyx-lsblk"
 path = "src/lsblk.rs"
 
+[[bin]]
+name = "onyx-groups"
+path = "src/groups.rs"
+
+[[bin]]
+name = "onyx-su"
+path = "src/su.rs"
+

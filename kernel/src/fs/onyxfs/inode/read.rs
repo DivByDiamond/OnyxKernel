@@ -1,8 +1,8 @@
 use super::super::{
-    G_BUF, G_SB, G_VERSION, ONYFS_V1, ONYFS_V1_INODE_SIZE, OnyfsStat, inodes_per_block, read_block,
+    inodes_per_block, read_block, OnyfsStat, G_BUF, G_SB, G_VERSION, ONYFS_V1, ONYFS_V1_INODE_SIZE,
 };
 use onyx_core::errno::{Errno, KResult};
-use onyx_core::formats::{ONYFS_BLOCK_SIZE, ONYFS_DIRECT_BLKS, OnyfsInode};
+use onyx_core::formats::{OnyfsInode, ONYFS_BLOCK_SIZE, ONYFS_DIRECT_BLKS};
 
 pub unsafe fn read_inode(ino: u32, out: &mut OnyfsInode) -> KResult<()> {
     // Bug (fs SERIOUS #10): bounds-check the inode number. A bogus ino
@@ -94,6 +94,8 @@ pub unsafe fn stat(ino: u32, out: &mut OnyfsStat) -> KResult<()> {
     out.ino = ino;
     out.size = inode.size;
     out.mode = inode.mode;
+    out.uid = inode.uid;
+    out.gid = inode.gid;
     out.mtime = inode.mtime;
     out.atime = inode.atime;
     out.ctime = inode.ctime;

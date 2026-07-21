@@ -7,7 +7,7 @@
 use crate::fs::vfs;
 use crate::proc;
 use crate::syscall::abi::{
-    F_DUPFD, F_GETFD, F_GETFL, F_SETFD, F_SETFL, FD_CLOEXEC, O_ACCMODE, O_APPEND, O_CREAT,
+    FD_CLOEXEC, F_DUPFD, F_GETFD, F_GETFL, F_SETFD, F_SETFL, O_ACCMODE, O_APPEND, O_CREAT,
     O_DIRECTORY, O_EXCL, O_NONBLOCK, O_RDONLY, O_RDWR, O_TRUNC, O_WRONLY,
 };
 use onyx_core::errno::Errno;
@@ -71,6 +71,8 @@ unsafe fn fill_user_stat(
     ino: u32,
     size: u64,
     mode: u32,
+    uid: u32,
+    gid: u32,
     mtime: u64,
     atime: u64,
     ctime: u64,
@@ -97,8 +99,8 @@ unsafe fn fill_user_stat(
         st_ino: ino as u64,
         st_mode,
         st_nlink: 1,
-        st_uid: 0,
-        st_gid: 0,
+        st_uid: uid,
+        st_gid: gid,
         __pad0: 0,
         st_rdev: 0,
         st_size: size as i64,
@@ -272,15 +274,27 @@ pub(in super::super) unsafe fn sys_stat(path: u64, st_buf: u64) -> i64 {
             // Try to get richer metadata from onyxfs if the root fs is OnyxFS.
             // (Lookup will fail for FAT32/procfs/ipcfs — that's fine.)
             let mut st = crate::fs::onyxfs::OnyfsStat::default();
-            let (mtime, atime, ctime, ino, mode) =
+            let (mtime, atime, ctime, ino, mode, uid, gid) =
                 match crate::fs::onyxfs::lookup(path_bytes, &mut st) {
-                    Ok(_) => (st.mtime, st.atime, st.ctime, st.ino, st.mode),
+                    Ok(_) => (
+                        st.mtime, st.atime, st.ctime, st.ino, st.mode, st.uid, st.gid,
+                    ),
                     Err(_) => {
                         let now = crate::srv::timer::uptime_us() / 1_000_000;
-                        (now, now, now, 0u32, 0u32)
+                        (now, now, now, 0u32, 0u32, 0u32, 0u32)
                     }
                 };
-            fill_user_stat(st_buf, ino, size as u64, mode, mtime, atime, ctime);
+            fill_user_stat(
+                st_buf,
+                ino,
+                size as u64,
+                mode,
+                uid,
+                gid,
+                mtime,
+                atime,
+                ctime,
+            );
             0
         }
         Err(e) => e.as_i64(),
@@ -298,7 +312,7 @@ pub(in super::super) unsafe fn sys_fstat(token: u64, st_buf: u64) -> i64 {
             // We don't have a cheap way to recover ino/mode/atime from a token
             // in the current VFS; fill with reasonable defaults.
             let now = crate::srv::timer::uptime_us() / 1_000_000;
-            fill_user_stat(st_buf, 0, size as u64, 0, now, now, now);
+            fill_user_stat(st_buf, 0, size as u64, 0, 0, 0, now, now, now);
             0
         }
         Err(e) => e.as_i64(),

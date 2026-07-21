@@ -1,4 +1,4 @@
-use super::{Fs, resolve_mount};
+use super::{resolve_mount, Fs};
 use crate::fs::onyxfs;
 use onyx_core::errno::{Errno, KResult};
 

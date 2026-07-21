@@ -1,6 +1,6 @@
 use super::{
-    FdToken, Fs, G_ROOT_FS, PERM_READ, PERM_SEEK, PERM_WRITE, VFS_MAX_FDS, alloc_fd, fd_check,
-    fd_clear, fd_get, fd_set, fd_token, fd_update_pos,
+    alloc_fd, fd_check, fd_clear, fd_get, fd_set, fd_token, fd_update_pos, FdToken, Fs, G_ROOT_FS,
+    PERM_READ, PERM_SEEK, PERM_WRITE, VFS_MAX_FDS,
 };
 use crate::fs::{devfs, fat32, ipcfs, onyxfs, procfs};
 use onyx_core::errno::{Errno, KResult};

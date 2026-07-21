@@ -266,6 +266,28 @@ pub unsafe fn sys_symlink(target: u64, linkpath: u64) -> i64 {
     }
 }
 
+/// chown(path, uid, gid) — change owner and group of a file.
+pub unsafe fn sys_chown(path: u64, uid: u32, gid: u32) -> i64 {
+    let mut path_buf = [0u8; 256];
+    let path_len = match parse_user_path(path, &mut path_buf) {
+        Some(l) => l,
+        None => return Errno::Inval.as_i64(),
+    };
+    let path_bytes = &path_buf[..path_len];
+    match vfs::chown(path_bytes, uid, gid) {
+        Ok(()) => 0,
+        Err(e) => e.as_i64(),
+    }
+}
+
+/// fchown(fd, uid, gid) — change owner and group via fd.
+pub unsafe fn sys_fchown(fd: u64, uid: u32, gid: u32) -> i64 {
+    match vfs::fchown(fd, uid, gid) {
+        Ok(()) => 0,
+        Err(e) => e.as_i64(),
+    }
+}
+
 /// chmod(path, mode) — change file mode bits.
 pub unsafe fn sys_chmod(path: u64, mode: u64) -> i64 {
     let mut path_buf = [0u8; 256];
@@ -516,8 +538,8 @@ pub unsafe fn sys_fork(tf: &mut TrapFrame) -> i64 {
     // 0 from the ecall, the parent will return the child PID.
     let mut child_tf = *tf;
     child_tf.a0 = 0; // child sees fork() == 0
-    // Advance past the ecall instruction. Without this, the child would
-    // re-execute SYS_fork on its first scheduling, recursing forever (fork bomb).
+                     // Advance past the ecall instruction. Without this, the child would
+                     // re-execute SYS_fork on its first scheduling, recursing forever (fork bomb).
     child_tf.sepc = tf.sepc.wrapping_add(4);
 
     // Ensure parent has a refcount for root_pa, then increment for the child.

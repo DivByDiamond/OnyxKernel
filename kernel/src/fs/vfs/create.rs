@@ -1,5 +1,5 @@
 //! File creation — `create` (regular file) and `mkdir` (directory).
-use super::{FdToken, Fs, PERM_READ, PERM_SEEK, PERM_WRITE, alloc_fd, fd_token, resolve_mount};
+use super::{alloc_fd, fd_token, resolve_mount, FdToken, Fs, PERM_READ, PERM_SEEK, PERM_WRITE};
 use crate::fs::onyxfs;
 use crate::proc;
 use onyx_core::errno::{Errno, KResult};
@@ -43,6 +43,9 @@ pub unsafe fn create(path: &[u8], mode: u32) -> KResult<FdToken> {
         onyxfs::lookup(parent_path, &mut st)?
     };
     let new_ino = onyxfs::create(parent_ino, filename, mode)?;
+    let cur_uid = proc::current().uid;
+    let cur_gid = proc::current().gid;
+    let _ = onyxfs::set_uid_gid(new_ino, cur_uid, cur_gid);
     let idx = alloc_fd(PERM_READ | PERM_WRITE | PERM_SEEK)?;
     super::fd_set(idx, new_ino, 0, Fs::Onyx, 0);
     let fd = super::fd_get(idx);
@@ -69,7 +72,10 @@ pub unsafe fn mkdir(path: &[u8]) -> KResult<()> {
     } else {
         onyxfs::lookup(parent_path, &mut st)?
     };
-    onyxfs::mkdir(parent_ino, dirname)?;
+    let new_ino = onyxfs::mkdir(parent_ino, dirname)?;
+    let cur_uid = proc::current().uid;
+    let cur_gid = proc::current().gid;
+    let _ = onyxfs::set_uid_gid(new_ino, cur_uid, cur_gid);
     Ok(())
 }
 

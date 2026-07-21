@@ -16,7 +16,7 @@
 //! last 8 bytes of a 4096-byte block are not protected. This is acceptable
 //! because the only metadata that fits in those 8 bytes (rare tail padding of
 //! dirent blocks) is not critical for crash recovery.
-use super::{G_JOURNAL_HEAD, G_SB, read_block, write_block};
+use super::{read_block, write_block, G_JOURNAL_HEAD, G_SB};
 use onyx_core::errno::{Errno, KResult};
 use onyx_core::formats::ONYFS_BLOCK_SIZE;
 

@@ -1,9 +1,9 @@
 use super::super::journal::journal_log;
-use super::super::{G_BUF, G_SB, G_VERSION, ONYFS_V1, inodes_per_block, read_block, write_block};
+use super::super::{inodes_per_block, read_block, write_block, G_BUF, G_SB, G_VERSION, ONYFS_V1};
 use super::read::read_inode;
 use crate::srv::timer;
 use onyx_core::errno::{Errno, KResult};
-use onyx_core::formats::{ONYFS_DIRECT_BLKS, OnyfsInode};
+use onyx_core::formats::{OnyfsInode, ONYFS_DIRECT_BLKS};
 
 pub unsafe fn write_inode(ino: u32, inode: &OnyfsInode) -> KResult<()> {
     if *(&raw const G_VERSION) == ONYFS_V1 {
@@ -71,6 +71,34 @@ pub unsafe fn set_mode(ino: u32, mode: u32) -> KResult<()> {
     };
     read_inode(ino, &mut inode)?;
     inode.mode = mode;
+    inode.mtime = *(&raw const timer::G_JIFFIES);
+    write_inode(ino, &inode)?;
+    super::super::journal::journal_commit()
+}
+
+pub unsafe fn set_uid_gid(ino: u32, uid: u32, gid: u32) -> KResult<()> {
+    if *(&raw const G_VERSION) == ONYFS_V1 {
+        return Err(Errno::NoSys);
+    }
+    let mut inode = OnyfsInode {
+        mode: 0,
+        size: 0,
+        uid: 0,
+        gid: 0,
+        nlink: 0,
+        blocks: [0; ONYFS_DIRECT_BLKS],
+        indirect: 0,
+        double_indirect: 0,
+        crtime: 0,
+        mtime: 0,
+        atime: 0,
+        ctime: 0,
+        flags: 0,
+        reserved: 0,
+    };
+    read_inode(ino, &mut inode)?;
+    inode.uid = uid;
+    inode.gid = gid;
     inode.mtime = *(&raw const timer::G_JIFFIES);
     write_inode(ino, &inode)?;
     super::super::journal::journal_commit()

@@ -2,8 +2,8 @@
 use crate::fs::{devfs, fat32, ipcfs, onyxfs, procfs};
 use onyx_core::errno::{Errno, KResult};
 
-use super::Fs;
 use super::resolve_mount;
+use super::Fs;
 
 pub unsafe fn readdir(dir_path: &[u8], name_out: *mut u8, name_len: usize) -> KResult<bool> {
     if dir_path.is_empty() || dir_path[0] != b'/' {

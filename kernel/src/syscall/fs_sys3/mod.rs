@@ -11,8 +11,8 @@ pub(super) use crate::proc::signals::{
 };
 pub(super) use dir::{sys_chdir, sys_getcwd};
 pub(super) use extra::{
-    sys_chmod, sys_execve, sys_fchmod, sys_fork, sys_fsync, sys_getdents, sys_getdents64,
-    sys_getentropy, sys_ioctl, sys_isatty, sys_readlink, sys_symlink, sys_waitpid,
+    sys_chmod, sys_chown, sys_execve, sys_fchmod, sys_fchown, sys_fork, sys_fsync, sys_getdents,
+    sys_getdents64, sys_getentropy, sys_ioctl, sys_isatty, sys_readlink, sys_symlink, sys_waitpid,
 };
 pub(super) use file_ops::{
     sys_access, sys_dup, sys_ftruncate, sys_pipe, sys_rename, sys_truncate, sys_truncate2,

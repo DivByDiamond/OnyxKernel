@@ -1,8 +1,8 @@
 //! File read path — `read` from a regular file inode.
 use super::inode::read_inode;
-use super::{G_BUF, G_VERSION, ONYFS_V1, read_block};
+use super::{read_block, G_BUF, G_VERSION, ONYFS_V1};
 use onyx_core::errno::{Errno, KResult};
-use onyx_core::formats::{ONYFS_BLOCK_SIZE, ONYFS_DIRECT_BLKS, OnyfsInode};
+use onyx_core::formats::{OnyfsInode, ONYFS_BLOCK_SIZE, ONYFS_DIRECT_BLKS};
 
 pub unsafe fn read(ino: u32, buf: *mut u8, off: u32, len: u32) -> KResult<u32> {
     let mut inode = OnyfsInode {

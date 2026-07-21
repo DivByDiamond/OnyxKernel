@@ -1,4 +1,5 @@
 pub mod chmod;
+pub mod chown;
 pub mod create;
 pub mod dir;
 pub mod dup;
@@ -15,6 +16,7 @@ pub mod utimens;
 pub mod vnode;
 
 pub use chmod::*;
+pub use chown::*;
 pub use create::*;
 pub use dir::*;
 pub use dup::*;
@@ -30,10 +32,10 @@ pub use unlink::*;
 pub use utimens::*;
 pub use vnode::*;
 
-pub(crate) use mount::{G_MOUNTS, G_ROOT_FS, resolve_mount};
+pub(crate) use mount::{resolve_mount, G_MOUNTS, G_ROOT_FS};
 pub(crate) use ops::{
-    G_KERNEL_FDS, alloc_fd, fd_check, fd_check_perm, fd_clear, fd_get, fd_set, fd_set_cloexec,
-    fd_update_pos, is_kernel_boot,
+    alloc_fd, fd_check, fd_check_perm, fd_clear, fd_get, fd_set, fd_set_cloexec, fd_update_pos,
+    is_kernel_boot, G_KERNEL_FDS,
 };
 
 #[cfg(test)]

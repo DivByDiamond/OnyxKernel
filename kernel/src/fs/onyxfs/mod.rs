@@ -42,7 +42,7 @@ pub use write::*;
 
 use crate::drivers::virtio_req;
 use onyx_core::errno::KResult;
-use onyx_core::formats::{ONYFS_BLOCK_SIZE, OnyfsSuper};
+use onyx_core::formats::{OnyfsSuper, ONYFS_BLOCK_SIZE};
 
 /// VFS-facing stat structure. Kept local (kernel-internal) because the VFS
 /// layer expects a fixed ABI independent of the on-disk inode format.
@@ -53,6 +53,8 @@ pub struct OnyfsStat {
     pub ino: u32,
     pub size: u64,
     pub mode: u32,
+    pub uid: u32,
+    pub gid: u32,
     pub mtime: u64,
     pub atime: u64,
     pub ctime: u64,

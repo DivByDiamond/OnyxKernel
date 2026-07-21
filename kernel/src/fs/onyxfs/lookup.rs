@@ -10,12 +10,12 @@
 use super::inode::{read_inode, stat};
 use super::symlink::readlink;
 use super::{
-    G_BUF, G_VERSION, ONYFS_V1, ONYFS_V1_DIRENT_SIZE, OnyfsStat, dirents_per_block, read_block,
+    dirents_per_block, read_block, OnyfsStat, G_BUF, G_VERSION, ONYFS_V1, ONYFS_V1_DIRENT_SIZE,
 };
 use onyx_core::errno::{Errno, KResult};
 use onyx_core::formats::{
-    ONYFS_BLOCK_SIZE, ONYFS_DIRECT_BLKS, ONYFS_DT_DIR, ONYFS_DT_LNK, ONYFS_NAME_MAX,
-    ONYFS_ROOT_INO, OnyfsDirent, OnyfsInode,
+    OnyfsDirent, OnyfsInode, ONYFS_BLOCK_SIZE, ONYFS_DIRECT_BLKS, ONYFS_DT_DIR, ONYFS_DT_LNK,
+    ONYFS_NAME_MAX, ONYFS_ROOT_INO,
 };
 
 /// Parse a dirent from the current `G_BUF` contents at the given slot index.

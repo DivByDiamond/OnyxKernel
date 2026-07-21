@@ -1,8 +1,8 @@
 use super::super::inode;
 use super::super::journal::journal_log;
-use super::super::{G_BUF, G_SB, read_block, write_block};
+use super::super::{read_block, write_block, G_BUF, G_SB};
 use onyx_core::errno::{Errno, KResult};
-use onyx_core::formats::{ONYFS_BLOCK_SIZE, ONYFS_DIRECT_BLKS, OnyfsInode};
+use onyx_core::formats::{OnyfsInode, ONYFS_BLOCK_SIZE, ONYFS_DIRECT_BLKS};
 
 pub unsafe fn alloc_data_block() -> KResult<u32> {
     let bm_blk = (*(&raw const G_SB)).data_bitmap_start;

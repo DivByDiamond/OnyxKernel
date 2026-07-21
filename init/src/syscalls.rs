@@ -428,6 +428,8 @@ pub const SYS_SYMLINK: u64 = 74;
 pub const SYS_CHMOD: u64 = 75;
 pub const SYS_FCHMOD: u64 = 76;
 pub const SYS_GETDENTS: u64 = 77;
+pub const SYS_CHOWN: u64 = 84;
+pub const SYS_FCHOWN: u64 = 85;
 
 #[inline]
 pub unsafe fn fstat(fd: u64, st_buf: *mut u8) -> i64 {
@@ -615,5 +617,19 @@ pub unsafe fn chmod(path: *const u8, mode: u64) -> i64 {
 pub unsafe fn fchmod(fd: u64, mode: u64) -> i64 {
     let ret: i64;
     asm!("ecall", in("a7") SYS_FCHMOD, in("a0") fd, in("a1") mode, lateout("a0") ret);
+    ret
+}
+
+#[inline]
+pub unsafe fn chown(path: *const u8, uid: u64, gid: u64) -> i64 {
+    let ret: i64;
+    asm!("ecall", in("a7") SYS_CHOWN, in("a0") path as usize, in("a1") uid, in("a2") gid, lateout("a0") ret);
+    ret
+}
+
+#[inline]
+pub unsafe fn fchown(fd: u64, uid: u64, gid: u64) -> i64 {
+    let ret: i64;
+    asm!("ecall", in("a7") SYS_FCHOWN, in("a0") fd, in("a1") uid, in("a2") gid, lateout("a0") ret);
     ret
 }

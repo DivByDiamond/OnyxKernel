@@ -88,6 +88,10 @@ pub const SYS_net_send: u64 = 81; // net_send(conn_id, buf, len) -> bytes
 pub const SYS_net_recv: u64 = 82; // net_recv(conn_id, buf, len) -> bytes
 pub const SYS_net_close: u64 = 83; // net_close(conn_id) -> 0
 
+// ── Multi-user syscalls (84–85) ──────────────────────────────────────────
+pub const SYS_chown: u64 = 84; // chown(path, uid, gid)
+pub const SYS_fchown: u64 = 85; // fchown(fd, uid, gid)
+
 // ── Flags / constants used by syscalls ─────────────────────────────────
 
 pub const SEEK_SET: u32 = 0;
