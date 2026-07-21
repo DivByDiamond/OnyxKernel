@@ -1,5 +1,5 @@
 //! virtio-net frame I/O — polling receive and blocking send.
-use super::{G_NET, HDR_LEN, NET_MTU, RX_DESCS, push_avail};
+use super::{push_avail, G_NET, HDR_LEN, NET_MTU, RX_DESCS};
 use crate::drivers::virtio::{R_QUEUE_NOTIFY, VQ_DESC_F_NEXT};
 use crate::mm::pmm;
 use core::ptr;

@@ -1,6 +1,6 @@
 use super::dma::{rx_buf_vaddr, rx_desc_vaddr, tx_buf_vaddr, tx_desc_vaddr};
 use super::regs;
-use super::{G_GMAC, GMAC_BUF_SIZE, TX_RING_SIZE};
+use super::{GMAC_BUF_SIZE, G_GMAC, TX_RING_SIZE};
 use core::ptr;
 use onyx_core::errno::{Errno, KResult};
 

@@ -10,6 +10,9 @@ pub mod scheduler;
 pub mod signals;
 pub mod spawn;
 
+#[cfg(test)]
+mod tests;
+
 pub use lifecycle::*;
 pub use process::*;
 pub use scheduler::*;

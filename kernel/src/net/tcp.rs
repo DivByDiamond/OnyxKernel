@@ -1,5 +1,5 @@
 use crate::net::ip;
-use crate::net::{G_IP, poll};
+use crate::net::{poll, G_IP};
 use onyx_core::errno::{Errno, KResult};
 const MAX_CONNS: usize = 8;
 const BUF_SIZE: usize = 2048;

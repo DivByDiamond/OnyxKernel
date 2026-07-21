@@ -1,5 +1,5 @@
-use super::G_GMAC;
 use super::regs;
+use super::G_GMAC;
 use onyx_core::errno::{Errno, KResult};
 
 pub const BMCR: u8 = 0;

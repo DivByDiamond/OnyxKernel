@@ -4,7 +4,7 @@
 //! controllers via the `compatible` property. Returns the same
 //! `FdtMmio` shape used by the existing virtio/sdhci discovery, so
 //! drivers can be probed uniformly from `kmain`.
-use super::fdt::{FdtMmio, walk};
+use super::fdt::{walk, FdtMmio};
 use onyx_core::parser::be32;
 
 /// Match a `compatible` string list against any of `candidates`.

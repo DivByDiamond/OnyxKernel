@@ -135,7 +135,11 @@ pub(super) unsafe fn init_clock(base: usize) {
 
     let div: u32 = if base_clk_mhz > 0 && base_clk_mhz > target_mhz {
         let d = base_clk_mhz / (2 * target_mhz);
-        if d == 0 { 1 } else { d.min(CLK_MAX_DIV) }
+        if d == 0 {
+            1
+        } else {
+            d.min(CLK_MAX_DIV)
+        }
     } else {
         1
     };

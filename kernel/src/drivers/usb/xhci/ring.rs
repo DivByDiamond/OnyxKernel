@@ -2,8 +2,8 @@ use crate::mm::pmm;
 use core::ptr;
 use onyx_core::errno::{Errno, KResult};
 
-use super::XhciCtx;
 use super::regs;
+use super::XhciCtx;
 
 pub const TRB_NORMAL: u32 = 1;
 pub const TRB_SETUP: u32 = 2;

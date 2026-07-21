@@ -1,6 +1,6 @@
-use super::FdtMmio;
 use super::reader::{cstr_at, rd32, rd64};
 use super::walk::walk;
+use super::FdtMmio;
 
 pub unsafe fn find_virtio(out: &mut [FdtMmio], max: usize) -> usize {
     let mut count = 0;

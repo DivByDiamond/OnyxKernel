@@ -876,7 +876,7 @@ pub unsafe fn ohci_control_transfer(
 ) -> KResult<u32> {
     let data_len = data.as_ref().map(|d| d.len() as u32).unwrap_or(0);
     let total_tds = 1 + 1; // setup + status (+ merged data TD)
-    // Use a single data TD that can span the full buffer (OHCI has no 4KB limit per TD).
+                           // Use a single data TD that can span the full buffer (OHCI has no 4KB limit per TD).
 
     if total_tds + if data_len > 0 { 1 } else { 0 } > MAX_OHCI_TD as u32 {
         return Err(Errno::NoMem);

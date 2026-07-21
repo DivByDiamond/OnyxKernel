@@ -1,6 +1,6 @@
-use super::FdtMmio;
 use super::reader::{cstr_at, rd32, rd64};
 use super::walk::walk;
+use super::FdtMmio;
 
 pub unsafe fn find_sdhci() -> Option<FdtMmio> {
     let mut result: Option<FdtMmio> = None;

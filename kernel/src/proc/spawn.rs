@@ -5,8 +5,8 @@
 //! is SYS_wait: it blocks the caller until a child exits, then reaps it.
 use super::lifecycle::{alloc_proc, free_proc};
 use super::process::{
-    G_ALL_PROCS, PROC_RING_ROOT, PROC_RING_USER, ProcState, alloc_pid, by_pid, current_for_hart,
-    current_pid, hart_id, proc_list_lock, proc_list_unlock,
+    alloc_pid, by_pid, current_for_hart, current_pid, hart_id, proc_list_lock, proc_list_unlock,
+    ProcState, G_ALL_PROCS, PROC_RING_ROOT, PROC_RING_USER,
 };
 use crate::arch::regs::*;
 use crate::arch::trap_frame::TrapFrame;

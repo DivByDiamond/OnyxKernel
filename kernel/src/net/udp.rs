@@ -1,6 +1,6 @@
-use crate::net::G_IP;
 use crate::net::ip;
 use crate::net::poll;
+use crate::net::G_IP;
 use onyx_core::errno::{Errno, KResult};
 
 pub const UDP_HLEN: usize = 8;

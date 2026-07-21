@@ -1,7 +1,7 @@
 use crate::drivers::virtio::{
-    R_DEVICE_ID, R_GUEST_FEATURES, R_HOST_FEATURES, R_MAGIC_VALUE, R_STATUS, R_VERSION,
-    VIRTIO_S_ACK, VIRTIO_S_DRIVER, VIRTIO_S_DRIVER_OK, VIRTIO_S_FEATURES_OK, VqAvail, VqDesc,
-    VqUsed, reg_r, reg_w,
+    reg_r, reg_w, VqAvail, VqDesc, VqUsed, R_DEVICE_ID, R_GUEST_FEATURES, R_HOST_FEATURES,
+    R_MAGIC_VALUE, R_STATUS, R_VERSION, VIRTIO_S_ACK, VIRTIO_S_DRIVER, VIRTIO_S_DRIVER_OK,
+    VIRTIO_S_FEATURES_OK,
 };
 use crate::mm::pmm;
 use core::ptr;

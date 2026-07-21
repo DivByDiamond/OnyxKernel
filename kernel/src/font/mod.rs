@@ -4,12 +4,12 @@ mod psf2;
 mod shared;
 
 pub use glyph::{
-    GlyphData, glyph_bitmap, glyph_bitmap_unicode, glyph_for_cp, glyph_for_unicode,
-    glyph_or_default,
+    glyph_bitmap, glyph_bitmap_unicode, glyph_for_cp, glyph_for_unicode, glyph_or_default,
+    GlyphData,
 };
 pub use shared::{
-    FONT_GLYPH_BYTES, FONT_H, FONT_NUM_GLYPHS, FONT_W, PcfFont, font, font_charsize, font_height,
-    font_width,
+    font, font_charsize, font_height, font_width, PcfFont, FONT_GLYPH_BYTES, FONT_H,
+    FONT_NUM_GLYPHS, FONT_W,
 };
 
 use onyx_core::errno::{Errno, KResult};

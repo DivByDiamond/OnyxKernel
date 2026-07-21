@@ -1,4 +1,4 @@
-use super::types::{CHAN_BUF_SIZE, CHAN_MAX, CHAN_MAX_CLIENTS, CHAN_NAME_MAX, Channel, G_CHANNELS};
+use super::types::{Channel, CHAN_BUF_SIZE, CHAN_MAX, CHAN_MAX_CLIENTS, CHAN_NAME_MAX, G_CHANNELS};
 use onyx_core::errno::{Errno, KResult};
 
 pub unsafe fn create(owner_pid: u32) -> KResult<u32> {

@@ -140,7 +140,11 @@ fn scancode_to_key(code: u8) -> KeyCode {
 #[inline]
 fn apply_case(base: u8) -> u8 {
     let up = unsafe { G_SHIFT ^ G_CAPS };
-    if up { base.to_ascii_uppercase() } else { base }
+    if up {
+        base.to_ascii_uppercase()
+    } else {
+        base
+    }
 }
 
 /// Drive `input::dispatch` from the PS/2 source. Call from a poll loop.

@@ -1,7 +1,7 @@
 //! klog — formatted logging via UART.
 use crate::drivers::uart;
 use core::panic::PanicInfo;
-use onyx_core::fmt::{Arg, Write, vformat};
+use onyx_core::fmt::{vformat, Arg, Write};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Level {

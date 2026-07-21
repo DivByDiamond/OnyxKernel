@@ -19,4 +19,7 @@ pub mod proc_sys;
 pub mod ring_sys;
 pub mod snap_sys;
 
+#[cfg(test)]
+mod tests;
+
 pub use abi::*;

@@ -1,6 +1,6 @@
 use crate::drivers::virtio_net::NET_MTU;
-use crate::net::G_IP;
 use crate::net::eth;
+use crate::net::G_IP;
 use onyx_core::errno::{Errno, KResult};
 
 pub const IP_HLEN: usize = 20;

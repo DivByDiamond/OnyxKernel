@@ -2,9 +2,9 @@ use crate::mm::pmm;
 use core::ptr;
 use onyx_core::errno::{Errno, KResult};
 
-use super::XhciCtx;
 use super::regs;
 use super::ring;
+use super::XhciCtx;
 
 pub const EP_TYPE_INVALID: u8 = 0;
 pub const EP_TYPE_ISO_OUT: u8 = 1;

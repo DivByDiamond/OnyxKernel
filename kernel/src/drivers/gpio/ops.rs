@@ -1,7 +1,7 @@
 //! GPIO pin-level operations: direction, drive, read, edge IRQ.
 use super::{
-    G_PINS, N_PINS, R_FALL_IE, R_FALL_IP, R_INPUT_EN, R_INPUT_VAL, R_OUT_XOR, R_OUTPUT_EN,
-    R_OUTPUT_VAL, R_RISE_IE, R_RISE_IP, rd, wr,
+    rd, wr, G_PINS, N_PINS, R_FALL_IE, R_FALL_IP, R_INPUT_EN, R_INPUT_VAL, R_OUTPUT_EN,
+    R_OUTPUT_VAL, R_OUT_XOR, R_RISE_IE, R_RISE_IP,
 };
 use onyx_core::errno::{Errno, KResult};
 
@@ -49,7 +49,13 @@ pub fn write(pin: usize, value: u8) -> KResult<()> {
 
 pub fn read(pin: usize) -> KResult<u8> {
     let m = mask(pin)?;
-    Ok(unsafe { if rd(R_INPUT_VAL) & m != 0 { 1 } else { 0 } })
+    Ok(unsafe {
+        if rd(R_INPUT_VAL) & m != 0 {
+            1
+        } else {
+            0
+        }
+    })
 }
 
 pub fn toggle(pin: usize) -> KResult<()> {

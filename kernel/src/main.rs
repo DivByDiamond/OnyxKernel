@@ -8,8 +8,8 @@
 //! - 1 (root space): U-mode, /bin/init + /service/*.bin + /bin/login
 //! - 2 (user space): U-mode, /bin/osh + user programs
 
-#![no_std]
-#![no_main]
+#![cfg_attr(not(test), no_std)]
+#![cfg_attr(not(test), no_main)]
 #![warn(clippy::all)]
 #![allow(
     clippy::module_inception,
@@ -79,6 +79,7 @@ pub unsafe extern "Rust" fn kmain(hartid: usize, fdt_addr: usize) -> ! {
     crate::srv::main::kmain(hartid, fdt_addr)
 }
 
+#[cfg(not(test))]
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
     crate::srv::klog::panic_handler(info)

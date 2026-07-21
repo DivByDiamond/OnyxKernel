@@ -1,5 +1,5 @@
 //! virtio-input event decode — translate raw events to `input::Event`.
-use super::{G_IN, N_EVENTS, VirtioInputEvent, push};
+use super::{push, VirtioInputEvent, G_IN, N_EVENTS};
 use crate::drivers::input::{self, Event, KeyCode, MouseButton};
 use crate::drivers::virtio::R_QUEUE_NOTIFY;
 use core::ptr;

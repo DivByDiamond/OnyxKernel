@@ -4,7 +4,7 @@ use onyx_core::errno::{Errno, KResult};
 
 use super::lifecycle::exit;
 use super::process::{
-    G_NEED_RESCHED, MAX_HARTS, Proc, ProcState, by_pid, current_for_hart, hart_id,
+    by_pid, current_for_hart, hart_id, Proc, ProcState, G_NEED_RESCHED, MAX_HARTS,
 };
 use crate::proc::scheduler::{enqueue, rq_lock, rq_unlock};
 

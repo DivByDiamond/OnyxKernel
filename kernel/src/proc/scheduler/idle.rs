@@ -1,7 +1,7 @@
 use crate::arch::csr;
 use crate::arch::regs::SSTATUS_SIE;
 use crate::arch::smp::{G_SEC_STACKS, SEC_STACK_SIZE};
-use crate::proc::process::{G_NEED_RESCHED, current_for_hart, hart_id};
+use crate::proc::process::{current_for_hart, hart_id, G_NEED_RESCHED};
 use crate::srv::timer;
 use core::sync::atomic::Ordering;
 
