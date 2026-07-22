@@ -15,6 +15,14 @@ unsafe fn split_parent(path: &[u8]) -> (&[u8], &[u8]) {
     }
 }
 
+/// Create a symbolic link at `linkpath` pointing to `target`.
+///
+/// Audit note (🟡 #3 + 🟡 #5): symlinks are only supported on OnyxFS —
+/// procfs, devfs, ipcfs and fat32 paths return `Errno::NoSys`. This is
+/// the correct POSIX return value for "operation not implemented on
+/// this filesystem"; the previous code already returned NoSys but the
+/// behavior was undocumented, which made it look like a stub bug. It
+/// is now explicitly documented.
 pub unsafe fn symlink(target: &[u8], linkpath: &[u8]) -> KResult<()> {
     if linkpath.is_empty() || linkpath[0] != b'/' {
         return Err(Errno::Inval);
@@ -38,6 +46,11 @@ pub unsafe fn symlink(target: &[u8], linkpath: &[u8]) -> KResult<()> {
     Ok(())
 }
 
+/// Read the target of a symbolic link at `path` into `buf`.
+///
+/// Audit note (🟡 #3): like `symlink`, `readlink` is only implemented
+/// for OnyxFS. Other filesystems return `Errno::NoSys` (matching
+/// POSIX's expected behavior when the operation is not supported).
 pub unsafe fn readlink(path: &[u8], buf: *mut u8, bufsiz: u32) -> KResult<u32> {
     if path.is_empty() || path[0] != b'/' {
         return Err(Errno::Inval);

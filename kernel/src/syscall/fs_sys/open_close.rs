@@ -152,6 +152,75 @@ pub(in super::super) unsafe fn sys_open(path: u64, flags: u64, mode: u64) -> i64
         return Errno::Perm.as_i64();
     }
 
+    // ── Audit fix (🔴 #3 + 🟡 #1): enforce Unix permission bits ──────
+    //
+    // The VFS layer used to skip permission checks entirely ("0o777 for
+    // now — OnyxFS does not yet enforce permissions"). Combined with the
+    // fail-open auth bug (🔴 #2), any Ring-2 user could read /etc/shadow
+    // and /etc/passwd directly, which made all of userspace auth
+    // bypassable. We now perform the standard POSIX owner/group/other
+    // check using the inode's mode/uid/gid from OnyxFS lookup, against
+    // the calling process's uid/gid. The check is skipped for:
+    //   - root (ring ≤ 1, uid 0): root can always open anything;
+    //   - non-OnyxFS files (procfs, devfs, ipcfs, fat32): they don't
+    //     carry Unix permission bits, and ACLing them here would break
+    //     legitimate access (/dev/*, /proc/*, IPC channels). They have
+    //     their own per-FS access control via `syscall_allowed()`.
+    //
+    // We compute the desired access (read and/or write) from `flags`,
+    // then verify each requested mode bit. On any failure we return
+    // EPERM before allocating an fd or calling vfs::open.
+    let cur = proc::current();
+    let is_root = cur.uid == 0 || ring <= proc::PROC_RING_ROOT;
+    if !is_root {
+        // Probe the inode metadata via onyxfs::lookup. We only enforce
+        // on OnyxFS — lookup will fail for procfs/devfs/ipcfs/fat32
+        // paths, and we let those through (per the rationale above).
+        let mut st = crate::fs::onyxfs::OnyfsStat::default();
+        if crate::fs::onyxfs::lookup(path_bytes, &mut st).is_ok() {
+            // Build the requested access mask.
+            let flags32 = flags as u32;
+            let acc_mode = flags32 & O_ACCMODE;
+            let want_read = acc_mode == O_RDONLY || acc_mode == O_RDWR
+                || (flags32 & O_CREAT) != 0;
+            let want_write = acc_mode == O_WRONLY || acc_mode == O_RDWR
+                || (flags32 & (O_TRUNC | O_APPEND)) != 0;
+
+            let mode = st.mode;
+            let owner_ok = cur.uid == st.uid;
+            let group_ok = cur.gid == st.gid;
+            // The 9 lower bits of `mode` are rwxrwxrwx.
+            let perm_bits = if owner_ok {
+                mode & 0o700
+            } else if group_ok {
+                (mode >> 3) & 0o700
+            } else {
+                mode & 0o007
+            };
+
+            if want_read && (perm_bits & 0o400) == 0 {
+                crate::kerr!(
+                    "sys_open",
+                    "EPERM: uid=%d path=%s mode=%o",
+                    Arg::from(cur.uid),
+                    Arg::from(core::str::from_utf8(path_bytes).unwrap_or("<bad>")),
+                    Arg::from(mode)
+                );
+                return Errno::Perm.as_i64();
+            }
+            if want_write && (perm_bits & 0o200) == 0 {
+                crate::kerr!(
+                    "sys_open",
+                    "EPERM: uid=%d path=%s mode=%o",
+                    Arg::from(cur.uid),
+                    Arg::from(core::str::from_utf8(path_bytes).unwrap_or("<bad>")),
+                    Arg::from(mode)
+                );
+                return Errno::Perm.as_i64();
+            }
+        }
+    }
+
     let flags32 = flags as u32;
     let acc_mode = flags32 & O_ACCMODE;
     // Build the VFS permission bitmask from the access-mode bits.

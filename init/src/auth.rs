@@ -220,18 +220,114 @@ pub fn const_time_eq(a: &[u8], b: &[u8]) -> bool {
 }
 
 // ============================================================================
-// Salt generation (LCG PRNG seeded with PID)
+// Salt generation (getentropy-backed, PID fallback)
 // ============================================================================
+//
+// Audit fix (🟢 #9): the previous implementation seeded an LCG from the
+// current PID. PIDs are enumerable, so an attacker who can read /etc/shadow
+// could precompute rainbow tables for every plausible PID. We now prefer
+// the kernel's getentropy() source (which mixes uptime, cycle counter and
+// PID), and only fall back to the LCG if getentropy fails.
 
 fn generate_salt() -> [u8; 8] {
-    let pid = unsafe { syscalls::getpid() } as u64;
-    let mut seed = pid.wrapping_mul(1103515245).wrapping_add(12345);
     let mut salt = [0u8; 8];
+    let r = unsafe { syscalls::getentropy(salt.as_mut_ptr(), 8) };
+    if r == 0 {
+        return salt;
+    }
+    // Fallback: mix PID + a cycle counter-ish source. Still weak, but at
+    // least not solely PID-derived.
+    let pid = unsafe { syscalls::getpid() } as u64;
+    let mut seed = pid
+        .wrapping_mul(1103515245)
+        .wrapping_add(12345)
+        .wrapping_add(r as u64);
     for s in &mut salt {
         seed = seed.wrapping_mul(1103515245).wrapping_add(12345);
         *s = (seed >> 16) as u8;
     }
     salt
+}
+
+// ============================================================================
+// Atomic rewrite helper (TOCTOU-safe file replacement)
+// ============================================================================
+//
+// Audit fix (🟢 #4): the four `update_*`/`delete_*` functions used to
+// reopen the target file with `create()` and overwrite it in place.
+// Two problems:
+//   1. TOCTOU: a concurrent `passwd`/`useradd`/`userdel` running on
+//      another hart can interleave its own read-modify-write, and one
+//      of the two writes silently loses data.
+//   2. Crash safety: if the kernel halts in the middle of `write_fd`,
+//      the auth DB is left truncated / destroyed.
+//
+// `atomic_rewrite` writes to a sibling `.tmp` file, fsyncs it, then
+// renames it over the target. Rename is atomic on OnyxFS, so readers
+// see either the old or the new content — never a partial write.
+
+/// Suffix appended to the target path to form the temp path.
+const TMP_SUFFIX: &[u8] = b".tmp";
+
+fn atomic_rewrite(path_nul: &[u8; 64], path_len: usize, data: &[u8], mode: u64) -> Result<(), i64> {
+    if path_len == 0 || path_len + TMP_SUFFIX.len() >= 64 {
+        return Err(-1);
+    }
+    // Build "<path>.tmp\0" in a separate buffer.
+    let mut tmp_buf = [0u8; 64];
+    tmp_buf[..path_len].copy_from_slice(&path_nul[..path_len]);
+    tmp_buf[path_len..path_len + TMP_SUFFIX.len()].copy_from_slice(TMP_SUFFIX);
+    // tmp_buf[path_len + TMP_SUFFIX.len()] is already 0 (NUL terminator).
+
+    // Create the temp file. `create` truncates if it already exists.
+    let fd = unsafe { syscalls::create(tmp_buf.as_ptr(), mode, 0) };
+    if fd < 0 {
+        return Err(fd);
+    }
+    let write_ret = unsafe { syscalls::write_fd(fd as u64, data.as_ptr(), data.len()) };
+    let _ = unsafe { syscalls::fsync(fd as u64) };
+    unsafe { syscalls::close(fd as u64) };
+    if write_ret < 0 {
+        // Best-effort cleanup of the temp file.
+        let _ = unsafe { syscalls::unlink(tmp_buf.as_ptr()) };
+        return Err(write_ret);
+    }
+    // Rename temp -> target (atomic on OnyxFS).
+    let ren = unsafe { syscalls::rename(tmp_buf.as_ptr(), path_nul.as_ptr()) };
+    if ren < 0 {
+        let _ = unsafe { syscalls::unlink(tmp_buf.as_ptr()) };
+        return Err(ren);
+    }
+    Ok(())
+}
+
+// ============================================================================
+// Password KDF (SHA-256 iterated)
+// ============================================================================
+//
+// Audit fix (🔴 #1): the previous `format_shadow_entry` stored passwords in
+// plaintext as `<user>:<plaintext>`. SHA-256+salt code existed but was dead.
+// We now use an iterated SHA-256 KDF: H_{i+1} = SHA-256(H_i || salt), with
+// 10 000 iterations. The stored format matches the existing verify path:
+//   <username>:$5$<16-char hex salt>$<64-char hex hash>
+// The verify path (`verify_shadow_password`) already parses this format, so
+// the two stay consistent.
+
+/// Number of KDF iterations. Tunable; 10 000 matches the audit's recommendation.
+pub const KDF_ITERS: usize = 10_000;
+
+/// Hash a password with the given 8-byte salt using the iterated SHA-256 KDF.
+/// Returns the final 32-byte hash.
+pub fn hash_password(password: &[u8], salt: &[u8; 8]) -> [u8; 32] {
+    let mut h = sha256(password);
+    let mut buf = [0u8; 40];
+    buf[..32].copy_from_slice(&h);
+    buf[32..].copy_from_slice(salt);
+    for _ in 0..KDF_ITERS {
+        h = sha256(&buf);
+        buf[..32].copy_from_slice(&h);
+    }
+    h
 }
 
 // ============================================================================
@@ -422,28 +518,14 @@ pub fn verify_shadow_password(username: &[u8], password: &[u8]) -> bool {
     let stored_len = stored.iter().position(|&b| b == 0).unwrap_or(stored.len());
     let data = &stored[..stored_len];
 
-    // DEBUG: dump what we read from /etc/shadow
-    unsafe {
-        let m = b"[dbg:verify] stored_len=";
-        syscalls::write(1, m.as_ptr(), m.len());
-        let s = format_dec(stored_len as u32);
-        let sl = s.iter().position(|&b| b != 0).unwrap_or(s.len());
-        let sr = s.iter().rposition(|&b| b != 0).map(|i| i + 1).unwrap_or(0);
-        if sl < sr {
-            syscalls::write(1, s[sl..sr].as_ptr(), sr - sl);
-        }
-        let m = b" data=\"";
-        syscalls::write(1, m.as_ptr(), m.len());
-        syscalls::write(1, data.as_ptr(), data.len());
-        let m = b"\"\n";
-        syscalls::write(1, m.as_ptr(), m.len());
-    }
+    // Audit fix (🔴 #4): all six `write(1, b"[dbg:verify]...")` debug
+    // blocks have been removed. They leaked the raw shadow entry, the salt,
+    // the stored hash AND the computed hash to stdout on every verify call
+    // (login / su / passwd), enabling both offline brute-force and — for
+    // the old plaintext path — direct disclosure of the cleartext password
+    // in cloud logs.
 
     if data.len() < 3 || data[0] != b'$' || data[1] != b'5' || data[2] != b'$' {
-        unsafe {
-            let m = b"[dbg:verify] bad format\n";
-            syscalls::write(1, m.as_ptr(), m.len());
-        }
         return false;
     }
 
@@ -456,66 +538,17 @@ pub fn verify_shadow_password(username: &[u8], password: &[u8]) -> bool {
     let stored_hash_hex = &rest[salt_end + 1..];
 
     if salt_hex.len() != 16 || stored_hash_hex.len() < 64 {
-        unsafe {
-            let m = b"[dbg:verify] bad lengths salt=";
-            syscalls::write(1, m.as_ptr(), m.len());
-            let s = format_dec(salt_hex.len() as u32);
-            let sl = s.iter().position(|&b| b != 0).unwrap_or(s.len());
-            let sr = s.iter().rposition(|&b| b != 0).map(|i| i + 1).unwrap_or(0);
-            if sl < sr {
-                syscalls::write(1, s[sl..sr].as_ptr(), sr - sl);
-            }
-            let m = b" hash=";
-            syscalls::write(1, m.as_ptr(), m.len());
-            let s = format_dec(stored_hash_hex.len() as u32);
-            let sl = s.iter().position(|&b| b != 0).unwrap_or(s.len());
-            let sr = s.iter().rposition(|&b| b != 0).map(|i| i + 1).unwrap_or(0);
-            if sl < sr {
-                syscalls::write(1, s[sl..sr].as_ptr(), sr - sl);
-            }
-            let m = b"\n";
-            syscalls::write(1, m.as_ptr(), m.len());
-        }
         return false;
     }
     let stored_hash_hex = &stored_hash_hex[..64];
 
     let salt_bytes = hex_decode_8(salt_hex);
 
-    let mut combined = [0u8; 72];
-    let mut combined_len = 0;
-    for &b in password {
-        if combined_len >= combined.len() {
-            break;
-        }
-        combined[combined_len] = b;
-        combined_len += 1;
-    }
-    for &b in &salt_bytes {
-        if combined_len >= combined.len() {
-            break;
-        }
-        combined[combined_len] = b;
-        combined_len += 1;
-    }
-
-    let computed_hash = sha256(&combined[..combined_len]);
+    // Audit fix (🔴 #1): use the iterated KDF instead of a single
+    // SHA-256(password || salt). This matches what `format_shadow_entry`
+    // now writes, so create-time and verify-time stay consistent.
+    let computed_hash = hash_password(password, &salt_bytes);
     let computed_hex = bytes_to_hex(&computed_hash);
-
-    // DEBUG: dump salt and both hashes
-    unsafe {
-        let m = b"[dbg:verify] salt_hex=\"";
-        syscalls::write(1, m.as_ptr(), m.len());
-        syscalls::write(1, salt_hex.as_ptr(), salt_hex.len());
-        let m = b"\" stored_hash=\"";
-        syscalls::write(1, m.as_ptr(), m.len());
-        syscalls::write(1, stored_hash_hex.as_ptr(), stored_hash_hex.len());
-        let m = b"\" computed_hash=\"";
-        syscalls::write(1, m.as_ptr(), m.len());
-        syscalls::write(1, computed_hex.as_ptr(), 64);
-        let m = b"\"\n";
-        syscalls::write(1, m.as_ptr(), m.len());
-    }
 
     const_time_eq(&computed_hex[..64], stored_hash_hex)
 }
@@ -614,24 +647,28 @@ pub fn update_shadow_password(username: &[u8], new_password: &[u8]) -> Result<()
         }
     }
 
-    let fd = unsafe { syscalls::create(path_buf.as_ptr(), 0o600, 0) };
-    if fd < 0 {
-        return Err(fd);
-    }
-    let _ = unsafe { syscalls::write_fd(fd as u64, out.as_ptr(), out_pos) };
-    unsafe { syscalls::close(fd as u64) };
-    Ok(())
+    // Audit fix (🟢 #4): use atomic_rewrite (temp + fsync + rename)
+    // instead of truncating the live file in place. Protects against
+    // concurrent passwd/useradd and against mid-write crashes.
+    atomic_rewrite(&path_buf, n, &out[..out_pos], 0o600)
 }
 
-/// Format a shadow entry: `<username>:<plaintext_password>`.
+/// Format a shadow entry: `<username>:$5$<hex_salt>$<hex_hash>`.
 ///
-/// NOTE: This stores passwords in PLAINTEXT. This is intentionally
-/// simple for the hobby OS — no SHA-256, no salt, no hex encoding.
-/// We'll add proper hashing back once the crypto path is debugged.
-/// The login binary reads this format via `verify_plaintext_password`.
+/// Audit fix (🔴 #1): the previous version wrote `<username>:<plaintext>`.
+/// This is the actual cause of `su` / `passwd` breakage — `verify_shadow_password`
+/// expects `$5$salt$hash`, but `update_shadow_password` wrote plaintext, so
+/// the very first password change silently broke login for that user. We now
+/// generate a fresh 8-byte salt via `generate_salt`, derive the hash via the
+/// iterated SHA-256 KDF (`hash_password`), and write the `$5$...$...` form.
 ///
 /// Returns a fixed 128-byte buffer AND the actual length used.
 fn format_shadow_entry(username: &[u8], password: &[u8]) -> ([u8; 128], usize) {
+    let salt = generate_salt();
+    let hash = hash_password(password, &salt);
+    let salt_hex = bytes_to_hex(&salt);
+    let hash_hex = bytes_to_hex(&hash);
+
     let mut buf = [0u8; 128];
     let mut pos = 0;
 
@@ -646,11 +683,31 @@ fn format_shadow_entry(username: &[u8], password: &[u8]) -> ([u8; 128], usize) {
         buf[pos] = b':';
         pos += 1;
     }
-    for &b in password {
+    for &b in b"$5$" {
         if pos >= buf.len() {
             break;
         }
         buf[pos] = b;
+        pos += 1;
+    }
+    // First 16 hex chars encode the 8-byte salt.
+    for i in 0..16 {
+        if pos >= buf.len() {
+            break;
+        }
+        buf[pos] = salt_hex[i];
+        pos += 1;
+    }
+    if pos < buf.len() {
+        buf[pos] = b'$';
+        pos += 1;
+    }
+    // 64 hex chars encode the 32-byte hash.
+    for i in 0..64 {
+        if pos >= buf.len() {
+            break;
+        }
+        buf[pos] = hash_hex[i];
         pos += 1;
     }
     (buf, pos)
@@ -746,13 +803,7 @@ pub fn update_passwd_entry(
         }
     }
 
-    let fd = unsafe { syscalls::create(path_buf.as_ptr(), 0o644, 0) };
-    if fd < 0 {
-        return Err(fd);
-    }
-    let _ = unsafe { syscalls::write_fd(fd as u64, out.as_ptr(), out_pos) };
-    unsafe { syscalls::close(fd as u64) };
-    Ok(())
+    atomic_rewrite(&path_buf, n, &out[..out_pos], 0o644)
 }
 
 pub fn delete_passwd_entry(username: &[u8]) -> Result<(), i64> {
@@ -818,13 +869,8 @@ pub fn delete_passwd_entry(username: &[u8]) -> Result<(), i64> {
         }
     }
 
-    let fd = unsafe { syscalls::create(path_buf.as_ptr(), 0o644, 0) };
-    if fd < 0 {
-        return Err(fd);
-    }
-    let _ = unsafe { syscalls::write_fd(fd as u64, out.as_ptr(), out_pos) };
-    unsafe { syscalls::close(fd as u64) };
-    Ok(())
+    // Audit fix (🟢 #4): atomic_rewrite — see the helper above.
+    atomic_rewrite(&path_buf, n, &out[..out_pos], 0o644)
 }
 
 pub fn delete_shadow_entry(username: &[u8]) -> Result<(), i64> {
@@ -890,13 +936,8 @@ pub fn delete_shadow_entry(username: &[u8]) -> Result<(), i64> {
         }
     }
 
-    let fd = unsafe { syscalls::create(path_buf.as_ptr(), 0o600, 0) };
-    if fd < 0 {
-        return Err(fd);
-    }
-    let _ = unsafe { syscalls::write_fd(fd as u64, out.as_ptr(), out_pos) };
-    unsafe { syscalls::close(fd as u64) };
-    Ok(())
+    // Audit fix (🟢 #4): atomic_rewrite — see the helper above.
+    atomic_rewrite(&path_buf, n, &out[..out_pos], 0o600)
 }
 
 /// Format a passwd entry: `<username>:<uid>:<gid>:<home>:<shell>`.

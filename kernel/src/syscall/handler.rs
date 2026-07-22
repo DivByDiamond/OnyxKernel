@@ -40,7 +40,13 @@ pub(super) unsafe fn parse_user_path(path: u64, out: &mut [u8; 256]) -> Option<u
     }
     let mut len = 0usize;
     let p = path as *const u8;
-    while *p.add(len) != 0 && len < 256 {
+    // Audit fix (🟢 #5): swap the order of the loop conditions. The
+    // previous `while *p.add(len) != 0 && len < 256` first dereferenced
+    // `*p.add(256)` when `len == 256`, reading one byte past the
+    // validated [path, path+256) window. If `path+256` happened to lie
+    // exactly at USER_TOP, that read reached kernel memory. By checking
+    // `len < 256` FIRST we short-circuit before the dereference.
+    while len < 256 && *p.add(len) != 0 {
         len += 1;
     }
     core::ptr::copy_nonoverlapping(p, out.as_mut_ptr(), len);

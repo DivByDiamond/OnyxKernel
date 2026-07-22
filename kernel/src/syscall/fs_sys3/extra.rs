@@ -578,7 +578,17 @@ pub unsafe fn sys_fork(tf: &mut TrapFrame) -> i64 {
         Ok(()) => {
             // Overwrite the child's tf with the cloned one so it resumes
             // right after the ecall, with a0=0.
-            let child = proc::by_pid(new_pid).unwrap();
+            //
+            // Audit fix (🔴 #8): the previous `proc::by_pid(new_pid).unwrap()`
+            // would panic the kernel if the freshly-spawned child was
+            // already reaped (or if `spawn` returned a stale pid due to a
+            // race on the process list). Returning the new pid to user
+            // space without finalising the child tf is preferable to
+            // taking the whole kernel down.
+            let child = match proc::by_pid(new_pid) {
+                Some(p) => p,
+                None => return new_pid as i64,
+            };
             // POSIX inheritance: the child must inherit the parent's open
             // file descriptors (with the same epoch tokens), installed
             // signal handlers, current signal mask, working directory,

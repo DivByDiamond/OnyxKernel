@@ -5,15 +5,25 @@
 //! 2. If NO users exist (fresh install) → auto-login as root, no
 //!    password. This lets you into an empty system immediately.
 //! 3. If users DO exist → print the user list and prompt for a
-//!    username + password. Passwords are compared in plaintext
-//!    against /etc/shadow (simpler than SHA-256+salt, and good enough
-//!    for a hobby OS until the crypto path is debugged).
+//!    username + password. Passwords are verified against the
+//!    `$5$salt$hash` entries in /etc/shadow via the iterated SHA-256
+//!    KDF implemented in `auth::verify_shadow_password`.
 //!
 //! Privilege handling:
 //! - **root** (uid 0) stays in ring 1 (root space). This lets root
 //!   run privileged binaries such as `/bin/init` for service
 //!   management.
 //! - **regular users** drop to ring 2 (user space) via `dropping(2)`.
+//!
+//! Audit fixes applied:
+//! - 🔴 #1: passwords are no longer compared as plaintext; the verify
+//!   path uses the iterated SHA-256 KDF in `auth`.
+//! - 🔴 #2: fail-closed authentication. If `/etc/shadow` cannot be
+//!   opened (deleted, corrupted, permission denied), authentication
+//!   always fails — never falls back to "empty password accepted".
+//! - 🔴 #11: exponential backoff on failed attempts (0.25 s → 16 s).
+//! - 🟡 #2: passwords are read with the terminal in raw mode so the
+//!   cooked-mode echo does not leak them onto the screen.
 
 #![no_std]
 #![no_main]
@@ -23,6 +33,10 @@ use core::arch::asm;
 
 mod auth;
 mod syscalls;
+
+/// ioctl numbers — match the kernel's `fs_sys3/extra.rs` definitions.
+const TIOCSRAW: u64 = 0x5421;
+const TIOCRRAW: u64 = 0x5422;
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn _start() -> ! {
@@ -61,6 +75,7 @@ pub unsafe extern "C" fn _start() -> ! {
     }
 
     // ── Case 2: users exist → normal login prompt ──────────────────
+    let mut fails: u32 = 0;
     loop {
         // Print user list so the user knows what to type.
         syscalls::write(1, b"\nUsers:\n".as_ptr(), 8);
@@ -101,15 +116,29 @@ pub unsafe extern "C" fn _start() -> ! {
             Some(i) => i,
             None => {
                 syscalls::write(1, b"Login incorrect\n\n".as_ptr(), 17);
+                // Audit fix (🔴 #11): even for unknown users we apply
+                // backoff — otherwise an attacker could enumerate valid
+                // usernames by timing the response.
+                backoff_sleep(fails);
+                fails = fails.saturating_add(1);
                 continue;
             }
         };
 
-        // Read password.
+        // Read password in raw mode so the cooked-mode echo doesn't
+        // leak it onto the screen. (Audit fix 🟡 #2.)
         syscalls::write(1, b"password: ".as_ptr(), 10);
+        let _ = syscalls::ioctl(0, TIOCSRAW, 0);
         let mut pass_buf = [0u8; 64];
         let pn = syscalls::read(0, pass_buf.as_mut_ptr(), pass_buf.len() as u64);
+        // Restore cooked mode BEFORE printing the newline so the kernel
+        // handles the line editing again on the next prompt.
+        let _ = syscalls::ioctl(0, TIOCRRAW, 0);
+        syscalls::write(1, b"\n".as_ptr(), 1);
+
         if pn <= 0 {
+            backoff_sleep(fails);
+            fails = fails.saturating_add(1);
             continue;
         }
         let pn = pn as usize;
@@ -120,11 +149,19 @@ pub unsafe extern "C" fn _start() -> ! {
         };
         let password = &pass_buf[..pn];
 
-        // Verify password (plaintext comparison against /etc/shadow).
-        if !verify_plaintext_password(username, password) {
+        // Verify password against /etc/shadow via the iterated SHA-256
+        // KDF. `verify_shadow_password` is fail-closed: if /etc/shadow
+        // cannot be read, it returns `false` rather than allowing the
+        // user in with an empty password. (Audit fixes 🔴 #1 and 🔴 #2.)
+        if !auth::verify_shadow_password(username, password) {
             syscalls::write(1, b"Login incorrect\n\n".as_ptr(), 17);
+            backoff_sleep(fails);
+            fails = fails.saturating_add(1);
             continue;
         }
+
+        // Successful login resets the failure counter.
+        fails = 0;
 
         // Success — set ring and exec shell.
         let is_root = users[user_idx].uid == 0;
@@ -157,8 +194,8 @@ pub unsafe extern "C" fn _start() -> ! {
 }
 
 /// Create a minimal root account so that `useradd` / `passwd` can
-/// later modify it. Writes /etc/passwd and /etc/shadow with password
-/// "root" in plaintext.
+/// later modify it. Writes /etc/passwd and /etc/shadow with the
+/// password "root" hashed via the iterated SHA-256 KDF.
 unsafe fn seed_root_account() {
     let home = b"/users/root";
     let shell = b"/bin/osh";
@@ -171,77 +208,20 @@ unsafe fn seed_root_account() {
     let _ = syscalls::mkdir(mkdir_buf.as_ptr());
 }
 
-/// Verify a password against /etc/shadow using PLAINTEXT comparison.
-/// The shadow entry format is `<username>:<plaintext_password>`.
-/// This is intentionally simple — no SHA-256, no salt, no hex. It's
-/// a hobby OS; we'll add proper hashing later once the crypto path
-/// is debugged.
-unsafe fn verify_plaintext_password(username: &[u8], password: &[u8]) -> bool {
-    // Read /etc/shadow.
-    let mut path_buf = [0u8; 64];
-    let path = b"/etc/shadow";
-    path_buf[..path.len()].copy_from_slice(path);
-    path_buf[path.len()] = 0;
-
-    let fd = syscalls::open(path_buf.as_ptr(), 0, 0);
-    if fd < 0 {
-        // No shadow file → if password is empty, allow (for first-boot
-        // edge cases). Otherwise reject.
-        return password.is_empty();
+/// Audit fix (🔴 #11): exponential backoff. `fails` is the number of
+/// consecutive failed attempts for this session. We delay by
+/// `2^min(fails,6) * 250 ms` — i.e. 0.25 s, 0.5 s, 1 s, 2 s, 4 s,
+/// 8 s, 16 s, 16 s, … — capped at 16 s. This makes online brute force
+/// impractical even in a cloud console while still being tolerable
+/// for a real user who typos their password once.
+fn backoff_sleep(fails: u32) {
+    let exp = fails.min(6);
+    let delay_us: u64 = (1u64 << exp) * 250_000;
+    // struct timespec { tv_sec, tv_nsec } — both u64 on RV64.
+    let ts: [u64; 2] = [delay_us / 1_000_000, (delay_us % 1_000_000) * 1000];
+    unsafe {
+        syscalls::nanosleep(ts.as_ptr(), core::ptr::null_mut());
     }
-
-    let mut buf = [0u8; 4096];
-    let mut total = 0usize;
-    loop {
-        let n = syscalls::read(
-            fd as u64,
-            buf[total..].as_mut_ptr(),
-            (buf.len() - total) as u64,
-        );
-        if n <= 0 {
-            break;
-        }
-        total += n as usize;
-        if total >= buf.len() {
-            break;
-        }
-    }
-    syscalls::close(fd as u64);
-
-    // Parse line by line: `username:password`
-    let data = &buf[..total];
-    let mut pos = 0;
-    while pos < data.len() {
-        let line_end = data[pos..]
-            .iter()
-            .position(|&b| b == b'\n')
-            .map(|n| pos + n)
-            .unwrap_or(data.len());
-        let line = &data[pos..line_end];
-        pos = line_end + 1;
-
-        let colon = match line.iter().position(|&b| b == b':') {
-            Some(n) => n,
-            None => continue,
-        };
-        let name = &line[..colon];
-        let stored_pass = &line[colon + 1..];
-
-        if name.len() == username.len() && name == username {
-            // Found the user — compare passwords byte by byte.
-            if stored_pass.len() != password.len() {
-                return false;
-            }
-            let mut ok = true;
-            for i in 0..stored_pass.len() {
-                if stored_pass[i] != password[i] {
-                    ok = false;
-                }
-            }
-            return ok;
-        }
-    }
-    false
 }
 
 #[panic_handler]

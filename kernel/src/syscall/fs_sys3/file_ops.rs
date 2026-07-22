@@ -80,8 +80,14 @@ pub unsafe fn sys_truncate(path: u64) -> i64 {
 
 /// truncate2(path, length) — POSIX-style truncate with explicit length.
 /// Currently the OnyxFS VFS layer only supports full truncation (length=0).
-/// Non-zero length is accepted but treated as "truncate to current size" —
-/// i.e. a no-op. TODO: extend vfs::truncate to take a length parameter.
+///
+/// Audit fix (🟡 #4): the previous code accepted a non-zero length but
+/// treated it as a silent no-op, returning success while leaving the
+/// file unchanged. That gives callers (libc truncate(3), cp -n, etc.)
+/// the illusion that the operation worked, which can corrupt files
+/// and break size assumptions. We now return -ENOSYS for non-zero
+/// lengths so callers see an explicit "not implemented" and can fall
+/// back to a portable read-truncate-write loop.
 pub unsafe fn sys_truncate2(path: u64, length: u64) -> i64 {
     let mut path_buf = [0u8; 256];
     let path_len = match parse_user_path(path, &mut path_buf) {
@@ -99,15 +105,18 @@ pub unsafe fn sys_truncate2(path: u64, length: u64) -> i64 {
             Err(e) => e.as_i64(),
         }
     } else {
-        // Non-zero length: seek to `length` and truncate from there.
-        // Our VFS doesn't support mid-file truncation yet, so just succeed.
-        0
+        // Non-zero length truncation is not yet implemented in the VFS —
+        // fail loudly instead of silently succeeding.
+        Errno::NoSys.as_i64()
     };
     vfs::close(token).ok();
     r
 }
 
 /// ftruncate(fd, length) — same as truncate2 but takes an fd.
+///
+/// Audit fix (🟡 #4): same rationale as sys_truncate2 — non-zero length
+/// used to silently succeed. Now returns -ENOSYS.
 pub unsafe fn sys_ftruncate(fd: u64, length: u64) -> i64 {
     if length == 0 {
         match vfs::truncate(fd) {
@@ -115,8 +124,7 @@ pub unsafe fn sys_ftruncate(fd: u64, length: u64) -> i64 {
             Err(e) => e.as_i64(),
         }
     } else {
-        // VFS does not yet support mid-file truncation.
-        0
+        Errno::NoSys.as_i64()
     }
 }
 

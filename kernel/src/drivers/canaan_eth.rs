@@ -110,3 +110,22 @@ pub fn mdio_write(phy_addr: u8, reg: u8, data: u16) -> KResult<()> {
 pub fn mac() -> [u8; 6] {
     unsafe { G_MAC }
 }
+
+// ── Audit fix (🟡 #6): TX/RX path stubs ─────────────────────────────────
+//
+// The audit's complaint was that `init()` returned `Ok(())` but did no
+// real DMA ring bring-up, while no send/recv entry points existed at
+// all — so user-space callers had no way to detect that the driver is
+// not actually moving packets. We add explicit `send` and `recv` stubs
+// that return `Errno::NoSys`, so protocols that probe the driver get a
+// clean "not implemented" instead of silent success.
+
+/// Transmit a frame. Not yet implemented — returns ENOSYS.
+pub fn send(_data: &[u8]) -> KResult<()> {
+    Err(Errno::NoSys)
+}
+
+/// Receive a frame into `buf`. Not yet implemented — returns ENOSYS.
+pub fn recv(_buf: &mut [u8]) -> KResult<usize> {
+    Err(Errno::NoSys)
+}

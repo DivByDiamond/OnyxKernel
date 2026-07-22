@@ -110,7 +110,14 @@ pub(super) unsafe fn sys_exec(tf: &mut TrapFrame, path: u64, argv: u64) -> i64 {
 
 pub(super) unsafe fn sys_sbrk(incr: i64) -> i64 {
     let pid = proc::current_pid();
-    let p = proc::by_pid(pid).unwrap();
+    // Audit fix (🔴 #8): replace `proc::by_pid(pid).unwrap()` with a
+    // graceful error return. See fs_sys3/mem.rs::sys_sbrk for the full
+    // rationale — same fix, different call site (this is the live
+    // sys_sbrk, mem.rs::sys_sbrk is the dead_code-tagged twin).
+    let p = match proc::by_pid(pid) {
+        Some(proc) => proc,
+        None => return Errno::Inval.as_i64(),
+    };
     let cur = p.heap_brk;
     let heap_end = crate::arch::regs::USER_HEAP_BASE + crate::arch::regs::USER_HEAP_SIZE;
     // Bug (syscall SERIOUS #1): use checked arithmetic for the new brk.

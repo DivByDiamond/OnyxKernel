@@ -153,7 +153,17 @@ pub unsafe fn udp_sendto(dst_ip: [u8; 4], dst_port: u16, data: &[u8]) -> KResult
         recv_head: 0,
     });
     let result = {
-        let sock = UDP_SOCKS[idx].as_mut().unwrap();
+        // Audit fix (🟡 #7): replace `UDP_SOCKS[idx].as_mut().unwrap()`.
+        // alloc_udp_sock() returned Some(idx) moments ago, but a
+        // malicious caller racing on another core could close the slot
+        // between alloc and here. The unwrap would then panic the
+        // kernel. Match-and-fail-closed is safe.
+        let sock = match UDP_SOCKS[idx].as_mut() {
+            Some(s) => s,
+            None => {
+                return Err(Errno::Inval);
+            }
+        };
         udp_send(sock, data)
     };
     UDP_SOCKS[idx] = None;

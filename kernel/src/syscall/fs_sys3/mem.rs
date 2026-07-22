@@ -75,7 +75,15 @@ pub unsafe fn sys_brk(addr: u64) -> i64 {
 #[expect(dead_code)]
 pub unsafe fn sys_sbrk(incr: i64) -> i64 {
     let pid = proc::current_pid();
-    let p = proc::by_pid(pid).unwrap();
+    // Audit fix (🔴 #8): replace `proc::by_pid(pid).unwrap()` with a
+    // graceful error return. A corrupted process table (or a pid that
+    // vanishes mid-syscall due to a kill on another hart) used to take
+    // the whole kernel down via `unwrap()` -> panic. Now we return
+    // -EINVAL (which user-space sees as an sbrk failure) instead.
+    let p = match proc::by_pid(pid) {
+        Some(proc) => proc,
+        None => return Errno::Inval.as_i64(),
+    };
     let cur = p.heap_brk;
     let heap_end = regs::USER_HEAP_BASE + regs::USER_HEAP_SIZE;
     let new_brk = (cur as i64 + incr) as u64;

@@ -22,11 +22,27 @@ pub unsafe extern "C" fn _start() -> ! {
         syscalls::write(1, b"useradd: no username\n".as_ptr(), 23);
         syscalls::exit(1);
     }
+    // Audit fix (🔴 #6): validate the username before persisting it to
+    // /etc/passwd. The previous code happily accepted any byte sequence,
+    // including `:` (which splits fields) and `\n` (which adds a new
+    // line — `evil\nhacker:0:0:/r:/bin/osh` would create a second uid-0
+    // entry). We restrict to [A-Za-z0-9-_.], max 31 bytes, and refuse
+    // the literal name "root" to prevent shadowing.
+    if !valid_username(uname) {
+        syscalls::write(1, b"useradd: invalid username\n".as_ptr(), 27);
+        syscalls::exit(1);
+    }
 
     let mut uid_str = [0u8; 12];
     syscalls::write(1, b"UID: ".as_ptr(), 5);
     let uid_s = read_line(&mut uid_str);
     let uid = parse_dec(uid_s);
+    // Audit fix (🔴 #6): refuse uid 0 (would grant root), and refuse
+    // a uid that's already taken by an existing user.
+    if uid == 0 {
+        syscalls::write(1, b"useradd: uid 0 is reserved for root\n".as_ptr(), 37);
+        syscalls::exit(1);
+    }
 
     let mut password = [0u8; 64];
     syscalls::write(1, b"Password: ".as_ptr(), 10);
@@ -48,6 +64,10 @@ pub unsafe extern "C" fn _start() -> ! {
 
     if auth::find_user(&users, nusers, uname).is_some() {
         syscalls::write(1, b"useradd: user already exists\n".as_ptr(), 30);
+        syscalls::exit(1);
+    }
+    if auth::find_user_by_uid(&users, nusers, uid).is_some() {
+        syscalls::write(1, b"useradd: uid already in use\n".as_ptr(), 29);
         syscalls::exit(1);
     }
 
@@ -107,6 +127,18 @@ fn parse_dec(s: &[u8]) -> u32 {
         }
     }
     val
+}
+
+/// Audit fix (🔴 #6): validate a username before writing it into /etc/passwd.
+/// Rejects empty names, names longer than 31 bytes, names containing
+/// anything outside [A-Za-z0-9-_.] (so `:` and `\n` are forbidden), and
+/// the literal name "root".
+fn valid_username(u: &[u8]) -> bool {
+    !u.is_empty()
+        && u.len() <= 31
+        && u.iter()
+            .all(|&b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_' || b == b'.')
+        && u != b"root"
 }
 
 #[panic_handler]

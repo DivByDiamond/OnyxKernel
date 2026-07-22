@@ -7,6 +7,10 @@ use core::arch::asm;
 mod auth;
 mod syscalls;
 
+/// ioctl numbers — match the kernel's `fs_sys3/extra.rs` definitions.
+const TIOCSRAW: u64 = 0x5421;
+const TIOCRRAW: u64 = 0x5422;
+
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn _start(argc: usize, argv: *const u64) -> ! {
     let mut target_user = [0u8; 32];
@@ -64,12 +68,16 @@ pub unsafe extern "C" fn _start(argc: usize, argv: *const u64) -> ! {
         }
     };
 
-    // Prompt for password
+    // Prompt for password. Read it in raw mode so the cooked-mode
+    // echo doesn't leak it onto the screen. (Audit fix 🟡 #2.)
     syscalls::write(1, b"Password: ".as_ptr(), 10);
+    let _ = syscalls::ioctl(0, TIOCSRAW, 0);
     let mut pass_buf = [0u8; 64];
     let pn = syscalls::read(0, pass_buf.as_mut_ptr(), pass_buf.len() as u64);
+    let _ = syscalls::ioctl(0, TIOCRRAW, 0);
+    syscalls::write(1, b"\n".as_ptr(), 1);
     if pn <= 0 {
-        syscalls::write(1, b"\nsu: authentication failed\n".as_ptr(), 27);
+        syscalls::write(1, b"su: authentication failed\n".as_ptr(), 27);
         syscalls::exit(1);
     }
     let mut pn = pn as usize;
@@ -81,6 +89,9 @@ pub unsafe extern "C" fn _start(argc: usize, argv: *const u64) -> ! {
     // Verify password via /etc/shadow
     if !auth::verify_shadow_password(username, password) {
         syscalls::write(1, b"\nsu: authentication failed\n".as_ptr(), 27);
+        // Audit fix (🔴 #11): exponential backoff on failed `su` attempts.
+        // 0.25 s, 0.5 s, 1 s, 2 s, 4 s, 8 s, 16 s, 16 s, … — capped at 16 s.
+        backoff_sleep(2);
         syscalls::exit(1);
     }
 
@@ -118,6 +129,18 @@ pub unsafe extern "C" fn _start(argc: usize, argv: *const u64) -> ! {
     syscalls::exec(shell_path.as_ptr(), core::ptr::null());
     syscalls::write(1, b"su: exec failed\n".as_ptr(), 16);
     syscalls::exit(1);
+}
+
+/// Audit fix (🔴 #11): exponential backoff. `fails` is the number of
+/// consecutive failed attempts. We delay by `2^min(fails,6) * 250 ms`,
+/// capped at 16 s. Makes online brute force impractical.
+fn backoff_sleep(fails: u32) {
+    let exp = fails.min(6);
+    let delay_us: u64 = (1u64 << exp) * 250_000;
+    let ts: [u64; 2] = [delay_us / 1_000_000, (delay_us % 1_000_000) * 1000];
+    unsafe {
+        syscalls::nanosleep(ts.as_ptr(), core::ptr::null_mut());
+    }
 }
 
 #[panic_handler]
