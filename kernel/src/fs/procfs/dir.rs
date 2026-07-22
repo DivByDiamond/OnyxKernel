@@ -11,6 +11,7 @@ pub unsafe fn lookup(name: &[u8]) -> KResult<u32> {
         b"uptime" => Ok(PROCFS_UPTIME_INO),
         b"load" => Ok(PROCFS_LOAD_INO),
         b"stat" => Ok(PROCFS_STAT_INO),
+        b"modules" => Ok(PROCFS_MODULES_INO),
         _ => Err(Errno::NoEnt),
     }
 }
@@ -25,6 +26,7 @@ pub unsafe fn readdir_entry(idx: u32, name_out: *mut u8, name_len: usize) -> Opt
         5 => (b"uptime" as &[u8], PROCFS_UPTIME_INO),
         6 => (b"load" as &[u8], PROCFS_LOAD_INO),
         7 => (b"stat" as &[u8], PROCFS_STAT_INO),
+        8 => (b"modules" as &[u8], PROCFS_MODULES_INO),
         _ => return None,
     };
     let n = name.len().min(name_len.saturating_sub(1));

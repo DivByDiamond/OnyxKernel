@@ -18,11 +18,18 @@ pub static mut G_RELEASE: u64 = 0;
 pub static mut G_KERNEL_ROOT_PA: u64 = 0;
 
 pub fn current_hart() -> usize {
-    let hartid: usize;
-    unsafe {
-        core::arch::asm!("mv {}, tp", out(reg) hartid);
+    #[cfg(not(test))]
+    {
+        let hartid: usize;
+        unsafe {
+            core::arch::asm!("mv {}, tp", out(reg) hartid);
+        }
+        hartid
     }
-    hartid
+    #[cfg(test)]
+    {
+        0
+    }
 }
 
 static mut G_CPU_ONLINE: [bool; MAX_HARTS] =
@@ -68,6 +75,7 @@ pub unsafe fn release_secondary_harts() {
         .store(1, Ordering::SeqCst);
 }
 
+#[cfg(not(test))]
 #[unsafe(no_mangle)]
 pub unsafe extern "Rust" fn secondary_entry() -> ! {
     let hartid: usize;
@@ -112,16 +120,26 @@ pub unsafe extern "Rust" fn secondary_entry() -> ! {
     );
 }
 
+#[cfg(test)]
+#[unsafe(no_mangle)]
+pub unsafe extern "Rust" fn secondary_entry() -> ! {
+    loop {}
+}
+
+#[cfg(not(test))]
 #[unsafe(no_mangle)]
 pub unsafe extern "Rust" fn secondary_kmain() -> ! {
     let hartid: usize;
     core::arch::asm!("mv {0}, tp", out(reg) hartid);
     crate::proc::process::set_cpu_online(hartid, true);
-    // Bug (syscall SERIOUS #10): atomic fetch_add to avoid races between
-    // concurrent secondary harts. The previous non-atomic increment could
-    // lose updates when two harts booted simultaneously.
     G_ONLINE_HARTS.fetch_add(1, Ordering::SeqCst);
     crate::proc::scheduler::sched_enter_idle()
+}
+
+#[cfg(test)]
+#[unsafe(no_mangle)]
+pub unsafe extern "Rust" fn secondary_kmain() -> ! {
+    loop {}
 }
 
 pub fn online_harts() -> u32 {

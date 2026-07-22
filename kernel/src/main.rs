@@ -67,6 +67,7 @@ pub mod fs;
 pub mod ipc;
 pub mod libfdt;
 pub mod mm;
+pub mod module;
 pub mod net;
 pub mod proc;
 pub mod srv;

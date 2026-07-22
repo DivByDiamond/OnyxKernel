@@ -1,7 +1,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/platform-RISC--V%2064--bit-green" alt="RISC-V 64">
   <img src="https://img.shields.io/badge/language-Rust%20%7E98%25-orange" alt="Rust ~98%">
-  <img src="https://img.shields.io/badge/version-v0.3-blue" alt="v0.3">
+  <img src="https://img.shields.io/badge/version-v0.5-blue" alt="v0.5">
   <img src="https://img.shields.io/badge/MMU-Sv39-yellow" alt="Sv39 MMU">
   <img src="https://img.shields.io/badge/license-GPL--3.0-red" alt="GPL-3.0">
   <a href="README.md"><img src="https://img.shields.io/badge/en_readme-blue" alt="en_readme"></a>
@@ -45,7 +45,9 @@ OnyxKernel — 64-битное RISC-V ядро ОС (~98% Rust, ассембле
 - **Журнал предзаписи (WAL)** — восстановление после сбоев при монтировании
 - **VFS с таблицей монтирования** — OnyxFS, procfs, ipcfs
 - **IPC каналы** — `chan_create` / `connect` / `send` / `recv` / `close`; именованные каналы через `/ipc/*` VFS
-- **Syscall ABI** — 31 системный вызов: `spawn`, `wait`, `read`, `write`, `exec`, `sbrk`, `kill`, `sigmask`, `snapshot_*`, `create`, `mkdir` и др.
+- **Syscall ABI** — 83 системных вызова: POSIX `open`/`fstat`/`waitpid`/`fork`/`execve`, `ioctl`, `mprotect`, `sigaction`, `clock_gettime`, `setuid`/`setgid`, `chown`/`fchown`, `sched_setaffinity` и др.
+- **Реестр модулей** — драйверы регистрируются как модули; `/proc/modules` показывает список; инфраструктура для будущей динамической загрузки
+- **Юнит-тесты драйверов** — 18 тестов для UART и VirtIO (константы, структуры, начальное состояние)
 - **Вытесняющая многозадачность** — планирование по таймеру, `NEED_RESCHED` → `sched_yield`
 - **Доставка сигналов** — `SYS_kill`, `SIGKILL` завершает процесс
 - **Блокирующий wait** — состояние `Waiting` + `sched_yield` для уведомления о завершении потомка
@@ -268,7 +270,9 @@ osh> _
 
 ## Дорожная карта
 
-### ✅ Сделано в v0.3–v0.4
+### ✅ Сделано в v0.3–v0.5
+- Юнит-тесты драйверов (UART, VirtIO) — 18 тестов
+- Реестр динамических модулей — `/proc/modules`, регистрация встроенных драйверов
 - Поддержка Unicode-таблицы в шрифтах PSF1/PSF2
 - Именованные IPC-каналы через `/ipc/*` VFS
 - Обнаружение оборудования через FDT
@@ -281,7 +285,7 @@ osh> _
 - SMP (до 8 ядер, per-CPU очереди, load balancing, CPU affinity)
 - Полный юзерленд: init, login, osh, passwd, useradd, userdel
 - Аутентификация: /etc/passwd + /etc/shadow, первый запуск
-- /proc: version, cpuinfo, meminfo, uptime, load, stat
+- /proc: version, cpuinfo, meminfo, uptime, load, stat, modules
 - Per-process FD таблицы (16 слотов, capability токены)
 - Сетевой стек (Ethernet/IP/TCP) с syscall интерфейсом
 - Write-ahead журнал + восстановление при монтировании
@@ -293,16 +297,12 @@ osh> _
 
 ### ❌ Осталось сделать:
 - **FAT32** — чтение файлов (сейчас заглушки)
-- **getdents64** — работал, требуется для `ls`
 - **USB** — URB-передача (сейчас только probe/init)
-- **truncate/ftruncate** — обрезание до ненулевого размера
 - **symlink/readlink** — символические ссылки в OnyxFS
-- **O_EXCL** — проверка при создании
-- **fork** — передача argv/envp родителя
 - **chmod/fchmod** — права доступа в OnyxFS
 - **fsync** — реальный flush на диск
 - **UDP/DHCP/DNS** — сетевой стек
-- **Юнит-тесты ядра**
+- **Динамическая загрузка модулей** — загрузка ELF-модулей ядра из userspace
 
 ----
 

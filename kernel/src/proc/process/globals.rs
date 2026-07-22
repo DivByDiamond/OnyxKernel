@@ -48,9 +48,16 @@ pub fn proc_list_unlock() {
 
 #[inline]
 pub fn hart_id() -> usize {
-    let id: usize;
-    unsafe { core::arch::asm!("mv {0}, tp", out(reg) id) }
-    id
+    #[cfg(not(test))]
+    {
+        let id: usize;
+        unsafe { core::arch::asm!("mv {0}, tp", out(reg) id) }
+        id
+    }
+    #[cfg(test)]
+    {
+        0
+    }
 }
 
 pub unsafe fn init() {

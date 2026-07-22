@@ -4,6 +4,7 @@ use crate::arch::{__bss_end, __bss_start, __stack_top, SAVED_FDT, SAVED_HARTID};
 use core::arch::global_asm;
 
 // ─── boot.S ──────────────────────────────────────────────────────────────────
+#[cfg(not(test))]
 global_asm!(
     r#"
 .section .text.boot

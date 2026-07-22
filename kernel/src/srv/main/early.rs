@@ -7,11 +7,13 @@ use crate::drivers::{
 use crate::libfdt::fdt;
 use crate::libfdt::periph;
 use crate::mm::{heap, pmm, vmm};
+use crate::module::{self, ModuleType};
 use crate::srv::{timer, trap};
 use onyx_core::fmt::Arg;
 
 pub(crate) unsafe fn early_init(fdt_addr: usize) {
     uart::init_default();
+    module::register("uart", ModuleType::Driver);
 
     if fdt::init(fdt_addr) {
         crate::kinf!("fdt", "parsed successfully");
@@ -82,6 +84,9 @@ pub(crate) unsafe fn probe_devices() -> usize {
             }
         }
     }
+    if ndevs > 0 {
+        module::register("virtio-blk", ModuleType::Driver);
+    }
     crate::kinf!("virtio-blk", "%d device(s)", Arg::from(ndevs));
 
     if let Some(sdhci_info) = fdt::find_sdhci() {
@@ -96,6 +101,7 @@ pub(crate) unsafe fn probe_devices() -> usize {
             );
             if sdhci::init(sdhci_base, sdhci_irq) {
                 crate::kinf!("sdhci", "SD card initialized");
+                module::register("sdhci", ModuleType::Driver);
             } else {
                 crate::kwrn!("sdhci", "SD card init failed");
             }
@@ -156,6 +162,7 @@ pub(crate) unsafe fn probe_peripherals() {
         if virtio_rng::probe(b) {
             if virtio_rng::init(b).is_ok() {
                 crate::kinf!("virtio-rng", "init @ %p", Arg::from(b));
+                module::register("virtio-rng", ModuleType::Driver);
             }
             continue;
         }
@@ -173,18 +180,21 @@ pub(crate) unsafe fn probe_peripherals() {
                     Arg::from(mac[4] as u32),
                     Arg::from(mac[5] as u32)
                 );
+                module::register("virtio-net", ModuleType::Driver);
             }
             continue;
         }
         if virtio_console::probe(b) {
             if virtio_console::init(b).is_ok() {
                 crate::kinf!("virtio-console", "init @ %p", Arg::from(b));
+                module::register("virtio-console", ModuleType::Driver);
             }
             continue;
         }
         if virtio_input::probe(b) {
             if virtio_input::init(b).is_ok() {
                 crate::kinf!("virtio-input", "init @ %p", Arg::from(b));
+                module::register("virtio-input", ModuleType::Driver);
             }
             continue;
         }

@@ -1,4 +1,5 @@
 use crate::mm::{heap, pmm};
+use crate::module;
 use crate::proc;
 use crate::srv::timer;
 use onyx_core::errno::{Errno, KResult};
@@ -102,6 +103,11 @@ unsafe fn generate_content(ino: u32) -> KResult<&'static [u8]> {
             pos += fmt::format_line(b"procs_running 1\n", 0, b"", buf, pos);
             pos += fmt::format_line(b"procs_blocked 0\n", 0, b"", buf, pos);
             core::str::from_utf8_unchecked(&buf[..pos.min(buf.len())])
+        }
+        PROCFS_MODULES_INO => {
+            let buf = &mut *pb;
+            let len = module::format_list(buf);
+            core::str::from_utf8_unchecked(&buf[..len.min(buf.len())])
         }
         _ => return Err(Errno::NoEnt),
     };

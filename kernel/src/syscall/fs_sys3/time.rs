@@ -64,7 +64,10 @@ pub unsafe fn sys_nanosleep(req: u64, _rem: u64) -> i64 {
         }
         // Wait for interrupt — the timer tick will wake us.  Between ticks
         // the CPU stays in a low-power state instead of busy-looping.
+        #[cfg(not(test))]
         core::arch::asm!("wfi", options(nostack, preserves_flags));
+        #[cfg(test)]
+        core::hint::spin_loop();
     }
     0
 }

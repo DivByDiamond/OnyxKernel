@@ -1,7 +1,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/platform-RISC--V%2064--bit-green" alt="RISC-V 64">
   <img src="https://img.shields.io/badge/language-Rust%20%7E98%25-orange" alt="Rust ~98%">
-  <img src="https://img.shields.io/badge/version-v0.4-blue" alt="v0.4">
+  <img src="https://img.shields.io/badge/version-v0.5-blue" alt="v0.5">
   <img src="https://img.shields.io/badge/MMU-Sv39-yellow" alt="Sv39 MMU">
   <img src="https://img.shields.io/badge/license-GPL--3.0-red" alt="GPL-3.0">
   <a href="README.ru.md"><img src="https://img.shields.io/badge/ru_readme-blue" alt="ru_readme"></a>
@@ -61,7 +61,9 @@ Part of the [OnyxOS](https://github.com/anomalyco/OnyxOS) ecosystem. Booted by
 - **Write-ahead journal** — crash recovery on mount
 - **VFS with mount table** — OnyxFS, procfs, ipcfs
 - **IPC channels** — `chan_create` / `connect` / `send` / `recv` / `close`; named channels via `/ipc/*` VFS
-- **Syscall ABI** — 77 syscalls (was 31 in v0.3): POSIX-flavoured `open` with `O_CREAT/O_TRUNC/O_APPEND`, `fstat`, `waitpid`, `fork`, `execve`, `getdents64`, `ioctl`, `mprotect`, `sigaction`/`sigprocmask`/`sigreturn`, `clock_gettime`, `isatty`, `getentropy`, `setuid`/`setgid`, `fsync`, `truncate` with length, `ftruncate`, `readlink`/`symlink`, `chmod`/`fchmod`, plus the original `spawn`/`wait`/`exec`/`sbrk`/`kill`/`sigmask`/`snapshot_*`/`create`/`mkdir`/IPC channel set.
+- **Syscall ABI** — 83 syscalls: POSIX-flavoured `open` with `O_CREAT/O_TRUNC/O_APPEND`, `fstat`, `waitpid`, `fork`, `execve`, `getdents64`, `ioctl`, `mprotect`, `sigaction`/`sigprocmask`/`sigreturn`, `clock_gettime`, `isatty`, `getentropy`, `setuid`/`setgid`, `fsync`, `truncate` with length, `ftruncate`, `readlink`/`symlink`, `chmod`/`fchmod`, `chown`/`fchown`, `sched_setaffinity`/`sched_getaffinity`, plus the original `spawn`/`wait`/`exec`/`sbrk`/`kill`/`sigmask`/`snapshot_*`/`create`/`mkdir`/IPC/net channel set.
+- **Dynamic module registry** — built-in drivers register as modules; `/proc/modules` lists loaded modules; infrastructure for future dynamic loading
+- **Driver unit tests** — 18 unit tests for UART and VirtIO drivers (constants, struct layouts, initial state)
 - **Preemptive multitasking** — timer tick scheduling with `NEED_RESCHED` → `sched_yield`
 - **Signal delivery** — `SYS_kill` with full `sigaction` / `sigprocmask` / `sigreturn` support for user-space handlers; KILL and STOP cannot be caught or blocked.
 - **Blocking wait** — `Waiting` state + `sched_yield` for child process notification; `waitpid` with `WNOHANG`.
@@ -287,7 +289,9 @@ osh> _
 
 ## Roadmap
 
-### ✅ Done in v0.3–v0.4
+### ✅ Done in v0.3–v0.5
+- Driver unit tests (UART, VirtIO) — 18 tests for constants, structs, initial state
+- Dynamic module registry — `/proc/modules`, built-in driver registration, future-loading infrastructure
 - Unicode table support in PSF1/PSF2 fonts
 - IPC named channels via `/ipc/*` VFS
 - FDT-driven hardware discovery (replace hardcoded addresses)
@@ -300,7 +304,7 @@ osh> _
 - Multi-core (SMP) support (up to 8 harts, per-CPU queues, load balancing, CPU affinity)
 - Full userland: init, login, osh, passwd, useradd, userdel
 - Authentication: /etc/passwd + /etc/shadow, first-boot root password setup
-- /proc filesystem: version, cpuinfo, meminfo, uptime, load, stat
+- /proc filesystem: version, cpuinfo, meminfo, uptime, load, stat, modules
 - Per-process FD tables (16 slots with capability tokens)
 - Network stack (Ethernet/IP/TCP) with syscall interface
 - Write-ahead journal + crash recovery on mount
@@ -312,17 +316,12 @@ osh> _
 
 ### ❌ Осталось:
 - **FAT32** — реализовать чтение файлов (сейчас lookup/read — заглушки)
-- **getdents64** — заработал (был ENOSYS), требуется для `ls`
 - **USB** — реализовать URB-передачу (сейчас только probe/init)
-- **truncate/ftruncate** — обрезание до ненулевого размера
 - **symlink/readlink** — символические ссылки в OnyxFS
-- **O_EXCL** — проверка при создании файлов (✅ реализовано в phase17)
-- **fork** — передача argv/envp родителя
 - **chmod/fchmod** — права доступа в OnyxFS
 - **fsync** — реальный flush на диск
-- **getdents64** — batched directory reading
 - **UDP/DHCP/DNS** — сетевой стек
-- **Юнит-тесты ядра**
+- **Динамическая загрузка модулей** — загрузка ELF-модулей ядра из userspace
 
 ----
 
