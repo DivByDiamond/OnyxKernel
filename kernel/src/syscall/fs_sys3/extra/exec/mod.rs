@@ -1,13 +1,13 @@
 mod fork;
 
-pub(super) use fork::*;
+pub use fork::*;
 
 use onyx_core::errno::Errno;
 
 use crate::arch::trap_frame::TrapFrame;
 use crate::mm::vmm;
 use crate::proc;
-use crate::proc::process::{proc_list_lock, proc_list_unlock, ProcState};
+use crate::proc::process::{ProcState, proc_list_lock, proc_list_unlock};
 use crate::syscall::abi::WNOHANG;
 use crate::syscall::handler::user_ptr_ok;
 

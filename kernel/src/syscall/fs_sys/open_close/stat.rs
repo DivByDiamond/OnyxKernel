@@ -97,7 +97,7 @@ unsafe fn fill_user_stat(
     core::ptr::write_volatile(dst, stat);
 }
 
-pub(in super::super) unsafe fn sys_stat(path: u64, st_buf: u64) -> i64 {
+pub unsafe fn sys_stat(path: u64, st_buf: u64) -> i64 {
     let mut path_buf = [0u8; 256];
     let path_len = match crate::syscall::handler::parse_user_path(path, &mut path_buf) {
         Some(l) => l,
@@ -144,7 +144,7 @@ pub(in super::super) unsafe fn sys_stat(path: u64, st_buf: u64) -> i64 {
     }
 }
 
-pub(in super::super) unsafe fn sys_fstat(token: u64, st_buf: u64) -> i64 {
+pub unsafe fn sys_fstat(token: u64, st_buf: u64) -> i64 {
     if !user_ptr_ok(st_buf, core::mem::size_of::<UserStat>() as u64) {
         return Errno::Inval.as_i64();
     }

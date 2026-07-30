@@ -1,4 +1,4 @@
-use super::{journal, G_VERSION, ONYFS_V1};
+use super::{G_VERSION, ONYFS_V1, journal};
 use onyx_core::errno::{Errno, KResult};
 
 pub unsafe fn fsync(_ino: u32) -> KResult<()> {

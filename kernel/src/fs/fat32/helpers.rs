@@ -1,6 +1,6 @@
 use super::{
-    cluster_to_lba, fat_entry, is_eoc, read_sec, ATTR_DIRECTORY, ATTR_LFN, DIR_ENTRY_SIZE,
-    ENTRIES_PER_SECTOR, FAT32_EOC, G_DATA_LBA, G_DEV, G_FAT_SZ, G_RESVD, G_ROOT_CLUSTER, G_SPC,
+    ATTR_DIRECTORY, ATTR_LFN, DIR_ENTRY_SIZE, ENTRIES_PER_SECTOR, FAT32_EOC, G_DATA_LBA, G_DEV,
+    G_FAT_SZ, G_RESVD, G_ROOT_CLUSTER, G_SPC, cluster_to_lba, fat_entry, is_eoc, read_sec,
 };
 use onyx_core::errno::{Errno, KResult};
 

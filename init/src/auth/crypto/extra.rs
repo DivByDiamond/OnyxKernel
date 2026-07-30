@@ -50,10 +50,9 @@ pub(crate) fn generate_salt() -> [u8; 8] {
         return salt;
     }
     let pid = unsafe { syscalls::getpid() } as u64;
-    let mut seed = pid
-        .wrapping_mul(1103515245)
-        .wrapping_add(12345)
-        .wrapping_add(r as u64);
+    let mut ts = [0u64; 2];
+    let _ = unsafe { syscalls::clock_gettime(0, ts.as_mut_ptr()) };
+    let mut seed = ts[0] ^ ts[1] ^ pid;
     for s in &mut salt {
         seed = seed.wrapping_mul(1103515245).wrapping_add(12345);
         *s = (seed >> 16) as u8;

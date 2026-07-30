@@ -18,6 +18,7 @@ pub mod net_sys;
 pub mod proc_sys;
 pub mod ring_sys;
 pub mod snap_sys;
+pub mod tty;
 
 #[cfg(test)]
 mod tests;

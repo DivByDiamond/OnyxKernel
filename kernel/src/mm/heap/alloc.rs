@@ -1,4 +1,4 @@
-use super::{lock_heap, unlock_heap, Block, G_HEAP, HEAP_SIZE, MIN_BLOCK};
+use super::{Block, G_HEAP, HEAP_SIZE, MIN_BLOCK, lock_heap, unlock_heap};
 use crate::mm::pmm;
 use onyx_core::errno::{Errno, KResult};
 

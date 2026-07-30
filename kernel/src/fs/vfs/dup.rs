@@ -1,5 +1,5 @@
 use super::{
-    alloc_fd, fd_check, fd_get, fd_set, fd_token, FdToken, Fs, PERM_READ, PERM_WRITE, VFS_MAX_FDS,
+    FdToken, Fs, PERM_READ, PERM_WRITE, VFS_MAX_FDS, alloc_fd, fd_check, fd_get, fd_set, fd_token,
 };
 use onyx_core::errno::{Errno, KResult};
 

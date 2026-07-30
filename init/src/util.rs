@@ -58,11 +58,7 @@ pub(crate) fn format_dec(n: i64) -> [u8; 12] {
 pub(crate) fn dec_slice(s: &[u8; 12]) -> &[u8] {
     let start = s.iter().position(|&b| b != 0).unwrap_or(s.len());
     let end = s.iter().rposition(|&b| b != 0).map(|i| i + 1).unwrap_or(0);
-    if start < end {
-        &s[start..end]
-    } else {
-        &[]
-    }
+    if start < end { &s[start..end] } else { &[] }
 }
 
 pub(crate) unsafe fn write_dec(n: i64) {

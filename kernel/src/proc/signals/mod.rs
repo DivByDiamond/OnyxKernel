@@ -2,7 +2,7 @@ use crate::arch::trap_frame::TrapFrame;
 use onyx_core::errno::{Errno, KResult};
 
 use super::process::{
-    by_pid, current_for_hart, hart_id, Proc, ProcState, G_NEED_RESCHED, MAX_HARTS,
+    G_NEED_RESCHED, MAX_HARTS, Proc, ProcState, by_pid, current_for_hart, hart_id,
 };
 use crate::proc::scheduler::{enqueue, rq_lock, rq_unlock};
 

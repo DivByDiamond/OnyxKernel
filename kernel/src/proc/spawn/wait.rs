@@ -1,6 +1,6 @@
 use super::super::process::{
-    current_for_hart, current_pid, hart_id, proc_list_lock, proc_list_unlock, ProcState,
-    G_ALL_PROCS,
+    G_ALL_PROCS, ProcState, current_for_hart, current_pid, hart_id, proc_list_lock,
+    proc_list_unlock,
 };
 use crate::arch::trap_frame::TrapFrame;
 use crate::mm::heap;

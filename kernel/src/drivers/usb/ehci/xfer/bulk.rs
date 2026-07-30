@@ -1,13 +1,13 @@
 use onyx_core::errno::{Errno, KResult};
 
 use super::super::{
-    alloc_qh, alloc_qtd, op_rd, op_wr, qh_phys, qh_ptr, qtd_phys, qtd_ptr, G_ASYNCLIST_ENABLED,
-    MAX_QTD, OP_USBCMD, OP_USBSTS, QH_DEV_ADDR_SHIFT, QH_DTC, QH_EPS_HIGH, QH_MPL_SHIFT,
-    QH_TERMINATE, QTD_ACTIVE, QTD_BUF_SIZE, QTD_CERR_3, QTD_ERROR, QTD_PID_IN, QTD_PID_OUT,
-    QTD_TOTAL_LEN_SHIFT, STS_HCHALTED,
+    G_ASYNCLIST_ENABLED, MAX_QTD, OP_USBCMD, OP_USBSTS, QH_DEV_ADDR_SHIFT, QH_DTC, QH_EPS_HIGH,
+    QH_MPL_SHIFT, QH_TERMINATE, QTD_ACTIVE, QTD_BUF_SIZE, QTD_CERR_3, QTD_ERROR, QTD_PID_IN,
+    QTD_PID_OUT, QTD_TOTAL_LEN_SHIFT, STS_HCHALTED, alloc_qh, alloc_qtd, op_rd, op_wr, qh_phys,
+    qh_ptr, qtd_phys, qtd_ptr,
 };
 
-pub(super) unsafe fn ehci_bulk_transfer(
+pub unsafe fn ehci_bulk_transfer(
     dev_addr: u8,
     mut data: Option<&mut [u8]>,
     data_in: bool,

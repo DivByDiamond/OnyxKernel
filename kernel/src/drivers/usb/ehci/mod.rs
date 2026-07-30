@@ -193,5 +193,6 @@ pub(super) unsafe fn ehci_port_enable(idx: u8) -> KResult<()> {
     Ok(())
 }
 
+pub(super) use queue::init_ehci;
 pub(super) use xfer::bulk::ehci_bulk_transfer;
 pub(super) use xfer::ehci_control_transfer;

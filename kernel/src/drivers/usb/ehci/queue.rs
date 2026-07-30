@@ -2,9 +2,9 @@ use crate::arch::mmio::Mmio;
 use onyx_core::errno::{Errno, KResult};
 
 use super::{
-    alloc_qh, op_rd, op_wr, qh_phys, qh_ptr, CMD_ASYNC_ENABLE, CMD_RESET, EHCI_CAP_HCSPARAMS,
-    G_ASYNCLIST_ENABLED, G_N_PORTS, G_OP_BASE, OP_ASYNCLISTADDR, OP_CONFIGFLAG, OP_USBCMD,
-    OP_USBSTS, QH, QH_HRL, QH_INACTIVATE, QH_QH, QH_TERMINATE, STS_ASYNC_ADVANCE, STS_HCHALTED,
+    CMD_ASYNC_ENABLE, CMD_RESET, EHCI_CAP_HCSPARAMS, G_ASYNCLIST_ENABLED, G_N_PORTS, G_OP_BASE,
+    OP_ASYNCLISTADDR, OP_CONFIGFLAG, OP_USBCMD, OP_USBSTS, QH, QH_HRL, QH_INACTIVATE, QH_QH,
+    QH_TERMINATE, STS_ASYNC_ADVANCE, STS_HCHALTED, alloc_qh, op_rd, op_wr, qh_phys, qh_ptr,
 };
 
 pub(super) unsafe fn init_async_list() -> KResult<()> {
@@ -70,7 +70,7 @@ pub(super) unsafe fn qh_remove(idx: usize) {
     }
 }
 
-pub(super) unsafe fn init_ehci(base: usize) -> KResult<()> {
+pub unsafe fn init_ehci(base: usize) -> KResult<()> {
     let cap_len = Mmio::<u32>::at(base).read() & 0xFF;
     G_OP_BASE = base + cap_len as usize;
     G_N_PORTS = ((Mmio::<u32>::at(base + EHCI_CAP_HCSPARAMS as usize)).read() >> 24) as u8;

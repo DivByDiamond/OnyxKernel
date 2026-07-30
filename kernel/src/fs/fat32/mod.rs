@@ -37,11 +37,11 @@ pub(crate) unsafe fn is_eoc(v: u32) -> bool {
     v >= FAT32_EOC
 }
 
-mod helpers;
 mod dir;
+mod helpers;
 
-pub(crate) use helpers::*;
 pub use dir::*;
+pub(crate) use helpers::*;
 
 #[cfg(test)]
 mod tests;

@@ -1,7 +1,7 @@
-use super::globals::hart_id;
 use super::globals::G_ALL_PROCS;
 use super::globals::G_HART_CURRENT;
-use super::types::{Proc, ProcState, PROC_RING_KERNEL};
+use super::globals::hart_id;
+use super::types::{PROC_RING_KERNEL, Proc, ProcState};
 
 pub fn current_pid() -> u32 {
     unsafe {
@@ -26,11 +26,7 @@ pub fn current_ring() -> u8 {
 pub fn current_opt() -> Option<&'static mut Proc> {
     unsafe {
         let p = G_HART_CURRENT[hart_id()];
-        if p.is_null() {
-            None
-        } else {
-            Some(&mut *p)
-        }
+        if p.is_null() { None } else { Some(&mut *p) }
     }
 }
 

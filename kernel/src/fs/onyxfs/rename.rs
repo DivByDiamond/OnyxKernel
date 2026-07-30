@@ -1,7 +1,7 @@
+use super::OnyfsStat;
 use super::alloc::{add_dirent, remove_dirent};
 use super::journal::journal_commit;
 use super::lookup::lookup;
-use super::OnyfsStat;
 use onyx_core::errno::{Errno, KResult};
 use onyx_core::formats::ONYFS_ROOT_INO;
 

@@ -1,6 +1,6 @@
 pub(crate) mod ctl;
 
-use super::{MAX_NAME_LEN, MAX_PATH_LEN, NUM_SERVICES, SERVICES, WNOHANG};
+use super::{MAX_NAME_LEN, MAX_PATH_LEN, MAX_SERVICES, NUM_SERVICES, SERVICES, WNOHANG};
 use crate::syscalls;
 use crate::util::{cstr_len, is_dot_or_dotdot, write_dec};
 

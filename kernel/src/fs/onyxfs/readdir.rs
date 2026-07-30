@@ -2,9 +2,9 @@
 //! (the VFS layer maintains the cursor). Uses `parse_dirent` from `lookup.rs`.
 use super::inode::read_inode;
 use super::lookup::parse_dirent;
-use super::{dirents_per_block, read_block, G_BUF};
+use super::{G_BUF, dirents_per_block, read_block};
 use onyx_core::errno::{Errno, KResult};
-use onyx_core::formats::{OnyfsInode, ONYFS_DIRECT_BLKS, ONYFS_DT_DIR, ONYFS_NAME_MAX};
+use onyx_core::formats::{ONYFS_DIRECT_BLKS, ONYFS_DT_DIR, ONYFS_NAME_MAX, OnyfsInode};
 
 /// Read a directory entry by index. Returns (inode, name_len, is_dir).
 /// Used by SYS_readdir and getdents64.

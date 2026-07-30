@@ -2,8 +2,7 @@ use crate::mm::pmm;
 use onyx_core::errno::{Errno, KResult};
 
 use super::{
-    ohci_alloc_ed, ohci_alloc_td, ohci_ed_phys, ohci_ed_ptr, ohci_rd, ohci_td_phys, ohci_td_ptr,
-    ohci_wr, ED_FA_SHIFT, ED_MPS_SHIFT, ED_SPEED_FULL, ED_SPEED_LOW, ED_TERMINATE, G_OHCI_BASE,
+    ED_FA_SHIFT, ED_MPS_SHIFT, ED_SPEED_FULL, ED_SPEED_LOW, ED_TERMINATE, G_OHCI_BASE,
     G_OHCI_HCCA_PA, G_OHCI_HCCA_READY, G_OHCI_N_PORTS, OHCI_CMD_CLF, OHCI_CMD_HCR, OHCI_CTRL_BLE,
     OHCI_CTRL_CLE, OHCI_CTRL_HCFS_MASK, OHCI_CTRL_HCFS_OPER, OHCI_CTRL_RWE,
     OHCI_HC_BULK_CURRENT_ED, OHCI_HC_BULK_HEAD_ED, OHCI_HC_COMMAND_STATUS, OHCI_HC_CONTROL,
@@ -11,10 +10,11 @@ use super::{
     OHCI_HC_INTERRUPT_STATUS, OHCI_HC_LS_THRESHOLD, OHCI_HC_PERIODIC_START, OHCI_HC_RH_DESC_A,
     OHCI_HC_RH_PORT_STATUS, OHCI_HC_RH_STATUS, RH_PS_CSC, RH_PS_PES, RH_PS_PPS, RH_PS_PRS,
     RH_PS_PRSC, TD_CC_MASK, TD_CC_NOT_ACCESSED, TD_DI_NO_INTR, TD_DP_IN, TD_DP_OUT, TD_R_3,
-    TD_TERMINATE, TD_T_DATA0,
+    TD_T_DATA0, TD_TERMINATE, ohci_alloc_ed, ohci_alloc_td, ohci_ed_phys, ohci_ed_ptr, ohci_rd,
+    ohci_td_phys, ohci_td_ptr, ohci_wr,
 };
 
-pub(super) unsafe fn ohci_bulk_transfer(
+pub unsafe fn ohci_bulk_transfer(
     dev_addr: u8,
     mut data: Option<&mut [u8]>,
     data_in: bool,
@@ -98,7 +98,7 @@ pub(super) unsafe fn ohci_bulk_transfer(
     }
 }
 
-pub(super) unsafe fn init_ohci(base: usize) -> KResult<()> {
+pub unsafe fn init_ohci(base: usize) -> KResult<()> {
     if !super::probe_ohci(base) {
         return Err(Errno::NoEnt);
     }

@@ -1,7 +1,7 @@
 use core::ptr;
 use onyx_core::errno::{Errno, KResult};
 
-use super::super::{fat_entry, is_eoc, is_valid_cluster, read_cluster_sector, G_SPC};
+use super::super::{G_SPC, fat_entry, is_eoc, is_valid_cluster, read_cluster_sector};
 
 pub unsafe fn read(cluster: u32, buf: *mut u8, off: u32, len: u32) -> KResult<u32> {
     if len == 0 || cluster == 0 {

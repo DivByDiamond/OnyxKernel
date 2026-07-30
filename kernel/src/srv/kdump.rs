@@ -1,6 +1,6 @@
 use crate::arch::csr;
 use crate::arch::regs::*;
-use onyx_core::fmt::{vformat, Arg, Write};
+use onyx_core::fmt::{Arg, Write, vformat};
 
 const MAX_BT_DEPTH: usize = 64;
 

@@ -1,3 +1,4 @@
+pub mod ring;
 use crate::arch::mmio::Mmio;
 
 pub const CAPLENGTH: u32 = 0x00;

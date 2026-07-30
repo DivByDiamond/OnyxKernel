@@ -1,9 +1,9 @@
 use super::super::inode::{read_inode, stat};
-use super::super::{dirents_per_block, read_block, OnyfsStat, G_BUF};
+use super::super::{G_BUF, OnyfsStat, dirents_per_block, read_block};
 use super::parse_dirent;
 use onyx_core::errno::{Errno, KResult};
 use onyx_core::formats::{
-    OnyfsInode, ONYFS_DIRECT_BLKS, ONYFS_DT_DIR, ONYFS_NAME_MAX, ONYFS_ROOT_INO,
+    ONYFS_DIRECT_BLKS, ONYFS_DT_DIR, ONYFS_NAME_MAX, ONYFS_ROOT_INO, OnyfsInode,
 };
 
 pub unsafe fn lookup_in(dir_ino: u32, name: &[u8], out: &mut OnyfsStat) -> KResult<u32> {

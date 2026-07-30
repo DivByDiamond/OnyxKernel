@@ -12,10 +12,8 @@ pub use open::sys_open;
 pub use stat::*;
 
 use crate::fs::vfs;
+use crate::syscall::abi::{F_DUPFD, F_GETFD, F_GETFL, F_SETFD, F_SETFL, FD_CLOEXEC, O_RDONLY};
 use onyx_core::errno::Errno;
-use crate::syscall::abi::{
-    FD_CLOEXEC, F_DUPFD, F_GETFD, F_GETFL, F_SETFD, F_SETFL, O_RDONLY,
-};
 
 pub(in super::super) unsafe fn sys_close(token: u64) -> i64 {
     match vfs::close(token) {

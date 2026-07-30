@@ -1,4 +1,4 @@
-use super::{by_pid, hart_id, proc_list_lock, proc_list_unlock, ProcState, G_ALL_PROCS, MAX_HARTS};
+use super::{G_ALL_PROCS, MAX_HARTS, ProcState, by_pid, hart_id, proc_list_lock, proc_list_unlock};
 use crate::mm::{heap, vmm};
 use crate::proc::scheduler::{rq_lock, rq_unlock};
 use core::ptr;

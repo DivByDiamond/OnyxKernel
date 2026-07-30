@@ -1,6 +1,6 @@
 use alloc::vec;
 
-const DHCP_SERVER_PORT: u16 = 67;
+pub(super) const DHCP_SERVER_PORT: u16 = 67;
 pub(super) const DHCP_CLIENT_PORT: u16 = 68;
 
 const DHCP_OP_BOOTREQUEST: u8 = 1;
@@ -23,7 +23,7 @@ const DHCP_OPT_END: u8 = 255;
 
 const DHCP_HEADER_LEN: usize = 240;
 
-fn make_dhcp_msg(
+pub(super) fn make_dhcp_msg(
     msg_type: u8,
     xid: u32,
     mac: &[u8; 6],
@@ -75,7 +75,7 @@ fn make_dhcp_msg(
     pkt
 }
 
-fn parse_dhcp_reply(frame: &[u8]) -> Option<(u8, [u8; 4], [u8; 4], [u8; 4], [u8; 4])> {
+pub(super) fn parse_dhcp_reply(frame: &[u8]) -> Option<(u8, [u8; 4], [u8; 4], [u8; 4], [u8; 4])> {
     if frame.len() < DHCP_HEADER_LEN + 1 {
         return None;
     }

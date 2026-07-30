@@ -51,7 +51,7 @@ unsafe fn unmap_impl(root_pa: u64, vaddr: u64, size: usize) -> KResult<()> {
                 pmm::free(paddr);
             }
         }
-        ptr::write_volatile(pte_ptr, 0);
+        ptr::write_volatile(pte_ptr as *mut u64, 0);
         csr::sfence_vma(va, 0);
         va += 4096;
         remaining -= 4096;

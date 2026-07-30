@@ -2,10 +2,10 @@ use crate::mm::pmm;
 use core::ptr;
 use onyx_core::errno::{Errno, KResult};
 
+use super::G_XHCI;
+use super::XhciCtx;
 use super::regs;
 use super::ring;
-use super::XhciCtx;
-use super::G_XHCI;
 
 pub unsafe fn init(base: usize) -> KResult<()> {
     let cap_len = regs::read_caplength(base) as usize;

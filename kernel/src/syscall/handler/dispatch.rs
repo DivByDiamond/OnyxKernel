@@ -11,11 +11,11 @@ const USER_TOP: u64 = 0x4000_0000;
 #[cfg(target_pointer_width = "32")]
 const USER_TOP: u64 = 0x8000_0000;
 
-pub(super) fn user_ptr_ok(p: u64, len: u64) -> bool {
+pub fn user_ptr_ok(p: u64, len: u64) -> bool {
     p >= USER_BASE && p.checked_add(len).is_some_and(|end| end <= USER_TOP)
 }
 
-pub(super) unsafe fn parse_user_path(path: u64, out: &mut [u8; 256]) -> Option<usize> {
+pub unsafe fn parse_user_path(path: u64, out: &mut [u8; 256]) -> Option<usize> {
     if !user_ptr_ok(path, 256) {
         return None;
     }

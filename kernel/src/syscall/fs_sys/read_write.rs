@@ -2,6 +2,7 @@ use crate::arch::trap_frame::TrapFrame;
 use crate::drivers::uart;
 use crate::fs::vfs;
 use crate::proc;
+use crate::syscall::tty::ECHO_ENABLED;
 use onyx_core::errno::Errno;
 
 use super::super::handler::user_ptr_ok;
@@ -87,20 +88,26 @@ pub(in super::super) unsafe fn sys_read(tf: &mut TrapFrame, _fd: u64, buf: u64, 
                 Some(b) => {
                     if b == b'\r' || b == b'\n' {
                         *dst.add(n) = b'\n';
-                        uart::putc(b'\r');
-                        uart::putc(b'\n');
+                        if ECHO_ENABLED {
+                            uart::putc(b'\r');
+                            uart::putc(b'\n');
+                        }
                         n += 1;
                         break;
                     } else if b == 0x7F || b == 0x08 {
                         if n > 0 {
                             n -= 1;
-                            uart::putc(0x08);
-                            uart::putc(b' ');
-                            uart::putc(0x08);
+                            if ECHO_ENABLED {
+                                uart::putc(0x08);
+                                uart::putc(b' ');
+                                uart::putc(0x08);
+                            }
                         }
                     } else {
                         *dst.add(n) = b;
-                        uart::putc(b);
+                        if ECHO_ENABLED {
+                            uart::putc(b);
+                        }
                         n += 1;
                     }
                 }

@@ -1,5 +1,5 @@
 //! File creation — `create` (regular file) and `mkdir` (directory).
-use super::{alloc_fd, fd_token, resolve_mount, FdToken, Fs, PERM_READ, PERM_SEEK, PERM_WRITE};
+use super::{FdToken, Fs, PERM_READ, PERM_SEEK, PERM_WRITE, alloc_fd, fd_token, resolve_mount};
 use crate::fs::onyxfs;
 use crate::proc;
 use onyx_core::errno::{Errno, KResult};

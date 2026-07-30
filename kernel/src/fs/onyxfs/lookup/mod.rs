@@ -1,6 +1,6 @@
-use super::{dirents_per_block, read_block, G_BUF, G_VERSION, ONYFS_V1, ONYFS_V1_DIRENT_SIZE};
+use super::{G_BUF, G_VERSION, ONYFS_V1, ONYFS_V1_DIRENT_SIZE, dirents_per_block, read_block};
 use onyx_core::errno::{Errno, KResult};
-use onyx_core::formats::{OnyfsDirent, ONYFS_BLOCK_SIZE, ONYFS_NAME_MAX};
+use onyx_core::formats::{ONYFS_BLOCK_SIZE, ONYFS_NAME_MAX, OnyfsDirent};
 
 pub(super) unsafe fn parse_dirent(slot: usize) -> KResult<OnyfsDirent> {
     let buf_view: &[u8] = &(*(&raw const G_BUF));
@@ -33,8 +33,8 @@ pub(super) unsafe fn parse_dirent(slot: usize) -> KResult<OnyfsDirent> {
     }
 }
 
-mod resolve;
 mod follow;
+mod resolve;
 
-pub use resolve::*;
 pub use follow::*;
+pub use resolve::*;

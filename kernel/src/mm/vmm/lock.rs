@@ -14,7 +14,7 @@ use core::sync::atomic::{AtomicBool, Ordering};
 pub(super) static G_VMM_LOCK: AtomicBool = AtomicBool::new(false);
 
 #[inline]
-pub(super) unsafe fn vmm_lock() {
+pub unsafe fn vmm_lock() {
     while G_VMM_LOCK.swap(true, Ordering::Acquire) {
         while G_VMM_LOCK.load(Ordering::Relaxed) {
             spin_loop();
@@ -23,6 +23,6 @@ pub(super) unsafe fn vmm_lock() {
 }
 
 #[inline]
-pub(super) unsafe fn vmm_unlock() {
+pub unsafe fn vmm_unlock() {
     G_VMM_LOCK.store(false, Ordering::Release);
 }

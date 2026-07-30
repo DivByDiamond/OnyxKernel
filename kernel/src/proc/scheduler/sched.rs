@@ -1,8 +1,8 @@
-use super::runqueue::{dequeue, enqueue, rq_lock, rq_unlock, G_RQ};
+use super::runqueue::{G_RQ, dequeue, enqueue, rq_lock, rq_unlock};
 use crate::arch::trap_frame::TrapFrame;
 use crate::proc::process::{
-    current_for_hart, hart_id, set_current_for_hart, Proc, ProcState, G_HART_IDLE_TF,
-    G_NEED_RESCHED, KSTACK_SIZE, MAX_HARTS,
+    G_HART_IDLE_TF, G_NEED_RESCHED, KSTACK_SIZE, MAX_HARTS, Proc, ProcState, current_for_hart,
+    hart_id, set_current_for_hart,
 };
 use core::ptr;
 use core::sync::atomic::Ordering;
