@@ -47,7 +47,7 @@ ONYXCCDIR="$ROOT/../OnyxCompiller"
 if [ -f "$ONYXCCDIR/onyxcc.onx" ]; then
     cp "$ONYXCCDIR/onyxcc.onx" "$BUILD/onyxcc.onx"
 else
-    echo "onyxcc.onx not found — skipping"
+    echo "onyxcc.onx not found - skipping"
 fi
 
 # Generate PSF1 font
@@ -58,7 +58,7 @@ echo "==> Generating font"
 echo "1" > "$BUILD/lsblk.enabled" 2>/dev/null || true
 
 # Create manifest. Optional files (onyxcc, test.c) are added only if
-# they exist — otherwise mkimage would fail trying to read them.
+# they exist - otherwise mkimage would fail trying to read them.
 MANIFEST="$BUILD/manifest.txt"
 {
     echo "dir /bin"
