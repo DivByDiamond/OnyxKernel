@@ -1,10 +1,10 @@
 use crate::arch::trap_frame::TrapFrame;
 use core::sync::atomic::Ordering;
 
-use super::protected_mask;
 use super::SIG_KILL;
 use super::SIG_STOP;
-use super::{by_pid, current_for_hart, hart_id, Proc, ProcState, G_NEED_RESCHED, MAX_HARTS};
+use super::protected_mask;
+use super::{G_NEED_RESCHED, MAX_HARTS, Proc, ProcState, by_pid, current_for_hart, hart_id};
 use crate::proc::lifecycle::exit;
 use crate::proc::scheduler::{enqueue, rq_lock, rq_unlock};
 

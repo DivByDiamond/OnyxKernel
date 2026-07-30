@@ -1,4 +1,4 @@
-use super::shared::{uni_map_insert, PcfFont, G_FONT};
+use super::shared::{G_FONT, PcfFont, uni_map_insert};
 use onyx_core::errno::{Errno, KResult};
 
 const PSF2_HAS_UNICODE_TABLE: u32 = 1;

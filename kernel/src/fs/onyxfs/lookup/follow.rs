@@ -1,6 +1,6 @@
+use super::super::OnyfsStat;
 use super::super::inode::stat;
 use super::super::symlink::readlink;
-use super::super::OnyfsStat;
 use super::lookup_in;
 use onyx_core::errno::{Errno, KResult};
 use onyx_core::formats::{ONYFS_BLOCK_SIZE, ONYFS_DT_LNK, ONYFS_ROOT_INO};

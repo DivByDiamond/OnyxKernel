@@ -1,9 +1,9 @@
 use super::super::super::inode;
-use super::super::journal::journal_log;
-use super::super::{read_block, write_block, G_BUF};
+use super::super::super::journal::journal_log;
+use super::super::super::{G_BUF, read_block, write_block};
 use super::free_data_block;
 use onyx_core::errno::{Errno, KResult};
-use onyx_core::formats::{OnyfsInode, ONYFS_BLOCK_SIZE, ONYFS_DIRECT_BLKS};
+use onyx_core::formats::{ONYFS_BLOCK_SIZE, ONYFS_DIRECT_BLKS, OnyfsInode};
 
 pub unsafe fn alloc_inode() -> KResult<u32> {
     const INODE_BITMAP_BLK: u32 = 1;

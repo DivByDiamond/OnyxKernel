@@ -5,24 +5,20 @@ use crate::proc;
 use onyx_core::errno::Errno;
 
 /// Page-align `n` upward to a 4 KiB boundary.
-const fn page_align_up(n: u64) -> u64 {
+pub fn page_align_up(n: u64) -> u64 {
     (n + 0xFFF) & !0xFFF
 }
-pub(super) use page_align_up;
-
 /// User-VA range check (Bug #27, #28 fix). Returns true iff
 /// [addr, addr+size) lies entirely inside [USER_BASE, USER_TOP) with no
 /// arithmetic overflow. Used by sys_mmap / sys_munmap / sys_mprotect to
 /// prevent a user process from mapping, unmapping, or re-protecting
 /// kernel pages.
-const fn user_range_ok(addr: u64, size: u64) -> bool {
+pub fn user_range_ok(addr: u64, size: u64) -> bool {
     match addr.checked_add(size) {
         Some(end) => addr >= regs::USER_BASE && end <= regs::USER_TOP,
         None => false,
     }
 }
-pub(super) use user_range_ok;
-
 /// Ensure that all pages in `[heap_brk, new_brk)` are mapped in the current
 /// process's root page table. Used by `brk`/`sbrk` to grow the heap on demand
 /// instead of pre-allocating the entire heap region at load time.

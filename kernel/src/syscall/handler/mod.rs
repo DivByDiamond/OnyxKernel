@@ -10,4 +10,4 @@ mod acl;
 mod dispatch;
 
 pub use dispatch::handle;
-pub(super) use dispatch::{parse_user_path, user_ptr_ok};
+pub use dispatch::{parse_user_path, user_ptr_ok};

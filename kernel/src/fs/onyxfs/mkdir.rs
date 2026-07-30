@@ -3,11 +3,11 @@
 use super::alloc::{add_dirent, alloc_data_block, alloc_inode};
 use super::inode::write_inode;
 use super::journal::{journal_commit, journal_log};
-use super::{write_block, G_BUF, G_VERSION, ONYFS_V1};
+use super::{G_BUF, G_VERSION, ONYFS_V1, write_block};
 use crate::srv::timer;
 use onyx_core::errno::{Errno, KResult};
 use onyx_core::formats::{
-    OnyfsDirent, OnyfsInode, ONYFS_BLOCK_SIZE, ONYFS_DIRECT_BLKS, ONYFS_DT_DIR, ONYFS_NAME_MAX,
+    ONYFS_BLOCK_SIZE, ONYFS_DIRECT_BLKS, ONYFS_DT_DIR, ONYFS_NAME_MAX, OnyfsDirent, OnyfsInode,
 };
 
 /// Create a new directory. Returns the new inode number. Like `create()` but

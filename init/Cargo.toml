@@ -10,7 +10,7 @@ path = "src/main.rs"
 
 [[bin]]
 name = "onyx-login"
-path = "src/login.rs"
+path = "src/login/mod.rs"
 
 [[bin]]
 name = "onyx-passwd"

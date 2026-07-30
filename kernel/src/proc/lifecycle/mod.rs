@@ -1,7 +1,7 @@
 use super::process::Proc;
 use super::process::{
-    by_pid, hart_id, proc_list_lock, proc_list_unlock, set_current_for_hart, ProcState,
-    G_ALL_PROCS, PROC_RING_KERNEL,
+    G_ALL_PROCS, MAX_HARTS, PROC_RING_KERNEL, ProcState, by_pid, hart_id, proc_list_lock,
+    proc_list_unlock, set_current_for_hart,
 };
 use crate::arch::trap_frame::TrapFrame;
 use crate::mm::{heap, vmm};

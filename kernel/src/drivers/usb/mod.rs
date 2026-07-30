@@ -25,7 +25,9 @@ pub unsafe fn control_transfer(
     max_pkt: u32,
 ) -> KResult<u32> {
     match G_ACTIVE {
-        ControllerType::Ehci => ehci::ehci_control_transfer(dev_addr, setup_pkt, data, data_in, max_pkt),
+        ControllerType::Ehci => {
+            ehci::ehci_control_transfer(dev_addr, setup_pkt, data, data_in, max_pkt)
+        }
         ControllerType::Ohci => {
             ohci::ohci_control_transfer(dev_addr, setup_pkt, data, data_in, max_pkt, 0)
         }

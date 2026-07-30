@@ -1,6 +1,6 @@
 use super::{
-    alloc_fd, fd_check, fd_clear, fd_get, fd_set, fd_token, fd_update_pos, FdToken, Fs, G_ROOT_FS,
-    PERM_READ, PERM_SEEK, PERM_WRITE, VFS_MAX_FDS,
+    FdToken, Fs, G_ROOT_FS, PERM_READ, PERM_SEEK, PERM_WRITE, VFS_MAX_FDS, alloc_fd, fd_check,
+    fd_clear, fd_get, fd_set, fd_token, fd_update_pos,
 };
 use crate::fs::{devfs, fat32, ipcfs, onyxfs, procfs};
 use onyx_core::errno::{Errno, KResult};
@@ -61,6 +61,30 @@ pub unsafe fn open(path: &[u8], perms: u32) -> KResult<FdToken> {
                     if let Err(e) = onyxfs::lookup(name, &mut st) {
                         let _ = fd_clear(idx);
                         return Err(e);
+                    }
+                    if !super::is_kernel_boot() {
+                        let cur = crate::proc::current();
+                        let is_root = cur.uid == 0
+                            || crate::proc::current_ring() <= crate::proc::PROC_RING_ROOT;
+                        if !is_root {
+                            let owner_ok = cur.uid == st.uid;
+                            let group_ok = cur.gid == st.gid;
+                            let perm_bits = if owner_ok {
+                                st.mode & 0o700
+                            } else if group_ok {
+                                (st.mode >> 3) & 0o700
+                            } else {
+                                st.mode & 0o007
+                            };
+                            if (perms & PERM_READ) != 0 && (perm_bits & 0o400) == 0 {
+                                let _ = fd_clear(idx);
+                                return Err(Errno::Perm);
+                            }
+                            if (perms & PERM_WRITE) != 0 && (perm_bits & 0o200) == 0 {
+                                let _ = fd_clear(idx);
+                                return Err(Errno::Perm);
+                            }
+                        }
                     }
                     (st.ino, st.size.min(u32::MAX as u64) as u32)
                 }

@@ -1,9 +1,10 @@
+mod read;
 use core::ptr;
 use onyx_core::errno::{Errno, KResult};
 
 use super::{
-    fat32_name_8_3, fat_entry, is_eoc, is_valid_cluster, read_cluster_sector, scan_dir_entries,
     ATTR_DIRECTORY, ATTR_LFN, DIR_ENTRY_SIZE, ENTRIES_PER_SECTOR, FAT32_EOC, G_ROOT_CLUSTER, G_SPC,
+    fat_entry, fat32_name_8_3, is_eoc, is_valid_cluster, read_cluster_sector, scan_dir_entries,
 };
 
 unsafe fn lookup_component(
@@ -70,6 +71,8 @@ pub unsafe fn lookup(path: &[u8], out_cluster: &mut u32, out_size: &mut u32) -> 
     *out_size = 0;
     Ok(())
 }
+
+pub use read::*;
 
 pub unsafe fn readdir_entry(
     dir_cluster: u32,

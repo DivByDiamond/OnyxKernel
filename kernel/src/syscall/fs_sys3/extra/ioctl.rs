@@ -7,6 +7,20 @@ use crate::mm::vmm;
 use crate::proc;
 use crate::syscall::abi::{TCGETS, TCSETS};
 use crate::syscall::handler::user_ptr_ok;
+use crate::syscall::tty::{ECHO_ENABLED, ICANON_ENABLED};
+
+const ECHO: u32 = 0o0000010;
+const ICANON: u32 = 0o0000002;
+const B9600: u32 = 0o0000015;
+
+const C_IFLAG: usize = 0;
+const C_OFLAG: usize = 4;
+const C_CFLAG: usize = 8;
+const C_LFLAG: usize = 12;
+const C_CC: usize = 16;
+const C_CC_VMIN: usize = 6;
+const C_CC_VTIME: usize = 5;
+const TERMIOS_SIZE: usize = 60;
 
 pub unsafe fn sys_ioctl(fd: u64, request: u64, arg: u64) -> i64 {
     let token = fd;
@@ -25,18 +39,45 @@ pub unsafe fn sys_ioctl(fd: u64, request: u64, arg: u64) -> i64 {
             if arg == 0 {
                 return 0;
             }
-            if !user_ptr_ok(arg, 60) {
+            if !user_ptr_ok(arg, TERMIOS_SIZE as u64) {
                 return Errno::Inval.as_i64();
             }
             let pa = crate::mm::vmm::translate(proc::current().root_pa, arg);
             if pa == 0 {
                 return Errno::Inval.as_i64();
             }
-            core::ptr::write_bytes(pa as *mut u8, 0, 60);
+            let buf = pa as *mut u8;
+            ptr::write_bytes(buf, 0, TERMIOS_SIZE);
+
+            let mut lflag = 0u32;
+            if ECHO_ENABLED {
+                lflag |= ECHO;
+            }
+            if ICANON_ENABLED {
+                lflag |= ICANON;
+            }
+
+            ptr::write(buf.add(C_CFLAG) as *mut u32, B9600);
+            ptr::write(buf.add(C_LFLAG) as *mut u32, lflag);
+            ptr::write(buf.add(C_CC + C_CC_VMIN), 1u8);
+            ptr::write(buf.add(C_CC + C_CC_VTIME), 0u8);
             0
         }
         TCSETS => {
-            let _ = (fd, arg);
+            if arg == 0 {
+                return 0;
+            }
+            if !user_ptr_ok(arg, TERMIOS_SIZE as u64) {
+                return Errno::Inval.as_i64();
+            }
+            let pa = crate::mm::vmm::translate(proc::current().root_pa, arg);
+            if pa == 0 {
+                return Errno::Inval.as_i64();
+            }
+            let buf = pa as *const u8;
+            let lflag = ptr::read(buf.add(C_LFLAG) as *const u32);
+            ECHO_ENABLED = (lflag & ECHO) != 0;
+            ICANON_ENABLED = (lflag & ICANON) != 0;
             0
         }
         0x5421 => {

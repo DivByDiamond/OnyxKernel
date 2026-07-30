@@ -4,12 +4,7 @@ use crate::mm::pmm;
 use core::ptr;
 use onyx_core::errno::{Errno, KResult};
 
-pub(super) unsafe fn walk(
-    root_pa: u64,
-    vaddr: u64,
-    leaf_level: u32,
-    create: bool,
-) -> KResult<*mut u64> {
+pub unsafe fn walk(root_pa: u64, vaddr: u64, leaf_level: u32, create: bool) -> KResult<*mut u64> {
     if leaf_level > 1 {
         return Err(Errno::Inval);
     }

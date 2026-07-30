@@ -1,11 +1,11 @@
 //! Mount, persist_superblock, and inode_table_block_count — top-level
 //! filesystem lifecycle entry points invoked once at boot.
 use super::{
-    inodes_per_block, read_block, write_block, G_BUF, G_DEV, G_LBA_BASE, G_SB, G_VERSION, ONYFS_V1,
-    ONYFS_V2,
+    G_BUF, G_DEV, G_LBA_BASE, G_SB, G_VERSION, ONYFS_V1, ONYFS_V2, inodes_per_block, read_block,
+    write_block,
 };
 use onyx_core::errno::{Errno, KResult};
-use onyx_core::formats::{OnyfsSuper, ONYFS_BLOCK_SIZE};
+use onyx_core::formats::{ONYFS_BLOCK_SIZE, OnyfsSuper};
 
 pub unsafe fn mount(dev: usize, lba_offset: u32) -> KResult<()> {
     *(&raw mut G_DEV) = dev;
@@ -54,9 +54,5 @@ pub(super) unsafe fn persist_superblock() -> KResult<()> {
 pub(super) unsafe fn inode_table_block_count() -> u32 {
     let ipb = inodes_per_block() as u32;
     let cnt = (*(&raw const G_SB)).inode_count;
-    if cnt == 0 {
-        1
-    } else {
-        (cnt + ipb - 1) / ipb
-    }
+    if cnt == 0 { 1 } else { (cnt + ipb - 1) / ipb }
 }

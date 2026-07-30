@@ -13,12 +13,12 @@
 //! in the worst-case RLE expansion).
 use super::compress::rle_compress;
 use super::{
-    inode_table_block_count, inodes_per_block, persist_superblock, read_block, write_block, G_BUF,
-    G_SB, SNAPSHOT_BLOCKS_EACH,
+    G_BUF, G_SB, SNAPSHOT_BLOCKS_EACH, inode_table_block_count, inodes_per_block,
+    persist_superblock, read_block, write_block,
 };
 use crate::srv::timer;
 use onyx_core::errno::{Errno, KResult};
-use onyx_core::formats::{OnyfsInode, SnapshotMeta, ONYFS_BLOCK_SIZE, ONYFS_FEAT_SNAPSHOTS};
+use onyx_core::formats::{ONYFS_BLOCK_SIZE, ONYFS_FEAT_SNAPSHOTS, OnyfsInode, SnapshotMeta};
 
 pub(super) const SNAPSHOT_SLOTS: u32 = 31;
 pub(super) const SNAPSHOT_SLOT_BLKS: u32 = 2;

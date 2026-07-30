@@ -1,5 +1,5 @@
-use crate::net::ip;
 use crate::net::G_IP;
+use crate::net::ip;
 use onyx_core::errno::KResult;
 
 pub(super) const MAX_CONNS: usize = 8;

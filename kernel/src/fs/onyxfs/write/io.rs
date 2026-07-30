@@ -1,11 +1,11 @@
 use super::super::alloc::alloc_data_block;
 use super::super::inode::{read_inode, write_inode};
 use super::super::journal::{journal_commit, journal_log};
-use super::super::{read_block, write_block, G_BUF};
+use super::super::{G_BUF, read_block, write_block};
 use super::check_v2;
 use crate::srv::timer;
 use onyx_core::errno::KResult;
-use onyx_core::formats::{OnyfsInode, ONYFS_BLOCK_SIZE, ONYFS_DIRECT_BLKS};
+use onyx_core::formats::{ONYFS_BLOCK_SIZE, ONYFS_DIRECT_BLKS, OnyfsInode};
 
 pub unsafe fn write(ino: u32, buf: *const u8, off: u32, len: u32) -> KResult<u32> {
     check_v2()?;

@@ -65,7 +65,7 @@ unsafe fn do_user_passwd() {
     syscalls::write(1, b"Current password: ".as_ptr(), 18);
     read_password(&mut old_pass);
 
-    if !auth::verify_shadow_password(me, old_pass) {
+    if !auth::verify_shadow_password(me, &old_pass) {
         syscalls::write(1, b"passwd: Authentication failure\n".as_ptr(), 33);
         syscalls::exit(1);
     }

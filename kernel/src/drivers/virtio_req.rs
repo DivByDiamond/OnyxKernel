@@ -1,7 +1,7 @@
 //! virtio-blk request submission + polled I/O.
 use crate::drivers::virtio::*;
 use core::ptr;
-use core::sync::atomic::{fence, Ordering};
+use core::sync::atomic::{Ordering, fence};
 use onyx_core::errno::{Errno, KResult};
 
 unsafe fn submit_and_wait(dev_idx: usize, req_type: u32, sector: u64) -> KResult<()> {

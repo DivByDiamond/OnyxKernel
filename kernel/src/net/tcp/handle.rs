@@ -1,7 +1,7 @@
 use crate::net::poll;
 use onyx_core::errno::{Errno, KResult};
 
-use super::conn::{alloc_conn, next_port, send_tcp_seg, BUF_SIZE, CONNS, TCP_HLEN};
+use super::conn::{BUF_SIZE, CONNS, TCP_HLEN, alloc_conn, next_port, send_tcp_seg};
 
 pub unsafe fn tcp_connect(dst_ip: [u8; 4], port: u16) -> KResult<usize> {
     let cid = alloc_conn().ok_or(Errno::Busy)?;

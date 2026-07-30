@@ -1,11 +1,11 @@
 use super::super::alloc::{add_dirent, alloc_inode, free_data_block};
 use super::super::inode::{read_inode, write_inode};
 use super::super::journal::{journal_commit, journal_log};
-use super::super::{read_block, write_block, G_BUF};
+use super::super::{G_BUF, read_block, write_block};
 use super::check_v2;
 use crate::srv::timer;
 use onyx_core::errno::{Errno, KResult};
-use onyx_core::formats::{OnyfsInode, ONYFS_BLOCK_SIZE, ONYFS_DIRECT_BLKS, ONYFS_NAME_MAX};
+use onyx_core::formats::{ONYFS_BLOCK_SIZE, ONYFS_DIRECT_BLKS, ONYFS_NAME_MAX, OnyfsInode};
 
 pub unsafe fn create(dir_ino: u32, name: &[u8], mode: u32) -> KResult<u32> {
     check_v2()?;

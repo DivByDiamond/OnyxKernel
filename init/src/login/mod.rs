@@ -2,12 +2,13 @@
 #![no_main]
 #![allow(unsafe_op_in_unsafe_fn, non_snake_case, clippy::missing_safety_doc)]
 
+#[path = "../auth/mod.rs"]
 mod auth;
-mod backoff;
-mod seed;
+#[path = "../syscalls/mod.rs"]
 mod syscalls;
 
-use core::arch::asm;
+mod backoff;
+mod seed;
 
 const TIOCSRAW: u64 = 0x5421;
 const TIOCRRAW: u64 = 0x5422;
@@ -27,10 +28,18 @@ pub unsafe extern "C" fn _start() -> ! {
     let nusers = auth::read_passwd(&mut users).unwrap_or(0);
 
     if nusers == 0 {
-        syscalls::write(1, b"[login] no users found - auto-login as root\n".as_ptr(), 43);
+        syscalls::write(
+            1,
+            b"[login] no users found - auto-login as root\n".as_ptr(),
+            43,
+        );
         seed::seed_root_account();
         let shell = b"/bin/osh\0";
-        syscalls::write(1, b"[login] launching /bin/osh (root, ring 1)\n".as_ptr(), 41);
+        syscalls::write(
+            1,
+            b"[login] launching /bin/osh (root, ring 1)\n".as_ptr(),
+            41,
+        );
         syscalls::exec(shell.as_ptr(), core::ptr::null());
         syscalls::write(1, b"login: exec failed\n".as_ptr(), 19);
         syscalls::exit(1);
@@ -59,7 +68,11 @@ pub unsafe extern "C" fn _start() -> ! {
             continue;
         }
         let n = n as usize;
-        let n = if n > 0 && user_buf[n - 1] == b'\n' { n - 1 } else { n };
+        let n = if n > 0 && user_buf[n - 1] == b'\n' {
+            n - 1
+        } else {
+            n
+        };
         let username = &user_buf[..n];
 
         if username.is_empty() {
@@ -90,7 +103,11 @@ pub unsafe extern "C" fn _start() -> ! {
             continue;
         }
         let pn = pn as usize;
-        let pn = if pn > 0 && pass_buf[pn - 1] == b'\n' { pn - 1 } else { pn };
+        let pn = if pn > 0 && pass_buf[pn - 1] == b'\n' {
+            pn - 1
+        } else {
+            pn
+        };
         let password = &pass_buf[..pn];
 
         if !auth::verify_shadow_password(username, password) {
