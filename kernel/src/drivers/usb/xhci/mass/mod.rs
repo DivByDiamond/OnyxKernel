@@ -18,6 +18,7 @@ pub struct MassStorageDev {
 pub(crate) static mut G_MASS: [Option<MassStorageDev>; MAX_MASS] = [const { None }; MAX_MASS];
 pub(crate) static mut G_NMASS: usize = 0;
 
+#[allow(dead_code)]
 #[repr(C, packed)]
 pub(super) struct Cbw {
     sig: u32,
@@ -29,6 +30,7 @@ pub(super) struct Cbw {
     cdb: [u8; 16],
 }
 
+#[allow(dead_code)]
 #[repr(C, packed)]
 pub(super) struct Csw {
     sig: u32,
@@ -37,7 +39,9 @@ pub(super) struct Csw {
     status: u8,
 }
 
+#[allow(dead_code)]
 pub(super) const CBW_SIG: u32 = 0x43425355;
+#[allow(dead_code)]
 pub(super) const CBW_SIZE: u32 = 31;
 
 pub unsafe fn probe(slot_id: u8, config_data: &[u8]) -> KResult<u8> {

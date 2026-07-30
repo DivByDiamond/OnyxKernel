@@ -2,9 +2,9 @@ use crate::arch::mmio::Mmio;
 use onyx_core::errno::{Errno, KResult};
 
 use super::{
-    CMD_ASYNC_ENABLE, CMD_RESET, EHCI_CAP_HCSPARAMS, G_ASYNCLIST_ENABLED, G_N_PORTS, G_OP_BASE,
-    OP_ASYNCLISTADDR, OP_CONFIGFLAG, OP_USBCMD, OP_USBSTS, QH, QH_HRL, QH_INACTIVATE, QH_QH,
-    QH_TERMINATE, STS_ASYNC_ADVANCE, STS_HCHALTED, alloc_qh, op_rd, op_wr, qh_phys, qh_ptr,
+    alloc_qh, op_rd, op_wr, qh_phys, qh_ptr, CMD_ASYNC_ENABLE, CMD_RESET, EHCI_CAP_HCSPARAMS,
+    G_ASYNCLIST_ENABLED, G_N_PORTS, G_OP_BASE, OP_ASYNCLISTADDR, OP_CONFIGFLAG, OP_USBCMD,
+    OP_USBSTS, QH, QH_HRL, QH_INACTIVATE, QH_QH, QH_TERMINATE, STS_ASYNC_ADVANCE, STS_HCHALTED,
 };
 
 pub(super) unsafe fn init_async_list() -> KResult<()> {

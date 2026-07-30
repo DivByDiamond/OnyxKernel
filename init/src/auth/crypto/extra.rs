@@ -1,4 +1,4 @@
-#![expect(dead_code)]
+#![allow(dead_code, unused_imports)]
 
 use super::sha256::sha256;
 use crate::syscalls;
