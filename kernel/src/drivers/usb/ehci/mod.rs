@@ -4,16 +4,13 @@ pub(super) mod xfer;
 use crate::arch::mmio::Mmio;
 use onyx_core::errno::{Errno, KResult};
 
-pub(super) const EHCI_CAP_LENGTH: u32 = 0x00;
 pub(super) const EHCI_CAP_VERSION: u32 = 0x02;
 pub(super) const EHCI_CAP_HCSPARAMS: u32 = 0x04;
 pub(super) const OP_USBCMD: u32 = 0x00;
 pub(super) const OP_USBSTS: u32 = 0x04;
-pub(super) const OP_CTRLDSSEGMENT: u32 = 0x10;
 pub(super) const OP_ASYNCLISTADDR: u32 = 0x18;
 pub(super) const OP_CONFIGFLAG: u32 = 0x40;
 pub(super) const OP_PORTSC: u32 = 0x44;
-pub(super) const CMD_RUN: u32 = 1 << 0;
 pub(super) const CMD_RESET: u32 = 1 << 1;
 pub(super) const CMD_ASYNC_ENABLE: u32 = 1 << 5;
 pub(super) const STS_HCHALTED: u32 = 1 << 12;

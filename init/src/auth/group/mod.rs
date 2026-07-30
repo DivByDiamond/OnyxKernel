@@ -1,9 +1,9 @@
-#![expect(dead_code)]
+#![allow(dead_code, unused_imports)]
 
 pub mod file;
 pub mod group_core;
 
 pub(crate) use file::atomic_rewrite;
 pub use group_core::{
-    GroupEntry, find_group_by_gid, find_group_by_name, parse_group, read_groups, user_in_group,
+    find_group_by_gid, find_group_by_name, parse_group, read_groups, user_in_group, GroupEntry,
 };

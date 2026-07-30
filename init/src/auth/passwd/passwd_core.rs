@@ -1,4 +1,4 @@
-#![expect(dead_code)]
+#![allow(dead_code, unused_imports)]
 
 use crate::auth::crypto::{copy_slice, format_dec, parse_dec};
 

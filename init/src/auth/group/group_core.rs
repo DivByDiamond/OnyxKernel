@@ -1,7 +1,7 @@
-#![expect(dead_code)]
+#![allow(dead_code, unused_imports)]
 
-use crate::auth::GROUP_PATH;
 use crate::auth::crypto::{copy_slice, parse_dec};
+use crate::auth::GROUP_PATH;
 use crate::syscalls;
 
 #[derive(Clone, Copy)]

@@ -7,8 +7,11 @@ const DHCP_OP_BOOTREQUEST: u8 = 1;
 const DHCP_OP_BOOTREPLY: u8 = 2;
 
 const DHCP_MSG_DISCOVER: u8 = 1;
+#[allow(dead_code)]
 const DHCP_MSG_OFFER: u8 = 2;
+#[allow(dead_code)]
 const DHCP_MSG_REQUEST: u8 = 3;
+#[allow(dead_code)]
 const DHCP_MSG_ACK: u8 = 5;
 
 const DHCP_OPT_PAD: u8 = 0;

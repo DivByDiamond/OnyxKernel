@@ -1,6 +1,6 @@
 use super::exec::{
-    self, build_enabled_path, find_service_by_name, refresh_service, service_name,
-    try_spawn_service, write_state_file,
+    build_enabled_path, find_service_by_name, refresh_service, service_name, try_spawn_service,
+    write_state_file,
 };
 use super::{MAX_NAME_LEN, MAX_PATH_LEN, NUM_SERVICES, SERVICES};
 use crate::syscalls;

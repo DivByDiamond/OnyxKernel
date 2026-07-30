@@ -1,4 +1,4 @@
-#![expect(dead_code)]
+#![allow(dead_code, unused_imports)]
 
 pub mod shadow_core;
 pub mod shadow_io;

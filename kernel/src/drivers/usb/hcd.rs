@@ -147,6 +147,6 @@ impl UsbHcd for OhciHcd {
     }
 
     fn n_ports(&self) -> u8 {
-        unsafe { crate::drivers::usb::ohci::ohci_n_ports() }
+        crate::drivers::usb::ohci::ohci_n_ports()
     }
 }
