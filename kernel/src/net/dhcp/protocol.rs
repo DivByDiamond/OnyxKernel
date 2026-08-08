@@ -48,7 +48,9 @@ pub(super) fn make_dhcp_msg(
     pkt[16..20].copy_from_slice(&[0; 4]);
     pkt[20..24].copy_from_slice(&[0; 4]);
     pkt[24..28].copy_from_slice(&[0; 4]);
-    pkt[28..44].copy_from_slice(mac);
+    // chaddr (bytes 28..44) is 16 bytes; only the 6-byte MAC goes in the
+    // front, the rest stays zero-initialized.
+    pkt[28..34].copy_from_slice(mac);
     pkt[44..236].fill(0);
     pkt[236..240].copy_from_slice(&[0x63, 0x82, 0x53, 0x63]);
     let mut off = 240;

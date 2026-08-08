@@ -8,32 +8,44 @@ use onyx_core::fmt::Arg;
 
 pub(crate) unsafe fn probe_devices() -> usize {
     let mut ndevs = 0;
-    let mut virtio_devs = [fdt::FdtMmio {
-        base: 0,
-        irq: 0,
-        reg_shift: 0,
-    }; 8];
-    let nfound = fdt::find_virtio(&mut virtio_devs, 8);
-    for dev in virtio_devs.iter().take(nfound) {
-        let b = dev.base as usize;
-        if b != 0 && virtio::probe(b) && virtio::init(b).is_ok() {
-            ndevs += 1;
-        }
-    }
-    if nfound == 0 {
-        let bases = [
-            0x1000_1000usize,
-            0x1000_2000,
-            0x1000_3000,
-            0x1000_4000,
-            0x1000_5000,
-            0x1000_6000,
-            0x1000_7000,
-            0x1000_8000,
-        ];
-        for &b in &bases {
-            if virtio::probe(b) && virtio::init(b).is_ok() {
+    // On OC2R/sedna the device tree carries no virtio nodes and the
+    // hardcoded QEMU addresses don't exist — probing them would raise a
+    // load access fault (scause=5) on an unmapped physical region. Skip the
+    // whole virtio scan there; block devices are not discovered yet anyway.
+    let sedna = crate::libfdt::fdt::is_sedna();
+    crate::kinf!(
+        "probe",
+        "devices: is_sedna=%d",
+        Arg::from(if sedna { 1 } else { 0 })
+    );
+    if !sedna {
+        let mut virtio_devs = [fdt::FdtMmio {
+            base: 0,
+            irq: 0,
+            reg_shift: 0,
+        }; 8];
+        let nfound = fdt::find_virtio(&mut virtio_devs, 8);
+        for dev in virtio_devs.iter().take(nfound) {
+            let b = dev.base as usize;
+            if b != 0 && virtio::probe(b) && virtio::init(b).is_ok() {
                 ndevs += 1;
+            }
+        }
+        if nfound == 0 {
+            let bases = [
+                0x1000_1000usize,
+                0x1000_2000,
+                0x1000_3000,
+                0x1000_4000,
+                0x1000_5000,
+                0x1000_6000,
+                0x1000_7000,
+                0x1000_8000,
+            ];
+            for &b in &bases {
+                if virtio::probe(b) && virtio::init(b).is_ok() {
+                    ndevs += 1;
+                }
             }
         }
     }
@@ -68,7 +80,7 @@ pub(crate) unsafe fn probe_devices() -> usize {
 
 pub(crate) unsafe fn probe_peripherals() {
     if let Some(rtc_info) = periph::find_rtc() {
-        rtc::probe();
+        rtc::probe(rtc_info.base as usize);
         crate::kinf!(
             "rtc",
             "base=%p src=%s",
@@ -76,11 +88,15 @@ pub(crate) unsafe fn probe_peripherals() {
             Arg::from(hwrand::source_name())
         );
     }
-    unsafe {
-        if usb::init_usb().is_ok() {
-            crate::kinf!("usb", "host controller initialized");
-        } else {
-            crate::kwrn!("usb", "no host controller found");
+    // USB EHCI/OHCI only exist on QEMU; on OC2R/sedna these addresses are
+    // not mapped and probing them would raise a load access fault.
+    if !crate::libfdt::fdt::is_sedna() {
+        unsafe {
+            if usb::init_usb().is_ok() {
+                crate::kinf!("usb", "host controller initialized");
+            } else {
+                crate::kwrn!("usb", "no host controller found");
+            }
         }
     }
     if let Some(gpio_info) = periph::find_gpio() {
@@ -105,7 +121,13 @@ pub(crate) unsafe fn probe_peripherals() {
     // live at different addresses and the DTB has no virtio nodes, so this
     // scan would read garbage, false-positive on the virtio magic, and then
     // fault writing into a non-existent device's registers.
-    if !crate::libfdt::fdt::is_sedna() {
+    let sedna = crate::libfdt::fdt::is_sedna();
+    crate::kinf!(
+        "probe",
+        "peripherals: is_sedna=%d",
+        Arg::from(if sedna { 1 } else { 0 })
+    );
+    if !sedna {
         let extra_virtio_bases = [
             0x1000_1000usize,
             0x1000_2000,
