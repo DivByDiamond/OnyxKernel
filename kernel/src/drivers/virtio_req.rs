@@ -1,12 +1,15 @@
 //! virtio-blk request submission + polled I/O.
 use crate::drivers::virtio::*;
 use core::ptr;
-use core::sync::atomic::{Ordering, fence};
+use core::sync::atomic::{fence, Ordering};
 use onyx_core::errno::{Errno, KResult};
 
 unsafe fn submit_and_wait(dev_idx: usize, req_type: u32, sector: u64) -> KResult<()> {
     let pd = &raw mut G_DEVS;
     let dev = &mut (*pd)[dev_idx];
+    if dev.req_buf.is_null() || dev.base == 0 {
+        return Err(Errno::Io);
+    }
     (*dev.req_buf).req_type = req_type;
     (*dev.req_buf).reserved = 0;
     (*dev.req_buf).sector = sector;
@@ -60,23 +63,23 @@ unsafe fn submit_and_wait(dev_idx: usize, req_type: u32, sector: u64) -> KResult
 }
 
 pub unsafe fn read(dev_idx: usize, lba: u64, buf: *mut u8) -> KResult<()> {
-    submit_and_wait(dev_idx, VIRTIO_BLK_T_IN, lba)?;
     let pd = &raw const G_DEVS;
-    ptr::copy_nonoverlapping(
-        (*(*pd)[dev_idx].req_buf).data.as_ptr(),
-        buf,
-        VIRTIO_BLK_SECTOR,
-    );
+    let dev = &(*pd)[dev_idx];
+    if dev.req_buf.is_null() || dev.base == 0 {
+        return Err(Errno::Io);
+    }
+    submit_and_wait(dev_idx, VIRTIO_BLK_T_IN, lba)?;
+    ptr::copy_nonoverlapping((*dev.req_buf).data.as_ptr(), buf, VIRTIO_BLK_SECTOR);
     Ok(())
 }
 
 pub unsafe fn write(dev_idx: usize, lba: u64, buf: *const u8) -> KResult<()> {
     let pd = &raw const G_DEVS;
-    ptr::copy_nonoverlapping(
-        buf,
-        (*(*pd)[dev_idx].req_buf).data.as_mut_ptr(),
-        VIRTIO_BLK_SECTOR,
-    );
+    let dev = &(*pd)[dev_idx];
+    if dev.req_buf.is_null() || dev.base == 0 {
+        return Err(Errno::Io);
+    }
+    ptr::copy_nonoverlapping(buf, (*dev.req_buf).data.as_mut_ptr(), VIRTIO_BLK_SECTOR);
     submit_and_wait(dev_idx, VIRTIO_BLK_T_OUT, lba)
 }
 
