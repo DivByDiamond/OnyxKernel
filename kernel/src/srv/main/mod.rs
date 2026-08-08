@@ -19,18 +19,39 @@ pub unsafe fn kmain(hartid: usize, fdt_addr: usize) -> ! {
     early::early_init(fdt_addr);
     let ndevs = early::probe_devices();
     early::probe_peripherals();
-    crate::net::init(
-        [10, 0, 2, 15],     // IP address (QEMU user-net default)
-        [10, 0, 2, 2],      // Gateway
-        [255, 255, 255, 0], // Netmask
-    );
+    // Network config: try DHCP first (OC2R/sedna net), fall back to the
+    // QEMU user-net defaults. dhcp_discover returns (ip, mask, gateway, dns).
+    let (ip, gw, mask, dns);
+    if let Ok((d_ip, d_mask, d_gw, d_dns)) = crate::net::dhcp::dhcp_discover() {
+        ip = d_ip;
+        gw = d_gw;
+        mask = d_mask;
+        dns = d_dns;
+        crate::kinf!("net", "DHCP lease acquired");
+    } else {
+        ip = [10, 0, 2, 15];
+        gw = [10, 0, 2, 2];
+        mask = [255, 255, 255, 0];
+        dns = [10, 0, 2, 3];
+        crate::kwrn!("net", "DHCP failed, using QEMU user-net defaults");
+    }
+    crate::net::init(ip, gw, mask);
+    crate::net::G_DNS = dns;
     crate::kinf!(
         "net",
-        "IP=%d.%d.%d.%d MAC=%x:%x:%x:%x:%x:%x",
-        Arg::from(10),
-        Arg::from(0),
-        Arg::from(2),
-        Arg::from(15),
+        "IP=%d.%d.%d.%d gw=%d.%d.%d.%d mask=%d.%d.%d.%d MAC=%x:%x:%x:%x:%x:%x",
+        Arg::from(ip[0] as u32),
+        Arg::from(ip[1] as u32),
+        Arg::from(ip[2] as u32),
+        Arg::from(ip[3] as u32),
+        Arg::from(gw[0] as u32),
+        Arg::from(gw[1] as u32),
+        Arg::from(gw[2] as u32),
+        Arg::from(gw[3] as u32),
+        Arg::from(mask[0] as u32),
+        Arg::from(mask[1] as u32),
+        Arg::from(mask[2] as u32),
+        Arg::from(mask[3] as u32),
         Arg::from(crate::drivers::virtio_net::mac()[0] as u32),
         Arg::from(crate::drivers::virtio_net::mac()[1] as u32),
         Arg::from(crate::drivers::virtio_net::mac()[2] as u32),
