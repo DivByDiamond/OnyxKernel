@@ -1,9 +1,6 @@
 //! Format trait + vformat engine.
 
-#![allow(unused_imports)]
-
 use super::format_num::{write_dec, write_hex_or_dec};
-use crate::parser::{le32, le64};
 
 pub trait Write {
     fn write_str(&mut self, s: &str);

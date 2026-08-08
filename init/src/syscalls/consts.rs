@@ -1,3 +1,5 @@
+// TODO(dead-code): syscalls::consts — syscall numbers shared across onyx_init bins;
+// only a subset is referenced by any single binary.
 #![allow(dead_code)]
 
 pub const SYS_WRITE: u64 = 1;

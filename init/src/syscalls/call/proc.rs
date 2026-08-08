@@ -4,7 +4,10 @@ use core::arch::asm;
 #[inline]
 pub unsafe fn exit(code: u64) -> ! {
     asm!("ecall", in("a7") SYS_EXIT, in("a0") code);
-    loop {}
+    // intentional: busy-wait
+    loop {
+        core::hint::spin_loop();
+    }
 }
 #[inline]
 pub fn yield_cpu() {

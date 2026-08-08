@@ -1,3 +1,5 @@
+// TODO(dead-code): auth::passwd::passwd_core — shared auth/syscalls module, compiled per onyx_init bin;
+// items unused by one binary are used by others (dead_code/unused_imports fire per-bin).
 #![allow(dead_code, unused_imports)]
 
 use crate::auth::crypto::{copy_slice, format_dec, parse_dec};
