@@ -31,10 +31,13 @@ pub unsafe fn kmain(hartid: usize, fdt_addr: usize) -> ! {
     early::early_init(fdt_addr);
     let ndevs = early::probe_devices();
     early::probe_peripherals();
-    // Network config: try DHCP first (OC2R/sedna net), fall back to the
-    // QEMU user-net defaults. dhcp_discover returns (ip, mask, gateway, dns).
+    // Network config: try DHCP first, fall back to the QEMU user-net
+    // defaults. Skip DHCP entirely when no virtio-net device exists
+    // (OC2R/sedna has none and the poll would just time out).
     let (ip, gw, mask, dns);
-    if let Ok((d_ip, d_mask, d_gw, d_dns)) = crate::net::dhcp::dhcp_discover() {
+    if crate::drivers::virtio_net::present()
+        && let Ok((d_ip, d_mask, d_gw, d_dns)) = crate::net::dhcp::dhcp_discover()
+    {
         ip = d_ip;
         gw = d_gw;
         mask = d_mask;
@@ -45,7 +48,7 @@ pub unsafe fn kmain(hartid: usize, fdt_addr: usize) -> ! {
         gw = [10, 0, 2, 2];
         mask = [255, 255, 255, 0];
         dns = [10, 0, 2, 3];
-        crate::kwrn!("net", "DHCP failed, using QEMU user-net defaults");
+        crate::kwrn!("net", "no net device or DHCP failed, using QEMU user-net defaults");
     }
     crate::net::init(ip, gw, mask);
     crate::net::G_DNS = dns;

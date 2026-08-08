@@ -4,11 +4,11 @@
 //! probe / init sequence. Frame I/O lives in `xfer.rs`.
 use crate::arch::mmio::Mmio;
 use crate::drivers::virtio::{
-    R_DEVICE_ID, R_GUEST_FEATURES, R_HOST_FEATURES, R_MAGIC_VALUE, R_QUEUE_AVAIL_HIGH,
-    R_QUEUE_AVAIL_LOW, R_QUEUE_DESC_HIGH, R_QUEUE_DESC_LOW, R_QUEUE_ENABLE, R_QUEUE_NUM,
-    R_QUEUE_SEL, R_QUEUE_USED_HIGH, R_QUEUE_USED_LOW, R_STATUS, R_VERSION, VIRTIO_S_ACK,
-    VIRTIO_S_DRIVER, VIRTIO_S_DRIVER_OK, VIRTIO_S_FEATURES_OK, VIRTQ_SIZE, VQ_DESC_F_WRITE,
-    VqAvail, VqDesc, VqUsed, reg_r, reg_w,
+    reg_r, reg_w, VqAvail, VqDesc, VqUsed, R_DEVICE_ID, R_GUEST_FEATURES, R_HOST_FEATURES,
+    R_MAGIC_VALUE, R_QUEUE_AVAIL_HIGH, R_QUEUE_AVAIL_LOW, R_QUEUE_DESC_HIGH, R_QUEUE_DESC_LOW,
+    R_QUEUE_ENABLE, R_QUEUE_NUM, R_QUEUE_SEL, R_QUEUE_USED_HIGH, R_QUEUE_USED_LOW, R_STATUS,
+    R_VERSION, VIRTIO_S_ACK, VIRTIO_S_DRIVER, VIRTIO_S_DRIVER_OK, VIRTIO_S_FEATURES_OK, VIRTQ_SIZE,
+    VQ_DESC_F_WRITE,
 };
 use crate::mm::pmm;
 use core::ptr;
@@ -41,6 +41,11 @@ pub(crate) static mut G_NET: NetDev = NetDev {
     rx_bufs: [ptr::null_mut(); RX_DESCS],
     mac: [0; 6],
 };
+
+/// True once a virtio-net device has been initialized.
+pub fn present() -> bool {
+    unsafe { G_NET.base != 0 }
+}
 
 pub unsafe fn probe(base: usize) -> bool {
     if reg_r(base, R_MAGIC_VALUE) != 0x7472_6976 {

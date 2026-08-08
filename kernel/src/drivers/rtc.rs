@@ -42,9 +42,14 @@ unsafe fn wr32(base: usize, off: u32, v: u32) {
     Mmio::<u32>::at(base + off as usize).write(v);
 }
 
-/// Probe for a known RTC at one of the fixed bases. Picks the first that
-/// returns a non-zero time on a back-to-back read (sanity check).
-pub unsafe fn probe() -> bool {
+/// Probe for a known RTC. `fdt_base` is the base from the device tree (0 if
+/// none). When the FDT provides a base we probe ONLY that address — on
+/// OC2R/sedna the RTC lives at the FDT address and the hardcoded QEMU
+/// goldfish base (0x10100000) is not a real device there (load access fault).
+pub unsafe fn probe(fdt_base: usize) -> bool {
+    if fdt_base != 0 {
+        return probe_at(fdt_base, RtcKind::Goldfish);
+    }
     if probe_at(GOLDFISH_RTC_BASE, RtcKind::Goldfish) {
         return true;
     }
