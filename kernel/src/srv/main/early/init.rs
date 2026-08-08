@@ -29,8 +29,10 @@ pub(crate) unsafe fn early_init(fdt_addr: usize) {
         size: 0x1000_0000,
     });
     pmm::init(mem.base, mem.size);
+    uart::putc(b'P');
 
     let _ = vmm::init();
+    uart::putc(b'V');
     crate::kinf!(
         "vmm",
         "Sv39 on, kernel root @%p",
@@ -38,15 +40,20 @@ pub(crate) unsafe fn early_init(fdt_addr: usize) {
     );
 
     heap::init();
+    uart::putc(b'H');
     crate::kinf!("heap", "ready");
 
     crate::proc::scheduler::runqueue::init();
+    uart::putc(b'Q');
 
     trap::init();
+    uart::putc(b'T');
     timer::init();
+    uart::putc(b'M');
 
     if let Some(plic_base) = fdt::find_plic() {
         plic::init(plic_base);
+        uart::putc(b'L');
         plic::set_priority(PLIC_PRIO_UART, 7);
         plic::set_priority(PLIC_PRIO_VIRTIO, 5);
         plic::enable(PLIC_PRIO_UART, 0);
