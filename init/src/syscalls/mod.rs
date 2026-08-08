@@ -1,3 +1,5 @@
+// TODO(dead-code): syscalls::mod — shared auth/syscalls module, compiled per onyx_init bin;
+// items unused by one binary are used by others (dead_code/unused_imports fire per-bin).
 #![allow(dead_code, unused_imports)]
 pub mod call;
 pub mod consts;

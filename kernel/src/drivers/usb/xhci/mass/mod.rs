@@ -18,6 +18,7 @@ pub struct MassStorageDev {
 pub(crate) static mut G_MASS: [Option<MassStorageDev>; MAX_MASS] = [const { None }; MAX_MASS];
 pub(crate) static mut G_NMASS: usize = 0;
 
+// TODO(dead-code): Cbw — used by unwired mass/transfer.rs (future mass-storage path), keep.
 #[allow(dead_code)]
 #[repr(C, packed)]
 pub(super) struct Cbw {
@@ -30,6 +31,7 @@ pub(super) struct Cbw {
     cdb: [u8; 16],
 }
 
+// TODO(dead-code): Csw — used by unwired mass/transfer.rs (future mass-storage path), keep.
 #[allow(dead_code)]
 #[repr(C, packed)]
 pub(super) struct Csw {
@@ -39,8 +41,10 @@ pub(super) struct Csw {
     status: u8,
 }
 
+// TODO(dead-code): CBW_SIG — used by unwired mass/transfer.rs (future mass-storage path), keep.
 #[allow(dead_code)]
 pub(super) const CBW_SIG: u32 = 0x43425355;
+// TODO(dead-code): CBW_SIZE — used by unwired mass/transfer.rs (future mass-storage path), keep.
 #[allow(dead_code)]
 pub(super) const CBW_SIZE: u32 = 31;
 

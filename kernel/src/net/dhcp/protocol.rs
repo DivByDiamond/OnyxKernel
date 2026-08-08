@@ -7,10 +7,13 @@ const DHCP_OP_BOOTREQUEST: u8 = 1;
 const DHCP_OP_BOOTREPLY: u8 = 2;
 
 const DHCP_MSG_DISCOVER: u8 = 1;
+// TODO(dead-code): DHCP_MSG_OFFER — valid DHCP message type for parsing replies, keep.
 #[allow(dead_code)]
 const DHCP_MSG_OFFER: u8 = 2;
+// TODO(dead-code): DHCP_MSG_REQUEST — sent by discover.rs as literal 3, keep as protocol const.
 #[allow(dead_code)]
 const DHCP_MSG_REQUEST: u8 = 3;
+// TODO(dead-code): DHCP_MSG_ACK — valid DHCP message type for parsing replies, keep.
 #[allow(dead_code)]
 const DHCP_MSG_ACK: u8 = 5;
 

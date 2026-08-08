@@ -27,6 +27,7 @@ pub fn write_v1(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn write_v2(
     img: &mut [u8],
     total_blocks: u32,

@@ -36,8 +36,7 @@ pub unsafe extern "C" fn _start() -> ! {
     let ngroups = auth::read_groups(&mut groups).unwrap_or(0);
 
     let mut first = true;
-    for i in 0..ngroups {
-        let entry = &groups[i];
+    for entry in groups.iter().take(ngroups) {
         let mut show = false;
         if entry.gid == gid {
             show = true;

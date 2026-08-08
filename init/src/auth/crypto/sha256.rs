@@ -1,3 +1,5 @@
+// TODO(dead-code): auth::crypto::sha256 — shared auth/syscalls module, compiled per onyx_init bin;
+// items unused by one binary are used by others (dead_code/unused_imports fire per-bin).
 #![allow(dead_code, unused_imports)]
 
 const K: [u32; 64] = [

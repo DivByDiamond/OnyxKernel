@@ -1,3 +1,5 @@
+// TODO(dead-code): auth::shadow::shadow_core — shared auth/syscalls module, compiled per onyx_init bin;
+// items unused by one binary are used by others (dead_code/unused_imports fire per-bin).
 #![allow(dead_code, unused_imports)]
 
 use crate::auth::SHADOW_PATH;
@@ -122,22 +124,22 @@ pub(crate) fn format_shadow_entry(username: &[u8], password: &[u8]) -> ([u8; 128
         buf[pos] = b;
         pos += 1;
     }
-    for i in 0..16 {
+    for &b in salt_hex.iter().take(16) {
         if pos >= buf.len() {
             break;
         }
-        buf[pos] = salt_hex[i];
+        buf[pos] = b;
         pos += 1;
     }
     if pos < buf.len() {
         buf[pos] = b'$';
         pos += 1;
     }
-    for i in 0..64 {
+    for &b in hash_hex.iter() {
         if pos >= buf.len() {
             break;
         }
-        buf[pos] = hash_hex[i];
+        buf[pos] = b;
         pos += 1;
     }
     (buf, pos)

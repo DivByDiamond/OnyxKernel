@@ -181,7 +181,7 @@ fn main() {
     eprintln!(
         "mkimage: v{} {} -> {} ({} blocks, {} bytes, {} inodes)",
         if v1 { 1 } else { 2 },
-        &args[1],
+        args[1],
         output_path,
         total_blocks,
         img.len(),

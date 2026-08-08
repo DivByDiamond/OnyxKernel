@@ -13,8 +13,10 @@ const ECHO: u32 = 0o0000010;
 const ICANON: u32 = 0o0000002;
 const B9600: u32 = 0o0000015;
 
+// TODO(dead-code): C_IFLAG — termios layout offset, not handled yet, keep for layout doc.
 #[allow(dead_code)]
 const C_IFLAG: usize = 0;
+// TODO(dead-code): C_OFLAG — termios layout offset, not handled yet, keep for layout doc.
 #[allow(dead_code)]
 const C_OFLAG: usize = 4;
 const C_CFLAG: usize = 8;
