@@ -1,6 +1,6 @@
-use super::FdtMmio;
 use super::reader::{cstr_at, rd32, reg_base};
 use super::walk::walk;
+use super::FdtMmio;
 
 pub unsafe fn find_uart() -> Option<FdtMmio> {
     let mut result: Option<FdtMmio> = None;
@@ -39,9 +39,16 @@ pub unsafe fn find_uart() -> Option<FdtMmio> {
         }
         false
     });
-    result.or(Some(FdtMmio {
-        base: 0x1000_0000,
-        irq: 10,
-        reg_shift: 0,
-    }))
+    // QEMU-virt's device tree always carries an ns16550a node, so a missing
+    // node means we are on OC2R/sedna: it ships a minimal DT with no
+    // peripherals and the stock minux firmware hardcodes the console at
+    // 0x10000448 (after two GoldfishRTCs and the virtio-console).
+    if result.is_none() {
+        return Some(FdtMmio {
+            base: 0x1000_0448,
+            irq: 10,
+            reg_shift: 0,
+        });
+    }
+    result
 }

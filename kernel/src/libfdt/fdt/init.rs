@@ -34,7 +34,11 @@ unsafe fn init_from(dtb_pa: usize) -> bool {
     }
     let struct_off = rd32(hdr.add(4 * 2)) as usize;
     let strings_off = rd32(hdr.add(4 * 3)) as usize;
-    let struct_size = rd32(hdr.add(4 * 8)) as usize;
+    // size_dt_struct is at offset 4*9 (0x24); 4*8 (0x20) is size_dt_strings.
+    // Using the strings size as the struct bound truncated the FDT walk on
+    // boards where size_dt_struct > size_dt_strings (e.g. sedna/OC2R), so
+    // nodes past that offset (UART) were never found.
+    let struct_size = rd32(hdr.add(4 * 9)) as usize;
     *(&raw mut G_DTB) = dtb_pa;
     *(&raw mut G_STRUCT) = dtb_pa + struct_off;
     *(&raw mut G_STRINGS) = dtb_pa + strings_off;
