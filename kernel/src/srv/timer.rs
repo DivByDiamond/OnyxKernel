@@ -2,6 +2,7 @@
 use crate::arch::regs::*;
 use crate::arch::{csr, mmio::Mmio};
 use crate::proc;
+#[cfg(not(feature = "smode"))]
 static mut G_MTIME: usize = 0;
 #[cfg(not(feature = "smode"))]
 static mut G_MTIMECMP: usize = 0;
@@ -12,9 +13,9 @@ pub static mut G_JIFFIES: u64 = 0;
 
 pub unsafe fn init() {
     let clint = CLINT_BASE;
-    G_MTIME = (clint + 0xBFF8) as usize;
     #[cfg(not(feature = "smode"))]
     {
+        G_MTIME = (clint + 0xBFF8) as usize;
         G_MTIMECMP = (clint + 0x4000) as usize;
     }
     G_FREQ = CLINT_FREQ_QEMU;
@@ -30,6 +31,15 @@ pub unsafe fn init() {
     );
 }
 
+#[cfg(feature = "smode")]
+unsafe fn read_mtime() -> u64 {
+    // sedna uses an ACLINT timer (mtime at 0x02004FF8, not the legacy CLINT
+    // 0x0200BFF8), so the MMIO offset is wrong there. The `time` CSR (0xC01)
+    // always reflects the current timer value and is readable from S-mode.
+    crate::arch::csr::read_time()
+}
+
+#[cfg(not(feature = "smode"))]
 unsafe fn read_mtime() -> u64 {
     loop {
         let hi = Mmio::<u32>::at(G_MTIME + 4).read();
