@@ -1,5 +1,5 @@
-use super::FB_WIDTH;
 use super::put_pixel;
+use super::FB_WIDTH;
 use crate::font;
 
 pub fn draw_char(x: usize, y: usize, c: u8, fg: u32, bg: u32) {
