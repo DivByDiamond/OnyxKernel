@@ -40,6 +40,12 @@ pub fn fb_base_pa() -> usize {
 }
 
 pub unsafe fn init(paddr: usize) -> KResult<()> {
+    // Only accept pmm-managed RAM. On OC2R the ECAM PCI scan can report a
+    // bogus display BAR in device space (e.g. 0x10100000) that is not backed
+    // by a real device — clearing it page-faults the kernel.
+    if paddr < 0x8000_0000 {
+        return Err(onyx_core::errno::Errno::Inval);
+    }
     G_FB = Fb {
         base: paddr as *mut u8,
         width: FB_WIDTH,
