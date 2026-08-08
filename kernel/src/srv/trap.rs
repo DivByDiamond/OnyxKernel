@@ -74,7 +74,8 @@ pub unsafe fn handle(tf: &mut TrapFrame) {
                 if from_kernel || pid == 0 {
                     crate::kerr!(
                         "trap",
-                        "KERNEL page fault sepc=%p stval=%p sstatus=%p",
+                        "KERNEL page fault scause=%p sepc=%p stval=%p sstatus=%p",
+                        onyx_core::fmt::Arg::from(scause),
                         onyx_core::fmt::Arg::from(tf.sepc),
                         onyx_core::fmt::Arg::from(stval),
                         onyx_core::fmt::Arg::from(sstatus)

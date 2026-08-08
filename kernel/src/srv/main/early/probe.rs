@@ -101,55 +101,61 @@ pub(crate) unsafe fn probe_peripherals() {
         let _ = watchdog::arm(3000);
         crate::kinf!("wdt", "base=%p timeout=3000ms", Arg::from(wdt_info.base));
     }
-    let extra_virtio_bases = [
-        0x1000_1000usize,
-        0x1000_2000,
-        0x1000_3000,
-        0x1000_4000,
-        0x1000_5000,
-        0x1000_6000,
-        0x1000_7000,
-        0x1000_8000,
-    ];
-    for &b in &extra_virtio_bases {
-        if virtio_rng::probe(b) {
-            if virtio_rng::init(b).is_ok() {
-                crate::kinf!("virtio-rng", "init @ %p", Arg::from(b));
-                module::register("virtio-rng", ModuleType::Driver);
+    // Hardcoded QEMU-virt virtio-mmio addresses. On OC2R/sedna the devices
+    // live at different addresses and the DTB has no virtio nodes, so this
+    // scan would read garbage, false-positive on the virtio magic, and then
+    // fault writing into a non-existent device's registers.
+    if !crate::libfdt::fdt::is_sedna() {
+        let extra_virtio_bases = [
+            0x1000_1000usize,
+            0x1000_2000,
+            0x1000_3000,
+            0x1000_4000,
+            0x1000_5000,
+            0x1000_6000,
+            0x1000_7000,
+            0x1000_8000,
+        ];
+        for &b in &extra_virtio_bases {
+            if virtio_rng::probe(b) {
+                if virtio_rng::init(b).is_ok() {
+                    crate::kinf!("virtio-rng", "init @ %p", Arg::from(b));
+                    module::register("virtio-rng", ModuleType::Driver);
+                }
+                continue;
             }
-            continue;
-        }
-        if virtio_net::probe(b) {
-            if virtio_net::init(b).is_ok() {
-                let mac = virtio_net::mac();
-                crate::kinf!(
-                    "virtio-net",
-                    "init @ %p mac=%x:%x:%x:%x:%x:%x",
-                    Arg::from(b),
-                    Arg::from(mac[0] as u32),
-                    Arg::from(mac[1] as u32),
-                    Arg::from(mac[2] as u32),
-                    Arg::from(mac[3] as u32),
-                    Arg::from(mac[4] as u32),
-                    Arg::from(mac[5] as u32)
-                );
-                module::register("virtio-net", ModuleType::Driver);
+            if virtio_net::probe(b) {
+                if virtio_net::init(b).is_ok() {
+                    let mac = virtio_net::mac();
+                    crate::kinf!(
+                        "virtio-net",
+                        "init @ %p mac=%x:%x:%x:%x:%x:%x",
+                        Arg::from(b),
+                        Arg::from(mac[0] as u32),
+                        Arg::from(mac[1] as u32),
+                        Arg::from(mac[2] as u32),
+                        Arg::from(mac[3] as u32),
+                        Arg::from(mac[4] as u32),
+                        Arg::from(mac[5] as u32)
+                    );
+                    module::register("virtio-net", ModuleType::Driver);
+                }
+                continue;
             }
-            continue;
-        }
-        if virtio_console::probe(b) {
-            if virtio_console::init(b).is_ok() {
-                crate::kinf!("virtio-console", "init @ %p", Arg::from(b));
-                module::register("virtio-console", ModuleType::Driver);
+            if virtio_console::probe(b) {
+                if virtio_console::init(b).is_ok() {
+                    crate::kinf!("virtio-console", "init @ %p", Arg::from(b));
+                    module::register("virtio-console", ModuleType::Driver);
+                }
+                continue;
             }
-            continue;
-        }
-        if virtio_input::probe(b) {
-            if virtio_input::init(b).is_ok() {
-                crate::kinf!("virtio-input", "init @ %p", Arg::from(b));
-                module::register("virtio-input", ModuleType::Driver);
+            if virtio_input::probe(b) {
+                if virtio_input::init(b).is_ok() {
+                    crate::kinf!("virtio-input", "init @ %p", Arg::from(b));
+                    module::register("virtio-input", ModuleType::Driver);
+                }
+                continue;
             }
-            continue;
         }
     }
     crate::kinf!("hwrand", "source=%s", Arg::from(hwrand::source_name()));

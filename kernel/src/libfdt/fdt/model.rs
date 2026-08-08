@@ -49,29 +49,30 @@ pub unsafe fn model() -> &'static str {
     }
 }
 
-/// Detect the OC2R/sedna platform (root compatible "riscv-sedna").
+/// Detect the OC2R/sedna platform. The OpenSBI and board device trees carry
+/// the root compatible "riscv-sedna" — the string lives in the FDT strings
+/// block, so scan the DTB memory for it (robust against walk quirks).
+/// On this platform the peripheral nodes (UART/PLIC/CLINT/virtio) are NOT
+/// present in the device tree — the stock minux firmware uses hardcoded
+/// addresses, so we do too.
 pub unsafe fn is_sedna() -> bool {
-    let mut found = false;
-    walk(&mut |_name, props: &[(u32, &[u8])]| {
-        for (name_off, data) in props {
-            let name = cstr_at(*name_off);
-            if name == "compatible" {
-                let mut start = 0;
-                while start < data.len() {
-                    let end = data[start..]
-                        .iter()
-                        .position(|&b| b == 0)
-                        .unwrap_or(data.len() - start);
-                    let s = &data[start..start + end];
-                    if s == b"riscv-sedna" {
-                        found = true;
-                        return true;
-                    }
-                    start += end + 1;
-                }
+    let dtb = *(&raw const super::G_DTB);
+    if dtb == 0 {
+        return false;
+    }
+    let needle = b"riscv-sedna";
+    for i in 0..0x40000usize {
+        let p = (dtb + i) as *const u8;
+        let mut ok = true;
+        for (j, &nb) in needle.iter().enumerate() {
+            if *p.add(j) != nb {
+                ok = false;
+                break;
             }
         }
-        false
-    });
-    found
+        if ok {
+            return true;
+        }
+    }
+    false
 }
