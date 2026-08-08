@@ -2,10 +2,10 @@ pub(super) mod bulk;
 use onyx_core::errno::{Errno, KResult};
 
 use super::{
-    alloc_qh, alloc_qtd, op_rd, op_wr, qh_phys, qh_ptr, qtd_phys, qtd_ptr, G_ASYNCLIST_ENABLED,
-    MAX_QTD, OP_USBCMD, OP_USBSTS, QH, QH_DEV_ADDR_SHIFT, QH_DTC, QH_EPS_HIGH, QH_MPL_SHIFT,
-    QH_TERMINATE, QTD, QTD_ACTIVE, QTD_BUF_SIZE, QTD_CERR_3, QTD_ERROR, QTD_PID_IN, QTD_PID_OUT,
-    QTD_PID_SETUP, QTD_TOGGLE, QTD_TOTAL_LEN_SHIFT, STS_HCHALTED,
+    G_ASYNCLIST_ENABLED, MAX_QTD, OP_USBCMD, OP_USBSTS, QH, QH_DEV_ADDR_SHIFT, QH_DTC, QH_EPS_HIGH,
+    QH_MPL_SHIFT, QH_TERMINATE, QTD, QTD_ACTIVE, QTD_BUF_SIZE, QTD_CERR_3, QTD_ERROR, QTD_PID_IN,
+    QTD_PID_OUT, QTD_PID_SETUP, QTD_TOGGLE, QTD_TOTAL_LEN_SHIFT, STS_HCHALTED, alloc_qh, alloc_qtd,
+    op_rd, op_wr, qh_phys, qh_ptr, qtd_phys, qtd_ptr,
 };
 
 pub unsafe fn ehci_control_transfer(

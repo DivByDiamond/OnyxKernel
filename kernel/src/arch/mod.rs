@@ -5,6 +5,8 @@ pub mod bits;
 pub mod csr;
 pub mod mmio;
 pub mod regs;
+#[cfg(feature = "smode")]
+pub mod sbi;
 pub mod smp;
 pub mod trap_frame;
 

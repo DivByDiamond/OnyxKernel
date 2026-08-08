@@ -4,10 +4,12 @@
 //! - trap_entry does NOT switch satp (keeps user satp + SUM bit)
 //! - drop_to_user does NOT zero gp/tp
 //! - sscratch initialized to __stack_top in trap::init
-#[cfg(all(not(test), target_pointer_width = "64"))]
+#[cfg(all(not(test), target_pointer_width = "64", not(feature = "smode")))]
 pub mod boot;
-#[cfg(all(not(test), target_pointer_width = "32"))]
+#[cfg(all(not(test), target_pointer_width = "32", not(feature = "smode")))]
 pub mod boot_32;
+#[cfg(all(not(test), target_pointer_width = "64", feature = "smode"))]
+pub mod boot_smode;
 #[cfg(all(not(test), target_pointer_width = "64"))]
 pub mod trap_asm;
 #[cfg(all(not(test), target_pointer_width = "32"))]

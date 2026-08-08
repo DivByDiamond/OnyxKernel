@@ -1,8 +1,8 @@
 #![allow(dead_code, unused_imports)]
 
-use super::passwd_core::{format_passwd_entry, parse_passwd, PasswdEntry};
-use crate::auth::group::atomic_rewrite;
+use super::passwd_core::{PasswdEntry, format_passwd_entry, parse_passwd};
 use crate::auth::PASSWD_PATH;
+use crate::auth::group::atomic_rewrite;
 use crate::syscalls;
 
 pub fn read_passwd(users: &mut [PasswdEntry; crate::auth::MAX_USERS]) -> Result<usize, i64> {

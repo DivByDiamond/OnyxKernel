@@ -101,6 +101,7 @@ pub unsafe extern "Rust" fn secondary_entry() -> ! {
     } else {
         0
     };
+    #[cfg(not(feature = "smode"))]
     core::arch::asm!(
         "mv sp, {0}",
         "csrw mepc, {1}",
@@ -113,6 +114,22 @@ pub unsafe extern "Rust" fn secondary_entry() -> ! {
         "csrw satp, {2}",
         "sfence.vma zero, zero",
         "mret",
+        in(reg) sp,
+        in(reg) entry,
+        in(reg) satp,
+        options(noreturn),
+    );
+    #[cfg(feature = "smode")]
+    core::arch::asm!(
+        "mv sp, {0}",
+        "csrw sepc, {1}",
+        "li t0, 1 << 8",     // sstatus.SPP = 1
+        "csrs sstatus, t0",
+        "li t0, 1 << 5",     // sstatus.SPIE = 1
+        "csrs sstatus, t0",
+        "csrw satp, {2}",
+        "sfence.vma zero, zero",
+        "sret",
         in(reg) sp,
         in(reg) entry,
         in(reg) satp,
