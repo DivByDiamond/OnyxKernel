@@ -8,14 +8,21 @@ use crate::srv::{timer, trap};
 use onyx_core::fmt::Arg;
 
 pub(crate) unsafe fn early_init(fdt_addr: usize) {
-    uart::init_default();
-    module::register("uart", ModuleType::Driver);
-
+    // Console address comes from the device tree. On QEMU-virt it is the
+    // legacy 0x10000000, but on OC2R/sedna the UART may be allocated at a
+    // different address (devices are placed sequentially from 0x10000000).
     if fdt::init(fdt_addr) {
+        if let Some(u) = fdt::find_uart() {
+            uart::init(u.base as usize, u.reg_shift);
+        } else {
+            uart::init_default();
+        }
         crate::kinf!("fdt", "parsed successfully");
     } else {
+        uart::init_default();
         crate::kwrn!("fdt", "parse failed, using defaults");
     }
+    module::register("uart", ModuleType::Driver);
 
     let mem = fdt::memory().unwrap_or(fdt::FdtMemory {
         base: 0x8000_0000,

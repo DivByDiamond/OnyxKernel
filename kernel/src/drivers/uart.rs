@@ -47,7 +47,16 @@ impl Uart {
     pub fn putc(self, c: u8) {
         unsafe {
             let r = self.regs();
-            while r.reg_u8(R_LSR).read() & LSR_THRE == 0 {}
+            // Bounded poll: if the console address is wrong (e.g. a device
+            // that is not a UART is mapped there), LSR never sets THRE and
+            // an unbounded loop would hang the kernel before it can log.
+            let mut spins = 0u32;
+            while r.reg_u8(R_LSR).read() & LSR_THRE == 0 {
+                spins += 1;
+                if spins > 0x8000 {
+                    return;
+                }
+            }
             r.reg_u8(R_DATA).write(c);
         }
     }

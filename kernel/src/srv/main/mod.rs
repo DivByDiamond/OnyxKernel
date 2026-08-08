@@ -8,6 +8,18 @@ mod vfs;
 const BANNER: &str = "\n\x1b[32m░█▀█░█▀█░█░█░█░█\n░█░█░█░█░░█░░▄▀▄\n░▀▀▀░▀░▀░░▀░░▀░▀\x1b[0m\n  OnyxKernel v0.3 (Rust) — RISC-V 64 GC\n\n";
 
 pub unsafe fn kmain(hartid: usize, fdt_addr: usize) -> ! {
+    // Configure the console from the device tree before printing anything:
+    // on OC2R/sedna the UART is not necessarily at the QEMU-virt default
+    // 0x10000000, and a wrong console address makes the kernel appear dead.
+    if crate::libfdt::fdt::init(fdt_addr) {
+        if let Some(u) = crate::libfdt::fdt::find_uart() {
+            crate::drivers::uart::init(u.base as usize, u.reg_shift);
+        } else {
+            crate::drivers::uart::init_default();
+        }
+    } else {
+        crate::drivers::uart::init_default();
+    }
     crate::srv::klog::puts(BANNER);
     crate::kinf!(
         "kmain",
