@@ -1,5 +1,5 @@
 use super::FdtMmio;
-use super::reader::{cstr_at, rd32, rd64};
+use super::reader::{cstr_at, rd32, reg_base};
 use super::walk::walk;
 
 pub unsafe fn find_uart() -> Option<FdtMmio> {
@@ -24,7 +24,7 @@ pub unsafe fn find_uart() -> Option<FdtMmio> {
                         start += end + 1;
                     }
                 }
-                "reg" if data.len() >= 8 => base = rd64(data.as_ptr()),
+                "reg" => base = reg_base(data),
                 "reg-shift" if data.len() >= 4 => reg_shift = rd32(data.as_ptr()),
                 _ => {}
             }

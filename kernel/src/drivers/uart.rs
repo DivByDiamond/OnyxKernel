@@ -47,14 +47,16 @@ impl Uart {
     pub fn putc(self, c: u8) {
         unsafe {
             let r = self.regs();
-            // Bounded poll: if the console address is wrong (e.g. a device
-            // that is not a UART is mapped there), LSR never sets THRE and
-            // an unbounded loop would hang the kernel before it can log.
+            // Bounded wait for THRE, then write regardless. sedna's UART
+            // accepts the byte into its transmit FIFO even while the
+            // transmitter is busy, so an unbounded poll would stall the
+            // kernel (QEMU sets THRE instantly; a wrong console address must
+            // not hang the boot either).
             let mut spins = 0u32;
             while r.reg_u8(R_LSR).read() & LSR_THRE == 0 {
                 spins += 1;
-                if spins > 0x8000 {
-                    return;
+                if spins > 0x4000 {
+                    break;
                 }
             }
             r.reg_u8(R_DATA).write(c);

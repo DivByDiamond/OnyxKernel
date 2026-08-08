@@ -8,6 +8,25 @@ pub(crate) unsafe fn rd64(p: *const u8) -> u64 {
     (rd32(p) as u64) << 32 | rd64_lo(p)
 }
 
+/// Read the base address from a `reg` property, honoring both 32-bit and
+/// 64-bit address cells:
+///   - QEMU virt (and most arm/riscv boards) use #address-cells=2,
+///     so `reg` = [addr: 8][size: 8] and the address is the first 8 bytes.
+///   - OC2R/sedna uses #address-cells=1, so `reg` = [addr: 4][size: 4]
+///     and reading 8 bytes would yield `addr << 32 | size`.
+/// The property length is the reliable discriminator (8 vs 16 bytes).
+pub(crate) unsafe fn reg_base(data: &[u8]) -> u64 {
+    if data.len() >= 16 {
+        rd64(data.as_ptr())
+    } else if data.len() >= 8 {
+        rd32(data.as_ptr()) as u64
+    } else if data.len() >= 4 {
+        rd32(data.as_ptr()) as u64
+    } else {
+        0
+    }
+}
+
 pub(crate) unsafe fn rd64_lo(p: *const u8) -> u64 {
     rd32(p.add(4)) as u64
 }
