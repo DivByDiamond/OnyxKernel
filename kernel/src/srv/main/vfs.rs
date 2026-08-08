@@ -7,9 +7,31 @@ use onyx_core::fmt::Arg;
 pub(crate) unsafe fn setup(ndevs: usize) {
     vfs::init();
     if ndevs > 0 {
-        match vfs::mount_root(0, ONYXFS_LBA) {
-            Ok(()) => crate::kinf!("vfs", "root mounted"),
-            Err(e) => crate::kerr!("vfs", "mount failed: %s", Arg::from(e.as_str())),
+        // OC2R: the OnyxFS disk is not necessarily dev 0 (vda=bootfs,
+        // vdb=rootfs, vdc=first HDD). Scan all probed virtio-blk devices and
+        // mount the first one carrying a valid filesystem superblock.
+        // mount_root tries OnyxFS then FAT32 and fails cleanly on others.
+        let mut mounted = false;
+        for dev in 0..ndevs {
+            match vfs::mount_root(dev, ONYXFS_LBA) {
+                Ok(()) => {
+                    crate::kinf!("vfs", "root mounted on dev %d", Arg::from(dev as u64));
+                    mounted = true;
+                    break;
+                }
+                Err(_) => crate::kwrn!(
+                    "vfs",
+                    "dev %d: no bootable filesystem",
+                    Arg::from(dev as u64)
+                ),
+            }
+        }
+        if !mounted {
+            crate::kerr!(
+                "vfs",
+                "mount failed on all %d device(s)",
+                Arg::from(ndevs as u64)
+            );
         }
     }
     vfs::mount_procfs();
