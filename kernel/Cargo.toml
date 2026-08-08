@@ -7,6 +7,10 @@ license.workspace = true
 [dependencies]
 onyx_core = { path = "../core" }
 
+[features]
+default = []
+smode = []
+
 [[bin]]
 name = "onyx-kernel"
 path = "src/main.rs"

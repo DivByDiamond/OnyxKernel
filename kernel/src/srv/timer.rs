@@ -3,6 +3,7 @@ use crate::arch::regs::*;
 use crate::arch::{csr, mmio::Mmio};
 use crate::proc;
 static mut G_MTIME: usize = 0;
+#[cfg(not(feature = "smode"))]
 static mut G_MTIMECMP: usize = 0;
 static mut G_FREQ: u64 = CLINT_FREQ_QEMU;
 static mut G_TICK_INTERVAL: u64 = 0;
@@ -12,11 +13,14 @@ pub static mut G_JIFFIES: u64 = 0;
 pub unsafe fn init() {
     let clint = CLINT_BASE;
     G_MTIME = (clint + 0xBFF8) as usize;
-    G_MTIMECMP = (clint + 0x4000) as usize;
+    #[cfg(not(feature = "smode"))]
+    {
+        G_MTIMECMP = (clint + 0x4000) as usize;
+    }
     G_FREQ = CLINT_FREQ_QEMU;
     G_TICK_INTERVAL = G_FREQ / 100;
     let now = read_mtime();
-    write_mtimecmp(now + G_TICK_INTERVAL);
+    arm_timer(now + G_TICK_INTERVAL);
     csr::set_sie(1 << 5);
     crate::kinf!(
         "timer",
@@ -37,6 +41,17 @@ unsafe fn read_mtime() -> u64 {
     }
 }
 
+#[cfg(feature = "smode")]
+unsafe fn arm_timer(next: u64) {
+    crate::arch::sbi::set_timer(next);
+}
+
+#[cfg(not(feature = "smode"))]
+unsafe fn arm_timer(next: u64) {
+    write_mtimecmp(next);
+}
+
+#[cfg(not(feature = "smode"))]
 unsafe fn write_mtimecmp(v: u64) {
     Mmio::<u32>::at(G_MTIMECMP + 4).write(0xFFFF_FFFF);
     Mmio::<u32>::at(G_MTIMECMP).write(v as u32);
@@ -44,12 +59,20 @@ unsafe fn write_mtimecmp(v: u64) {
 }
 
 pub unsafe fn init_hart(hartid: usize) {
-    let cmp_addr = clint_mtimecmp_hart(hartid) as usize;
     let now = read_mtime();
     let next = now + G_TICK_INTERVAL;
-    Mmio::<u32>::at(cmp_addr + 4).write(0xFFFF_FFFF);
-    Mmio::<u32>::at(cmp_addr).write(next as u32);
-    Mmio::<u32>::at(cmp_addr + 4).write((next >> 32) as u32);
+    #[cfg(feature = "smode")]
+    {
+        let _ = hartid;
+        arm_timer(next);
+    }
+    #[cfg(not(feature = "smode"))]
+    {
+        let cmp_addr = clint_mtimecmp_hart(hartid) as usize;
+        Mmio::<u32>::at(cmp_addr + 4).write(0xFFFF_FFFF);
+        Mmio::<u32>::at(cmp_addr).write(next as u32);
+        Mmio::<u32>::at(cmp_addr + 4).write((next >> 32) as u32);
+    }
     csr::set_sie(1 << 5);
 }
 
@@ -57,17 +80,21 @@ pub unsafe fn handle() {
     G_UPTICKS = G_UPTICKS.wrapping_add(1);
     G_JIFFIES = G_JIFFIES.wrapping_add(1);
     let now = read_mtime();
-    // Write to THIS hart's mtimecmp, not hart 0's. The previous code used
-    // the global G_MTIMECMP (hardwired to hart 0), so on multi-hart systems
-    // harts 1..N never had their comparators advanced — they re-fired the
-    // timer interrupt immediately on return from SRET, producing a timer
-    // storm that starved every other hart.
-    let hartid = crate::arch::smp::current_hart();
-    let cmp_addr = clint_mtimecmp_hart(hartid) as usize;
     let next = now + G_TICK_INTERVAL;
-    Mmio::<u32>::at(cmp_addr + 4).write(0xFFFF_FFFF);
-    Mmio::<u32>::at(cmp_addr).write(next as u32);
-    Mmio::<u32>::at(cmp_addr + 4).write((next >> 32) as u32);
+    // Re-arm the tick for THIS hart. In M-mode we write the per-hart
+    // mtimecmp directly (never hart 0's — that bug caused a timer storm
+    // on harts 1..N). In S-mode (OC2R) we arm via the SBI timer, which
+    // OpenSBI forwards to us as an STIP.
+    #[cfg(feature = "smode")]
+    arm_timer(next);
+    #[cfg(not(feature = "smode"))]
+    {
+        let hartid = crate::arch::smp::current_hart();
+        let cmp_addr = clint_mtimecmp_hart(hartid) as usize;
+        Mmio::<u32>::at(cmp_addr + 4).write(0xFFFF_FFFF);
+        Mmio::<u32>::at(cmp_addr).write(next as u32);
+        Mmio::<u32>::at(cmp_addr + 4).write((next >> 32) as u32);
+    }
     proc::sched_tick();
     // Heartbeat: ping the watchdog every tick (100 Hz) so the system
     // resets if a scheduler stall prevents us from reaching this point.
