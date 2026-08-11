@@ -5,7 +5,7 @@
 //! MMIO constants and provides a single `read()` entry point.
 use crate::drivers::virtio::{
     R_DEVICE_ID, R_GUEST_FEATURES, R_HOST_FEATURES, R_MAGIC_VALUE, R_QUEUE_ALIGN,
-    R_QUEUE_AVAIL_HIGH, R_QUEUE_AVAIL_LOW, R_QUEUE_DESC_HIGH, R_QUEUE_DESC_LOW, R_QUEUE_ENABLE,
+    R_QUEUE_AVAIL_HIGH, R_QUEUE_AVAIL_LOW, R_QUEUE_DESC_HIGH, R_QUEUE_DESC_LOW, R_QUEUE_READY,
     R_QUEUE_NUM, R_QUEUE_PFN, R_QUEUE_SEL, R_QUEUE_USED_HIGH, R_QUEUE_USED_LOW, R_STATUS,
     R_VERSION, VIRTIO_S_ACK, VIRTIO_S_DRIVER, VIRTIO_S_DRIVER_OK, VIRTIO_S_FEATURES_OK, VIRTQ_SIZE,
     VQ_DESC_F_WRITE, VqAvail, VqDesc, VqUsed, reg_r, reg_w,
@@ -112,7 +112,7 @@ unsafe fn setup_queue(idx: usize) -> KResult<()> {
         );
         reg_w(dev.base, R_QUEUE_USED_LOW, used_pa as u32);
         reg_w(dev.base, R_QUEUE_USED_HIGH, ((used_pa as u64) >> 32) as u32);
-        reg_w(dev.base, R_QUEUE_ENABLE, 1);
+        reg_w(dev.base, R_QUEUE_READY, 1);
     } else {
         let pa = pmm::alloc_n(3)? as usize;
         dev.desc = pa as *mut VqDesc;

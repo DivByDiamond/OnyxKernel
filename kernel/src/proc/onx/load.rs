@@ -2,6 +2,7 @@ use crate::arch::regs::*;
 use crate::mm::{pmm, vmm};
 use core::ptr;
 use onyx_core::errno::{Errno, KResult};
+use onyx_core::fmt::Arg;
 use onyx_core::formats::{ONX_FLAGS_COMPRESSED, ONX_FLAGS_RING1};
 
 use super::segments::map_segment_data;
@@ -33,6 +34,14 @@ pub unsafe fn load(image: *const u8, image_size: usize) -> KResult<OnxLoadResult
     }
 
     for s in &hdr.segs {
+        crate::kinf!(
+            "onx",
+            "seg vaddr=%p memsz=%d filesz=%d flags=%d",
+            Arg::from(s.vaddr),
+            Arg::from(s.memsz),
+            Arg::from(s.filesz),
+            Arg::from(s.flags as u32)
+        );
         if s.vaddr < USER_BASE || s.vaddr >= USER_TOP {
             return Err(Errno::Range);
         }

@@ -2,6 +2,7 @@ use crate::arch::regs::*;
 use crate::mm::pmm;
 use core::ptr;
 use onyx_core::errno::{Errno, KResult};
+use onyx_core::fmt::Arg;
 
 #[cfg(target_pointer_width = "64")]
 use super::walk::walk;
@@ -98,7 +99,18 @@ unsafe fn map_one(root_pa: u64, vaddr: u64, paddr: u64, flags: u64, level: u32) 
     }
     let pte_ptr = walk(root_pa, vaddr, level, true)?;
     let old_pte = core::ptr::read_volatile(pte_ptr);
-    if old_pte & PTE_V != 0 {
+    if old_pte & PTE_V != 0 && old_pte & PTE_U != 0 {
+        // A real user mapping already exists at this address — refuse to
+        // clobber it (shared segment pages are handled by the caller via
+        // update_user_pte). Non-user leaves (identity placeholder pages
+        // produced by leaf splitting) are freely replaced below.
+        crate::kinf!(
+            "vmm",
+            "map EEXIST vaddr=%p level=%d old_pte=%p",
+            Arg::from(vaddr),
+            Arg::from(level as u64),
+            Arg::from(old_pte)
+        );
         return Err(Errno::Exist);
     }
     let pte = PTE_V | flags | ((paddr >> 12) << PTE_PPN_SHIFT);

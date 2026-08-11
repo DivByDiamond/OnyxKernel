@@ -131,6 +131,7 @@ mod tests {
 }
 
 pub fn init(base: usize, shift: u32) {
+    crate::srv::klog::debug_mark(b'u');
     unsafe {
         G_UART.init(base, shift);
     }

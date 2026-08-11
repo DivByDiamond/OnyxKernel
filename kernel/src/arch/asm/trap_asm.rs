@@ -11,10 +11,14 @@ global_asm!(
 .global trap_entry
 trap_entry:
     csrrw sp, sscratch, sp
+    bnez sp, .Ltrap_from_user
+    csrr sp, sscratch
+.Ltrap_from_user:
     addi sp, sp, -288
     sd t0, 32(sp)
     csrr t0, sscratch
     sd t0, 8(sp)
+    csrw sscratch, zero
     sd ra, 0(sp)
     sd gp, 16(sp)
     sd tp, 24(sp)
@@ -93,8 +97,15 @@ trap_return:
     li t1, ~(1 << 1)
     and t0, t0, t1
     csrw sstatus, t0
+    srli t0, t0, 8
+    andi t0, t0, 1
+    bnez t0, .Lret_kernel
     addi t1, sp, 288
     csrw sscratch, t1
+    j .Lret_finish
+.Lret_kernel:
+    csrw sscratch, zero
+.Lret_finish:
     ld t0, 8(sp)
     ld t1, 280(sp)
     csrw satp, t1

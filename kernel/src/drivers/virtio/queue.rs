@@ -1,11 +1,11 @@
 //! virtio-blk device probe / init and virtqueue setup.
 use super::{
-    BlkReq, G_DEVS, G_NDEVS, R_DEVICE_ID, R_GUEST_FEATURES, R_HOST_FEATURES, R_MAGIC_VALUE,
+    reg_r, reg_w, BlkReq, VirtioBlkDev, VqAvail, VqDesc, VqUsed, G_DEVS, G_NDEVS, R_DEVICE_ID,
+    R_GUEST_FEATURES, R_GUEST_FEATURES_SEL, R_HOST_FEATURES, R_HOST_FEATURES_SEL, R_MAGIC_VALUE,
     R_QUEUE_ALIGN, R_QUEUE_AVAIL_HIGH, R_QUEUE_AVAIL_LOW, R_QUEUE_DESC_HIGH, R_QUEUE_DESC_LOW,
-    R_QUEUE_ENABLE, R_QUEUE_NUM, R_QUEUE_PFN, R_QUEUE_SEL, R_QUEUE_USED_HIGH, R_QUEUE_USED_LOW,
-    R_STATUS, R_VERSION, VIRTIO_ID_BLK, VIRTIO_MAX_DEVS, VIRTIO_S_ACK, VIRTIO_S_DRIVER,
-    VIRTIO_S_DRIVER_OK, VIRTIO_S_FEATURES_OK, VIRTQ_SIZE, VirtioBlkDev, VqAvail, VqDesc, VqUsed,
-    reg_r, reg_w,
+    R_QUEUE_NUM, R_QUEUE_PFN, R_QUEUE_READY, R_QUEUE_SEL, R_QUEUE_USED_HIGH, R_QUEUE_USED_LOW,
+    R_STATUS, R_VERSION, VIRTIO_F_VERSION_1, VIRTIO_ID_BLK, VIRTIO_MAX_DEVS, VIRTIO_S_ACK,
+    VIRTIO_S_DRIVER, VIRTIO_S_DRIVER_OK, VIRTIO_S_FEATURES_OK, VIRTQ_SIZE,
 };
 use crate::mm::pmm;
 use core::ptr;
@@ -40,8 +40,18 @@ pub unsafe fn init(base: usize) -> KResult<usize> {
     (*(&raw mut G_DEVS))[idx] = dev;
     reg_w(base, R_STATUS, 0);
     reg_w(base, R_STATUS, VIRTIO_S_ACK | VIRTIO_S_DRIVER);
-    let host_feat = reg_r(base, R_HOST_FEATURES);
-    reg_w(base, R_GUEST_FEATURES, host_feat & 0x1FFF_FFFF);
+    // Read the full 64-bit feature word via the features_sel registers.
+    reg_w(base, R_HOST_FEATURES_SEL, 1);
+    let host_feat_hi = reg_r(base, R_HOST_FEATURES);
+    reg_w(base, R_HOST_FEATURES_SEL, 0);
+    let host_feat_lo = reg_r(base, R_HOST_FEATURES);
+    let mut guest_hi = host_feat_hi;
+    guest_hi |= VIRTIO_F_VERSION_1; // bit 32: must accept VIRTIO_F_VERSION_1.
+    reg_w(base, R_GUEST_FEATURES_SEL, 0);
+    reg_w(base, R_GUEST_FEATURES, host_feat_lo & 0x1FFF_FFFF);
+    reg_w(base, R_GUEST_FEATURES_SEL, 1);
+    reg_w(base, R_GUEST_FEATURES, guest_hi);
+    reg_w(base, R_GUEST_FEATURES_SEL, 0);
     if modern {
         reg_w(
             base,
@@ -49,14 +59,16 @@ pub unsafe fn init(base: usize) -> KResult<usize> {
             VIRTIO_S_ACK | VIRTIO_S_DRIVER | VIRTIO_S_FEATURES_OK,
         );
         if reg_r(base, R_STATUS) & VIRTIO_S_FEATURES_OK == 0 {
-            return Err(Errno::Inval);
+            // sedna's virtio emulation never sets FEATURES_OK, yet it still
+            // accepts DRIVER_OK — don't fail the whole device over it.
+            crate::kwrn!("virtio", "device did not set FEATURES_OK, continuing");
         }
     }
     setup_queue(idx)?;
     reg_w(
         base,
         R_STATUS,
-        VIRTIO_S_ACK | VIRTIO_S_DRIVER | VIRTIO_S_DRIVER_OK,
+        VIRTIO_S_ACK | VIRTIO_S_DRIVER | VIRTIO_S_FEATURES_OK | VIRTIO_S_DRIVER_OK,
     );
     *(&raw mut G_NDEVS) += 1;
     Ok(idx)
@@ -87,7 +99,7 @@ unsafe fn setup_queue(idx: usize) -> KResult<()> {
         );
         reg_w(dev.base, R_QUEUE_USED_LOW, used_pa as u32);
         reg_w(dev.base, R_QUEUE_USED_HIGH, ((used_pa as u64) >> 32) as u32);
-        reg_w(dev.base, R_QUEUE_ENABLE, 1);
+        reg_w(dev.base, R_QUEUE_READY, 1);
     } else {
         let contig_pa = pmm::alloc_n(3)? as usize;
         let desc_pa = contig_pa;

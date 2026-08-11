@@ -6,7 +6,7 @@ use crate::arch::mmio::Mmio;
 use crate::drivers::virtio::{
     reg_r, reg_w, VqAvail, VqDesc, VqUsed, R_DEVICE_ID, R_GUEST_FEATURES, R_HOST_FEATURES,
     R_MAGIC_VALUE, R_QUEUE_AVAIL_HIGH, R_QUEUE_AVAIL_LOW, R_QUEUE_DESC_HIGH, R_QUEUE_DESC_LOW,
-    R_QUEUE_ENABLE, R_QUEUE_NUM, R_QUEUE_SEL, R_QUEUE_USED_HIGH, R_QUEUE_USED_LOW, R_STATUS,
+    R_QUEUE_READY, R_QUEUE_NUM, R_QUEUE_SEL, R_QUEUE_USED_HIGH, R_QUEUE_USED_LOW, R_STATUS,
     R_VERSION, VIRTIO_S_ACK, VIRTIO_S_DRIVER, VIRTIO_S_DRIVER_OK, VIRTIO_S_FEATURES_OK, VIRTQ_SIZE,
     VQ_DESC_F_WRITE,
 };
@@ -105,7 +105,7 @@ unsafe fn setup_rx_queue() -> KResult<()> {
     reg_w(base, R_QUEUE_AVAIL_HIGH, ((avail_pa as u64) >> 32) as u32);
     reg_w(base, R_QUEUE_USED_LOW, used_pa as u32);
     reg_w(base, R_QUEUE_USED_HIGH, ((used_pa as u64) >> 32) as u32);
-    reg_w(base, R_QUEUE_ENABLE, 1);
+    reg_w(base, R_QUEUE_READY, 1);
     for i in 0..RX_DESCS {
         let buf_pa = pmm::alloc_zero()? as *mut u8;
         G_NET.rx_bufs[i] = buf_pa;

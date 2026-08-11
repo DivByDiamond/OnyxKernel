@@ -34,8 +34,10 @@ pub unsafe fn map_segment_data(
             // already mapped the page as r--.
             let existing_flags = vmm::pte_user_flags(root_pa, page_base);
             let combined_flags = existing_flags | seg_flags;
-            if combined_flags != existing_flags {
-                vmm::map_one_pub(root_pa, page_base, existing_pa, combined_flags, 0)?;
+            if combined_flags != existing_flags
+                && !vmm::update_user_pte(root_pa, page_base, seg_flags)
+            {
+                return Err(Errno::Exist);
             }
         }
         va = (page_base + 4096).min(end);

@@ -8,6 +8,7 @@ use onyx_core::errno::Errno;
 
 use super::handler::{parse_user_path, user_ptr_ok};
 
+#[inline(never)]
 pub(super) unsafe fn sys_exec(tf: &mut TrapFrame, path: u64, argv: u64) -> i64 {
     let mut path_buf = [0u8; 256];
     let path_len = match parse_user_path(path, &mut path_buf) {
@@ -136,6 +137,7 @@ pub(super) unsafe fn sys_sbrk(incr: i64) -> i64 {
     cur as i64
 }
 
+#[inline(never)]
 pub(super) unsafe fn sys_readdir(dir: u64, name_out: u64, len: u64) -> i64 {
     let mut dir_buf = [0u8; 256];
     let dir_len = match parse_user_path(dir, &mut dir_buf) {
@@ -158,6 +160,7 @@ pub(super) unsafe fn sys_readdir(dir: u64, name_out: u64, len: u64) -> i64 {
     }
 }
 
+#[inline(never)]
 pub(super) unsafe fn sys_write_fd(token: u64, buf: u64, len: u64) -> i64 {
     if !user_ptr_ok(buf, len) {
         return Errno::Inval.as_i64();
@@ -168,6 +171,7 @@ pub(super) unsafe fn sys_write_fd(token: u64, buf: u64, len: u64) -> i64 {
     }
 }
 
+#[inline(never)]
 pub(super) unsafe fn sys_create(path: u64, mode: u64, _reserved: u64) -> i64 {
     let mut path_buf = [0u8; 256];
     let path_len = match parse_user_path(path, &mut path_buf) {
@@ -186,6 +190,7 @@ pub(super) unsafe fn sys_create(path: u64, mode: u64, _reserved: u64) -> i64 {
     }
 }
 
+#[inline(never)]
 pub(super) unsafe fn sys_mkdir(path: u64) -> i64 {
     let mut path_buf = [0u8; 256];
     let path_len = match parse_user_path(path, &mut path_buf) {

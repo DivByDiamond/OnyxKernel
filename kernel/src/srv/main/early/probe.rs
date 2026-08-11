@@ -8,44 +8,58 @@ use onyx_core::fmt::Arg;
 
 pub(crate) unsafe fn probe_devices() -> usize {
     let mut ndevs = 0;
-    // On OC2R/sedna the device tree carries no virtio nodes and the
-    // hardcoded QEMU addresses don't exist — probing them would raise a
-    // load access fault (scause=5) on an unmapped physical region. Skip the
-    // whole virtio scan there; block devices are not discovered yet anyway.
-    let sedna = crate::libfdt::fdt::is_sedna();
-    crate::kinf!(
-        "probe",
-        "devices: is_sedna=%d",
-        Arg::from(if sedna { 1 } else { 0 })
-    );
-    if !sedna {
-        let mut virtio_devs = [fdt::FdtMmio {
-            base: 0,
-            irq: 0,
-            reg_shift: 0,
-        }; 8];
-        let nfound = fdt::find_virtio(&mut virtio_devs, 8);
-        for dev in virtio_devs.iter().take(nfound) {
-            let b = dev.base as usize;
-            if b != 0 && virtio::probe(b) && virtio::init(b).is_ok() {
-                ndevs += 1;
-            }
+    let mut virtio_devs = [fdt::FdtMmio {
+        base: 0,
+        irq: 0,
+        reg_shift: 0,
+    }; 8];
+    // OC2R/sedna now registers DTB providers, so find_virtio returns the real
+    // virtio block devices from the device tree. The hardcoded QEMU addresses
+    // are only a fallback for when the FDT has no virtio nodes (and must be
+    // skipped on OC2R, where they don't exist and probing would fault).
+    let nfound = fdt::find_virtio(&mut virtio_devs, 8);
+    crate::kinf!("virtio", "fdt nodes=%d", Arg::from(nfound as u32));
+    for dev in virtio_devs.iter().take(nfound) {
+        let b = dev.base as usize;
+        let magic = if b != 0 {
+            crate::drivers::virtio::reg_r(b, crate::drivers::virtio::R_MAGIC_VALUE)
+        } else {
+            0
+        };
+        let devid = if b != 0 {
+            crate::drivers::virtio::reg_r(b, crate::drivers::virtio::R_DEVICE_ID)
+        } else {
+            0
+        };
+        let probed = b != 0 && virtio::probe(b);
+        let inited = probed && virtio::init(b).is_ok();
+        crate::kinf!(
+            "virtio",
+            "node base=%p magic=%x devid=%x probe=%d init=%d",
+            Arg::from(dev.base),
+            Arg::from(magic),
+            Arg::from(devid),
+            Arg::from(if probed { 1 } else { 0 }),
+            Arg::from(if inited { 1 } else { 0 })
+        );
+        if inited {
+            ndevs += 1;
         }
-        if nfound == 0 {
-            let bases = [
-                0x1000_1000usize,
-                0x1000_2000,
-                0x1000_3000,
-                0x1000_4000,
-                0x1000_5000,
-                0x1000_6000,
-                0x1000_7000,
-                0x1000_8000,
-            ];
-            for &b in &bases {
-                if virtio::probe(b) && virtio::init(b).is_ok() {
-                    ndevs += 1;
-                }
+    }
+    if nfound == 0 && !crate::libfdt::fdt::is_sedna() {
+        let bases = [
+            0x1000_1000usize,
+            0x1000_2000,
+            0x1000_3000,
+            0x1000_4000,
+            0x1000_5000,
+            0x1000_6000,
+            0x1000_7000,
+            0x1000_8000,
+        ];
+        for &b in &bases {
+            if virtio::probe(b) && virtio::init(b).is_ok() {
+                ndevs += 1;
             }
         }
     }
@@ -117,17 +131,61 @@ pub(crate) unsafe fn probe_peripherals() {
         let _ = watchdog::arm(3000);
         crate::kinf!("wdt", "base=%p timeout=3000ms", Arg::from(wdt_info.base));
     }
-    // Hardcoded QEMU-virt virtio-mmio addresses. On OC2R/sedna the devices
-    // live at different addresses and the DTB has no virtio nodes, so this
-    // scan would read garbage, false-positive on the virtio magic, and then
-    // fault writing into a non-existent device's registers.
-    let sedna = crate::libfdt::fdt::is_sedna();
-    crate::kinf!(
-        "probe",
-        "peripherals: is_sedna=%d",
-        Arg::from(if sedna { 1 } else { 0 })
-    );
-    if !sedna {
+    // Scan the virtio devices from the device tree for rng/net/console/input
+    // types. OC2R/sedna now registers DTB providers, so find_virtio returns
+    // the real devices. The hardcoded QEMU bases are only a fallback when the
+    // FDT has no virtio nodes (skipped on OC2R, where they don't exist and
+    // probing would fault).
+    let mut virtio_devs = [fdt::FdtMmio {
+        base: 0,
+        irq: 0,
+        reg_shift: 0,
+    }; 8];
+    let nfound = fdt::find_virtio(&mut virtio_devs, 8);
+    let probe_at = |b: usize| {
+        if virtio_rng::probe(b) {
+            if virtio_rng::init(b).is_ok() {
+                crate::kinf!("virtio-rng", "init @ %p", Arg::from(b));
+                module::register("virtio-rng", ModuleType::Driver);
+            }
+            return;
+        }
+        if virtio_net::probe(b) {
+            if virtio_net::init(b).is_ok() {
+                let mac = virtio_net::mac();
+                crate::kinf!(
+                    "virtio-net",
+                    "init @ %p mac=%x:%x:%x:%x:%x:%x",
+                    Arg::from(b),
+                    Arg::from(mac[0] as u32),
+                    Arg::from(mac[1] as u32),
+                    Arg::from(mac[2] as u32),
+                    Arg::from(mac[3] as u32),
+                    Arg::from(mac[4] as u32),
+                    Arg::from(mac[5] as u32)
+                );
+                module::register("virtio-net", ModuleType::Driver);
+            }
+            return;
+        }
+        if virtio_console::probe(b) {
+            if virtio_console::init(b).is_ok() {
+                crate::kinf!("virtio-console", "init @ %p", Arg::from(b));
+                module::register("virtio-console", ModuleType::Driver);
+            }
+            return;
+        }
+        if virtio_input::probe(b) {
+            if virtio_input::init(b).is_ok() {
+                crate::kinf!("virtio-input", "init @ %p", Arg::from(b));
+                module::register("virtio-input", ModuleType::Driver);
+            }
+        }
+    };
+    for dev in virtio_devs.iter().take(nfound) {
+        probe_at(dev.base as usize);
+    }
+    if nfound == 0 && !crate::libfdt::fdt::is_sedna() {
         let extra_virtio_bases = [
             0x1000_1000usize,
             0x1000_2000,
@@ -139,45 +197,7 @@ pub(crate) unsafe fn probe_peripherals() {
             0x1000_8000,
         ];
         for &b in &extra_virtio_bases {
-            if virtio_rng::probe(b) {
-                if virtio_rng::init(b).is_ok() {
-                    crate::kinf!("virtio-rng", "init @ %p", Arg::from(b));
-                    module::register("virtio-rng", ModuleType::Driver);
-                }
-                continue;
-            }
-            if virtio_net::probe(b) {
-                if virtio_net::init(b).is_ok() {
-                    let mac = virtio_net::mac();
-                    crate::kinf!(
-                        "virtio-net",
-                        "init @ %p mac=%x:%x:%x:%x:%x:%x",
-                        Arg::from(b),
-                        Arg::from(mac[0] as u32),
-                        Arg::from(mac[1] as u32),
-                        Arg::from(mac[2] as u32),
-                        Arg::from(mac[3] as u32),
-                        Arg::from(mac[4] as u32),
-                        Arg::from(mac[5] as u32)
-                    );
-                    module::register("virtio-net", ModuleType::Driver);
-                }
-                continue;
-            }
-            if virtio_console::probe(b) {
-                if virtio_console::init(b).is_ok() {
-                    crate::kinf!("virtio-console", "init @ %p", Arg::from(b));
-                    module::register("virtio-console", ModuleType::Driver);
-                }
-                continue;
-            }
-            if virtio_input::probe(b) {
-                if virtio_input::init(b).is_ok() {
-                    crate::kinf!("virtio-input", "init @ %p", Arg::from(b));
-                    module::register("virtio-input", ModuleType::Driver);
-                }
-                continue;
-            }
+            probe_at(b);
         }
     }
     crate::kinf!("hwrand", "source=%s", Arg::from(hwrand::source_name()));

@@ -1,19 +1,26 @@
 use crate::arch::mmio::Mmio;
 use core::ptr;
 
-pub const VIRTIO_MAX_DEVS: usize = 4;
+pub const VIRTIO_MAX_DEVS: usize = 8;
 pub const VIRTIO_BLK_SECTOR: usize = 512;
 pub const VIRTQ_SIZE: usize = 256;
+pub const VIRTIO_F_VERSION_1: u32 = 1;
 pub const R_MAGIC_VALUE: u32 = 0x00;
 pub const R_VERSION: u32 = 0x04;
 pub const R_DEVICE_ID: u32 = 0x08;
+// Modern virtio mmio (version 2): the 64-bit feature words are selected
+// through DEVICE_FEATURES_SEL (0x14) / DRIVER_FEATURES_SEL (0x24) and
+// read/written at 0x10/0x20. Reading 0x14 returns 0 — it is write-only.
 pub const R_HOST_FEATURES: u32 = 0x10;
-pub const R_GUEST_FEATURES: u32 = 0x14;
+pub const R_HOST_FEATURES_SEL: u32 = 0x14;
+pub const R_GUEST_FEATURES: u32 = 0x20;
+pub const R_GUEST_FEATURES_SEL: u32 = 0x24;
 pub const R_QUEUE_SEL: u32 = 0x30;
 pub const R_QUEUE_NUM_MAX: u32 = 0x34;
 pub const R_QUEUE_NUM: u32 = 0x38;
 pub const R_QUEUE_ALIGN: u32 = 0x3C;
 pub const R_QUEUE_PFN: u32 = 0x40;
+pub const R_QUEUE_READY: u32 = 0x44;
 pub const R_QUEUE_NOTIFY: u32 = 0x50;
 pub const R_STATUS: u32 = 0x70;
 pub const R_QUEUE_DESC_LOW: u32 = 0x80;
@@ -22,7 +29,6 @@ pub const R_QUEUE_AVAIL_LOW: u32 = 0x90;
 pub const R_QUEUE_AVAIL_HIGH: u32 = 0x94;
 pub const R_QUEUE_USED_LOW: u32 = 0xA0;
 pub const R_QUEUE_USED_HIGH: u32 = 0xA4;
-pub const R_QUEUE_ENABLE: u32 = 0xB0;
 pub const VIRTIO_S_ACK: u32 = 1;
 pub const VIRTIO_S_DRIVER: u32 = 2;
 pub const VIRTIO_S_DRIVER_OK: u32 = 4;
