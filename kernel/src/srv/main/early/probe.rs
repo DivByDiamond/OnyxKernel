@@ -102,9 +102,10 @@ pub(crate) unsafe fn probe_peripherals() {
             Arg::from(hwrand::source_name())
         );
     }
-    // USB EHCI/OHCI only exist on QEMU; on OC2R/sedna these addresses are
-    // not mapped and probing them would raise a load access fault.
-    if !crate::libfdt::fdt::is_sedna() {
+    // USB EHCI/OHCI are hardcoded SG2000 (Milk-V Duos) addresses. On
+    // QEMU virt and OC2R/sedna they are not mapped, and probing them would
+    // raise a load access fault on unmapped MMIO.
+    if !crate::libfdt::fdt::is_sedna() && !crate::libfdt::fdt::is_qemu() {
         unsafe {
             if usb::init_usb().is_ok() {
                 crate::kinf!("usb", "host controller initialized");
