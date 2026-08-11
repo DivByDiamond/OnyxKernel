@@ -1,6 +1,6 @@
-use super::FdtMemory;
 use super::reader::{cstr_at, rd64, rd64_hi};
 use super::walk::walk;
+use super::FdtMemory;
 
 pub unsafe fn memory() -> Option<FdtMemory> {
     let mut result: Option<FdtMemory> = None;

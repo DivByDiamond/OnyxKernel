@@ -76,3 +76,31 @@ pub unsafe fn is_sedna() -> bool {
     }
     false
 }
+
+/// Detect the QEMU virt machine. The device tree model is
+/// "riscv-virtio,qemu" and the root compatible contains "qemu". Like
+/// `is_sedna`, this scans the raw FDT memory for the substring. On QEMU
+/// virt there is no USB host controller by default, so probing the
+/// SG2000 EHCI/OHCI addresses (0x04C00000) would raise a load access
+/// fault on unmapped MMIO.
+pub unsafe fn is_qemu() -> bool {
+    let dtb = *(&raw const super::G_DTB);
+    if dtb == 0 {
+        return false;
+    }
+    let needle = b"qemu";
+    for i in 0..0x40000usize {
+        let p = (dtb + i) as *const u8;
+        let mut ok = true;
+        for (j, &nb) in needle.iter().enumerate() {
+            if *p.add(j) != nb {
+                ok = false;
+                break;
+            }
+        }
+        if ok {
+            return true;
+        }
+    }
+    false
+}

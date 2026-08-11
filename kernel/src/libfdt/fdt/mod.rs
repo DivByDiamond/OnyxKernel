@@ -18,7 +18,7 @@ pub(crate) use types::{
 pub use clint::find_clint;
 pub use init::init;
 pub use memory::memory;
-pub use model::{is_sedna, model};
+pub use model::{is_qemu, is_sedna, model};
 pub use plic::find_plic;
 pub use reader::prop_name;
 pub use sdhci::find_sdhci;
