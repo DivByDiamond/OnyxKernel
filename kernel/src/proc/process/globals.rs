@@ -3,7 +3,7 @@ use core::hint::spin_loop;
 use core::ptr;
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
-use super::types::{PROC_PID_INIT, Proc};
+use super::types::{Proc, PROC_PID_INIT};
 use crate::arch::smp;
 
 pub const MAX_HARTS: usize = smp::MAX_HARTS;
@@ -18,7 +18,7 @@ pub static G_NEED_RESCHED: [AtomicBool; MAX_HARTS] = [const { AtomicBool::new(fa
 
 pub static mut G_CURRENT: *mut Proc = ptr::null_mut();
 
-pub static G_NEXT_PID: AtomicU32 = AtomicU32::new(PROC_PID_INIT);
+pub static G_NEXT_PID: AtomicU32 = AtomicU32::new(PROC_PID_INIT + 1);
 
 /// Global process-list spinlock (Bug #16 fix). All mutations and iterations
 /// of `G_ALL_PROCS` (the singly-linked list of all Proc nodes) must hold
@@ -67,7 +67,7 @@ pub unsafe fn init() {
         G_HART_CURRENT[i] = ptr::null_mut();
         G_NEED_RESCHED[i].store(false, Ordering::Release);
     }
-    G_NEXT_PID.store(PROC_PID_INIT, Ordering::Release);
+    G_NEXT_PID.store(PROC_PID_INIT + 1, Ordering::Release);
 }
 
 pub fn alloc_pid() -> u32 {

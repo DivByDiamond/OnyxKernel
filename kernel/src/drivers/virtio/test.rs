@@ -27,7 +27,7 @@ mod tests {
         assert_eq!(R_QUEUE_AVAIL_HIGH, 0x94);
         assert_eq!(R_QUEUE_USED_LOW, 0xA0);
         assert_eq!(R_QUEUE_USED_HIGH, 0xA4);
-        assert_eq!(R_QUEUE_ENABLE, 0xB0);
+        assert_eq!(R_QUEUE_READY, 0x44);
     }
 
     #[test]

@@ -30,6 +30,7 @@ unsafe fn init_from(dtb_pa: usize) -> bool {
     let hdr = dtb_pa as *const u8;
     let magic = rd32(hdr);
     if magic != FDT_MAGIC {
+        crate::srv::klog::debug_mark(b'f');
         return false;
     }
     let struct_off = rd32(hdr.add(4 * 2)) as usize;

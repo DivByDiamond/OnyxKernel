@@ -1,6 +1,6 @@
 use super::{C_RESOURCE_CREATE_2D, C_SET_SCANOUT, Create2D, GpuCtrlHdr, SetScanout};
 use crate::drivers::virtio::{
-    R_QUEUE_AVAIL_HIGH, R_QUEUE_AVAIL_LOW, R_QUEUE_DESC_HIGH, R_QUEUE_DESC_LOW, R_QUEUE_ENABLE,
+    R_QUEUE_AVAIL_HIGH, R_QUEUE_AVAIL_LOW, R_QUEUE_DESC_HIGH, R_QUEUE_DESC_LOW, R_QUEUE_READY,
     R_QUEUE_NOTIFY, R_QUEUE_NUM, R_QUEUE_SEL, R_QUEUE_USED_HIGH, R_QUEUE_USED_LOW, VIRTQ_SIZE,
     VQ_DESC_F_NEXT, VQ_DESC_F_WRITE, VqAvail, VqDesc, VqUsed, reg_w,
 };
@@ -30,7 +30,7 @@ pub unsafe fn setup_queue(
     reg_w(b, R_QUEUE_AVAIL_HIGH, ((ap as u64) >> 32) as u32);
     reg_w(b, R_QUEUE_USED_LOW, up as u32);
     reg_w(b, R_QUEUE_USED_HIGH, ((up as u64) >> 32) as u32);
-    reg_w(b, R_QUEUE_ENABLE, 1);
+    reg_w(b, R_QUEUE_READY, 1);
     Ok(())
 }
 

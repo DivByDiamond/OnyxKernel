@@ -1,7 +1,7 @@
 //! klog — formatted logging via UART.
 use crate::drivers::uart;
 use core::panic::PanicInfo;
-use onyx_core::fmt::{Arg, Write, vformat};
+use onyx_core::fmt::{vformat, Arg, Write};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Level {
@@ -39,6 +39,12 @@ impl Write for UartWriter {
         }
         uart::putc(c);
     }
+}
+
+pub fn debug_mark(c: u8) {
+    uart::putc(b'[');
+    uart::putc(c);
+    uart::putc(b']');
 }
 
 pub fn puts(s: &str) {
@@ -103,9 +109,6 @@ fn delay_loops(n: u64) {
 }
 
 pub fn panic_handler(info: &PanicInfo) -> ! {
-    unsafe {
-        crate::arch::csr::clear_sstatus(crate::arch::regs::SSTATUS_SIE);
-    }
     let mut w = PanicWriter;
     w.write_str("\n\n*** KERNEL PANIC ***\n");
     if let Some(loc) = info.location() {

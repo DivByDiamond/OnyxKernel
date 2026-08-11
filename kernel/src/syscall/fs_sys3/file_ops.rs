@@ -24,6 +24,7 @@ pub unsafe fn sys_pipe(pipefd: u64) -> i64 {
     0
 }
 
+#[inline(never)]
 pub unsafe fn sys_unlink(path: u64) -> i64 {
     let mut path_buf = [0u8; 256];
     let path_len = match parse_user_path(path, &mut path_buf) {
@@ -37,6 +38,7 @@ pub unsafe fn sys_unlink(path: u64) -> i64 {
     }
 }
 
+#[inline(never)]
 pub unsafe fn sys_rename(old_path: u64, new_path: u64) -> i64 {
     let mut old_buf = [0u8; 256];
     let old_len = match parse_user_path(old_path, &mut old_buf) {

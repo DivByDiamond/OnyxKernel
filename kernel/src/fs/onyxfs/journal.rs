@@ -16,7 +16,7 @@
 //! last 8 bytes of a 4096-byte block are not protected. This is acceptable
 //! because the only metadata that fits in those 8 bytes (rare tail padding of
 //! dirent blocks) is not critical for crash recovery.
-use super::{G_JOURNAL_HEAD, G_SB, read_block, write_block};
+use super::{read_block, write_block, G_JOURNAL_HEAD, G_SB};
 use onyx_core::errno::{Errno, KResult};
 use onyx_core::formats::ONYFS_BLOCK_SIZE;
 
@@ -29,6 +29,7 @@ const JOURNAL_DATA_SIZE: usize = ONYFS_BLOCK_SIZE - 8;
 /// of `block_num`. Called BEFORE the actual `write_block` so that a crash
 /// between the journal append and the data write leaves a recoverable redo
 /// entry on disk. No-op if the filesystem has no journal configured.
+#[inline(never)]
 pub(super) unsafe fn journal_log(block_num: u32, data: &[u8; ONYFS_BLOCK_SIZE]) -> KResult<()> {
     let sb_ptr = &raw const G_SB;
     let journal_start = (*sb_ptr).journal_start;
@@ -66,6 +67,7 @@ pub(super) unsafe fn journal_log(block_num: u32, data: &[u8; ONYFS_BLOCK_SIZE]) 
 /// the old commit_end — silently corrupting the filesystem. Zeroing the
 /// entries after commit ensures the next transaction always starts with
 /// a clean slate on disk.
+#[inline(never)]
 pub(super) unsafe fn journal_commit() -> KResult<()> {
     let sb_ptr = &raw const G_SB;
     let journal_start = (*sb_ptr).journal_start;

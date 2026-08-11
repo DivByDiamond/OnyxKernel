@@ -7,6 +7,7 @@ use crate::syscall::handler::parse_user_path;
 use onyx_core::errno::Errno;
 use onyx_core::fmt::Arg;
 
+#[inline(never)]
 pub unsafe fn sys_open(path: u64, flags: u64, mode: u64) -> i64 {
     crate::kinf!(
         "sys_open",

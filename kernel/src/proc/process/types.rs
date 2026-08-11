@@ -6,7 +6,13 @@ pub const PROC_RING_ROOT: u8 = 1;
 pub const PROC_RING_USER: u8 = 2;
 
 pub const PROC_PID_INIT: u32 = 1;
-pub const KSTACK_SIZE: usize = 16 * 1024;
+// KSTACK_SIZE must comfortably exceed the largest kernel stack frame
+// (the syscall dispatcher inlines ~100 match arms; release builds peaked
+// at ~21 KB). 16 KB was too small — a deep onyfs call chain (unlink →
+// journal/free_inode with 4 KB buffers) overflowed the process kernel
+// stack and silently zeroed the *front* of the Proc struct (pid/ring/
+// root_pa), which is what turned login into "ring=KERNEL pid=0 root_pa=0".
+pub const KSTACK_SIZE: usize = 32 * 1024;
 pub const PROC_MAX_FDS: usize = 16;
 
 #[derive(Clone, Copy, PartialEq, Eq)]

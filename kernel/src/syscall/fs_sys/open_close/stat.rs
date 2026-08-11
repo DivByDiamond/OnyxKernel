@@ -97,6 +97,7 @@ unsafe fn fill_user_stat(
     core::ptr::write_volatile(dst, stat);
 }
 
+#[inline(never)]
 pub unsafe fn sys_stat(path: u64, st_buf: u64) -> i64 {
     let mut path_buf = [0u8; 256];
     let path_len = match crate::syscall::handler::parse_user_path(path, &mut path_buf) {

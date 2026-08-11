@@ -12,6 +12,12 @@ const ONYFS_BLOCK_SIZE: usize = 4096;
 const SNAPSHOT_BLOCKS_EACH: u32 = 64;
 const MAX_SNAPSHOTS: u32 = 4;
 const JOURNAL_BLOCKS: u32 = 32;
+// Free blocks left unallocated in the data bitmap so the filesystem can
+// create new files at runtime (e.g. /etc/passwd, /etc/shadow, state files,
+// user home dirs). Without this the disk is exactly as big as the manifest
+// contents and the first alloc_data_block() returns a block past the end of
+// the image → virtio-blk write fails with EIO.
+const RESERVED_DATA_BLOCKS: u32 = 256;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -127,7 +133,7 @@ fn main() {
     };
     let journal_blocks = if !v1 { JOURNAL_BLOCKS } else { 0 };
     let metadata_blocks = 3 + inode_table_blocks + snapshot_blocks + journal_blocks;
-    let total_blocks = metadata_blocks + data_blocks_needed;
+    let total_blocks = metadata_blocks + data_blocks_needed + RESERVED_DATA_BLOCKS;
     let img_size = (total_blocks as usize * ONYFS_BLOCK_SIZE + 511) & !511;
     let mut img = vec![0u8; img_size];
 

@@ -13,18 +13,20 @@ pub(crate) unsafe fn setup(ndevs: usize) {
         // mount_root tries OnyxFS then FAT32 and fails cleanly on others.
         let mut mounted = false;
         for dev in 0..ndevs {
-            match vfs::mount_root(dev, ONYXFS_LBA) {
-                Ok(()) => {
-                    crate::kinf!("vfs", "root mounted on dev %d", Arg::from(dev as u64));
-                    mounted = true;
-                    break;
-                }
-                Err(_) => crate::kwrn!(
-                    "vfs",
-                    "dev %d: no bootable filesystem",
-                    Arg::from(dev as u64)
-                ),
+            // A standalone OnyxFS hard drive (OC2R) has its superblock at LBA 0;
+            // QEMU embeds the image at LBA 10240 of the boot disk. Try LBA 0
+            // first — reading LBA 10240 on a small standalone drive is out of
+            // range and the virtio device never completes the request (hang).
+            if vfs::mount_root(dev, 0).is_ok() || vfs::mount_root(dev, ONYXFS_LBA).is_ok() {
+                crate::kinf!("vfs", "root mounted on dev %d", Arg::from(dev as u64));
+                mounted = true;
+                break;
             }
+            crate::kwrn!(
+                "vfs",
+                "dev %d: no bootable filesystem",
+                Arg::from(dev as u64)
+            );
         }
         if !mounted {
             crate::kerr!(

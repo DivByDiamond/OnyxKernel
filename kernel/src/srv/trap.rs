@@ -19,17 +19,23 @@ pub unsafe fn init() {
 pub unsafe fn init_hart() {
     crate::arch::csr::write_stvec(crate::arch::asm::trap_entry as *const () as usize as u64);
     let hartid = crate::arch::smp::current_hart();
-    let stack_top = if hartid == 0 {
-        &crate::arch::__stack_top as *const u8 as usize
-    } else {
-        let b = &raw const crate::arch::smp::G_SEC_STACKS as *const u8 as usize;
-        b + (hartid + 1) * crate::arch::smp::SEC_STACK_SIZE
-    };
-    crate::arch::csr::write_sscratch(stack_top as u64);
+    let _ = hartid;
+    // sscratch = 0 while in kernel mode (trap_entry uses it as the
+    // user/kernel discriminator). drop_to_user sets it to the kernel stack
+    // top right before entering user space.
+    crate::arch::csr::write_sscratch(0);
 }
 
 pub unsafe fn handle(tf: &mut TrapFrame) {
+    crate::srv::klog::debug_mark(b'T');
     let scause = crate::arch::csr::read_scause();
+    crate::kinf!(
+        "trap",
+        "enter scause=%p sepc=%p stval=%p",
+        onyx_core::fmt::Arg::from(scause),
+        onyx_core::fmt::Arg::from(tf.sepc),
+        onyx_core::fmt::Arg::from(crate::arch::csr::read_stval())
+    );
     let is_int = scause & SCAUSE_INT != 0;
     let code = scause & !SCAUSE_INT;
     if is_int {
@@ -72,13 +78,27 @@ pub unsafe fn handle(tf: &mut TrapFrame) {
                 let sstatus = crate::arch::csr::read_sstatus();
                 let from_kernel = sstatus & SSTATUS_SPP != 0;
                 if from_kernel || pid == 0 {
+                    let cur = proc::current_opt();
+                    let (_cur_pid, cur_ring, cur_root) = if let Some(p) = cur {
+                        (p.pid, p.ring, p.root_pa)
+                    } else {
+                        (0u32, 0u8, 0u64)
+                    };
+                    let hart = crate::proc::process::hart_id();
+                    let gc = crate::proc::process::current_for_hart(hart) as usize;
                     crate::kerr!(
                         "trap",
-                        "KERNEL page fault scause=%p sepc=%p stval=%p sstatus=%p",
+                        "KERNEL page fault pid=%d scause=%p sepc=%p stval=%p satp=%p root_pa=%p ring=%d GC=%p ra=%p a7=%d",
+                        onyx_core::fmt::Arg::from(pid),
                         onyx_core::fmt::Arg::from(scause),
                         onyx_core::fmt::Arg::from(tf.sepc),
                         onyx_core::fmt::Arg::from(stval),
-                        onyx_core::fmt::Arg::from(sstatus)
+                        onyx_core::fmt::Arg::from(crate::arch::csr::read_satp()),
+                        onyx_core::fmt::Arg::from(cur_root),
+                        onyx_core::fmt::Arg::from(cur_ring as u32),
+                        onyx_core::fmt::Arg::from(gc as u64),
+                        onyx_core::fmt::Arg::from(tf.ra),
+                        onyx_core::fmt::Arg::from(tf.a7 as u32)
                     );
                     crate::srv::klog::halt();
                 }

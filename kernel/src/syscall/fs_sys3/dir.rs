@@ -3,6 +3,7 @@ use crate::proc;
 
 use super::super::handler::{parse_user_path, user_ptr_ok};
 
+#[inline(never)]
 pub unsafe fn sys_chdir(path: u64) -> i64 {
     let mut path_buf = [0u8; 256];
     let path_len = match parse_user_path(path, &mut path_buf) {
@@ -19,6 +20,7 @@ pub unsafe fn sys_chdir(path: u64) -> i64 {
     }
 }
 
+#[inline(never)]
 pub unsafe fn sys_getcwd(buf: u64, len: u64) -> i64 {
     if !user_ptr_ok(buf, len) {
         return onyx_core::errno::Errno::Inval.as_i64();

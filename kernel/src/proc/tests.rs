@@ -7,8 +7,8 @@ fn test_alloc_pid_unique() {
         super::process::init();
         let pid1 = alloc_pid();
         let pid2 = alloc_pid();
-        assert_eq!(pid1, PROC_PID_INIT);
-        assert_eq!(pid2, PROC_PID_INIT + 1);
+        assert_eq!(pid1, PROC_PID_INIT + 1);
+        assert_eq!(pid2, PROC_PID_INIT + 2);
         assert_ne!(pid1, pid2);
     }
 }

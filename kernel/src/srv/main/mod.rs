@@ -8,10 +8,12 @@ mod vfs;
 const BANNER: &str = "\n\x1b[32m░█▀█░█▀█░█░█░█░█\n░█░█░█░█░░█░░▄▀▄\n░▀▀▀░▀░▀░░▀░░▀░▀\x1b[0m\n  OnyxKernel v0.3 (Rust) — RISC-V 64 GC\n\n";
 
 pub unsafe fn kmain(hartid: usize, fdt_addr: usize) -> ! {
+    crate::srv::klog::debug_mark(b'K');
     // Configure the console from the device tree before printing anything:
     // on OC2R/sedna the UART is not necessarily at the QEMU-virt default
     // 0x10000000, and a wrong console address makes the kernel appear dead.
     if crate::libfdt::fdt::init(fdt_addr) {
+        crate::srv::klog::debug_mark(b'i');
         if let Some(u) = crate::libfdt::fdt::find_uart() {
             crate::drivers::uart::init(u.base as usize, u.reg_shift);
         } else {
@@ -20,7 +22,9 @@ pub unsafe fn kmain(hartid: usize, fdt_addr: usize) -> ! {
     } else {
         crate::drivers::uart::init_default();
     }
+    crate::srv::klog::debug_mark(b'b');
     crate::srv::klog::puts(BANNER);
+    crate::srv::klog::debug_mark(b'n');
     crate::kinf!(
         "kmain",
         "hartid=%d fdt=%p",
@@ -75,7 +79,10 @@ pub unsafe fn kmain(hartid: usize, fdt_addr: usize) -> ! {
         Arg::from(crate::drivers::virtio_net::mac()[5] as u32)
     );
     display::init_and_draw();
+    crate::srv::klog::debug_mark(b'1');
     vfs::setup(ndevs);
+    crate::srv::klog::debug_mark(b'2');
     vfs::load_font();
+    crate::srv::klog::debug_mark(b'3');
     init::launch()
 }

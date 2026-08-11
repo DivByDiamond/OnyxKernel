@@ -3,6 +3,7 @@ use crate::drivers::virtio::*;
 use core::ptr;
 use core::sync::atomic::{fence, Ordering};
 use onyx_core::errno::{Errno, KResult};
+use onyx_core::fmt::Arg;
 
 unsafe fn submit_and_wait(dev_idx: usize, req_type: u32, sector: u64) -> KResult<()> {
     let pd = &raw mut G_DEVS;
@@ -52,8 +53,24 @@ unsafe fn submit_and_wait(dev_idx: usize, req_type: u32, sector: u64) -> KResult
     );
     reg_w(dev.base, R_QUEUE_NOTIFY, 0);
     let used_idx_ptr = core::ptr::addr_of!((*dev.used).idx);
+    let mut spins = 0u64;
     #[allow(clippy::while_immutable_condition)]
-    while core::ptr::read_volatile(used_idx_ptr) == dev.last_used {}
+    while core::ptr::read_volatile(used_idx_ptr) == dev.last_used {
+        spins += 1;
+        if spins == 500_000 {
+            crate::kwrn!(
+                "virtio",
+                "req type=%d sector=%d spins=%d avail.idx=%d used.idx=%d queue_ready?",
+                Arg::from(req_type),
+                Arg::from(sector),
+                Arg::from(spins),
+                Arg::from(u32::from(core::ptr::read_volatile(core::ptr::addr_of!(
+                    (*dev.avail).idx
+                )))),
+                Arg::from(u32::from(core::ptr::read_volatile(used_idx_ptr)))
+            );
+        }
+    }
     dev.last_used = core::ptr::read_volatile(used_idx_ptr);
     if (*dev.req_buf).status == VIRTIO_BLK_S_OK {
         Ok(())
