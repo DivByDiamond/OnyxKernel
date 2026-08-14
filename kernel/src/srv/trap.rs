@@ -27,15 +27,7 @@ pub unsafe fn init_hart() {
 }
 
 pub unsafe fn handle(tf: &mut TrapFrame) {
-    crate::srv::klog::debug_mark(b'T');
     let scause = crate::arch::csr::read_scause();
-    crate::kinf!(
-        "trap",
-        "enter scause=%p sepc=%p stval=%p",
-        onyx_core::fmt::Arg::from(scause),
-        onyx_core::fmt::Arg::from(tf.sepc),
-        onyx_core::fmt::Arg::from(crate::arch::csr::read_stval())
-    );
     let is_int = scause & SCAUSE_INT != 0;
     let code = scause & !SCAUSE_INT;
     if is_int {
