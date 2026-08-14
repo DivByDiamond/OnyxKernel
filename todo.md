@@ -105,6 +105,11 @@
 - [x] **mkimage v2** — v2 образы с snapshot area + journal (уже было реализовано)
 
 ### Приоритет 7 — Общее:
+- [ ] **OC2R-блок «Загрузчик ОС»** (см. oc2r/todo.md секция 30): игрок кладёт флешку/диск в блок, указывает путь к образу (`config/oc2r/onyx-kernel.bin`, `config/oc2r/onyxfs.img`) → получает предмет с прошитой OnyxOS. Не требует пересборки мода и прав на сервер.
+- [ ] Проверить, что кастомный kernel из `config/oc2r/onyx-kernel.bin` грузится (OnyxOSFirmware уже читает override с fallback на jar — коммит `0b90b3b` в oc2r).
+- [ ] Проверить, что кастомный rootfs из `config/oc2r/onyxfs.img` маунтится (OnyxOSBlockDeviceData уже читает override).
+- [ ] Сеть в OC2R: OnyxOS подхватывает адрес из FDT/DHCP, а не хардкод `[10,0,2,15]`.
+- [ ] GPU/framebuffer: формат `r5g6b5` на мониторе OC2R — проверить отрисовку PSF-шрифтов.
 - [x] **Panic recovery** — kdump (CSR, backtrace, hartid, dump_all), QEMU reboot
 - [x] **Multi-core (SMP)** — G_HART_CURRENT, G_HART_IDLE_TF, SpinLock, sched_enter_idle()
 - [x] **RLE decompression в загрузчике onx** — распаковка сжатых сегментов при загрузке
