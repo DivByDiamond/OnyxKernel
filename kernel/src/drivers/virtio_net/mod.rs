@@ -4,11 +4,11 @@
 //! probe / init sequence. Frame I/O lives in `xfer.rs`.
 use crate::arch::mmio::Mmio;
 use crate::drivers::virtio::{
-    reg_r, reg_w, VqAvail, VqDesc, VqUsed, R_DEVICE_ID, R_GUEST_FEATURES, R_HOST_FEATURES,
-    R_MAGIC_VALUE, R_QUEUE_AVAIL_HIGH, R_QUEUE_AVAIL_LOW, R_QUEUE_DESC_HIGH, R_QUEUE_DESC_LOW,
-    R_QUEUE_READY, R_QUEUE_NUM, R_QUEUE_SEL, R_QUEUE_USED_HIGH, R_QUEUE_USED_LOW, R_STATUS,
-    R_VERSION, VIRTIO_S_ACK, VIRTIO_S_DRIVER, VIRTIO_S_DRIVER_OK, VIRTIO_S_FEATURES_OK, VIRTQ_SIZE,
-    VQ_DESC_F_WRITE,
+    reg_r, reg_w, VqAvail, VqDesc, VqUsed, R_DEVICE_ID, R_GUEST_FEATURES, R_GUEST_FEATURES_SEL,
+    R_HOST_FEATURES, R_HOST_FEATURES_SEL, R_MAGIC_VALUE, R_QUEUE_AVAIL_HIGH, R_QUEUE_AVAIL_LOW,
+    R_QUEUE_DESC_HIGH, R_QUEUE_DESC_LOW, R_QUEUE_NUM, R_QUEUE_READY, R_QUEUE_SEL,
+    R_QUEUE_USED_HIGH, R_QUEUE_USED_LOW, R_STATUS, R_VERSION, VIRTIO_F_VERSION_1, VIRTIO_S_ACK,
+    VIRTIO_S_DRIVER, VIRTIO_S_DRIVER_OK, VIRTIO_S_FEATURES_OK, VIRTQ_SIZE, VQ_DESC_F_WRITE,
 };
 use crate::mm::pmm;
 use core::ptr;
@@ -42,9 +42,9 @@ pub(crate) static mut G_NET: NetDev = NetDev {
     mac: [0; 6],
 };
 
-/// True once a virtio-net device has been initialized.
+/// True once a virtio-net device has been fully initialized (queues up).
 pub fn present() -> bool {
-    unsafe { G_NET.base != 0 }
+    unsafe { G_NET.base != 0 && !G_NET.desc.is_null() }
 }
 
 pub unsafe fn probe(base: usize) -> bool {
@@ -60,12 +60,23 @@ pub unsafe fn init(base: usize) -> KResult<()> {
     }
     let version = reg_r(base, R_VERSION);
     let modern = version >= 2;
-    G_NET.base = base;
-    G_NET.modern = modern;
     reg_w(base, R_STATUS, 0);
     reg_w(base, R_STATUS, VIRTIO_S_ACK | VIRTIO_S_DRIVER);
-    let hf = reg_r(base, R_HOST_FEATURES);
-    reg_w(base, R_GUEST_FEATURES, hf & 0x1FFF_FFFF);
+    // Read the full 64-bit feature word via the features_sel registers and
+    // negotiate VIRTIO_F_VERSION_1 (bit 32) explicitly: sedna's virtio
+    // emulation clears FEATURES_OK unless that bit is present in the guest
+    // features, which would fail the device (and leave G_NET half-initialized
+    // in older code, faulting on a NULL descriptor queue later).
+    reg_w(base, R_HOST_FEATURES_SEL, 1);
+    let host_feat_hi = reg_r(base, R_HOST_FEATURES);
+    reg_w(base, R_HOST_FEATURES_SEL, 0);
+    let host_feat_lo = reg_r(base, R_HOST_FEATURES);
+    let guest_hi = host_feat_hi | VIRTIO_F_VERSION_1;
+    reg_w(base, R_GUEST_FEATURES_SEL, 0);
+    reg_w(base, R_GUEST_FEATURES, host_feat_lo & 0x1FFF_FFFF);
+    reg_w(base, R_GUEST_FEATURES_SEL, 1);
+    reg_w(base, R_GUEST_FEATURES, guest_hi);
+    reg_w(base, R_GUEST_FEATURES_SEL, 0);
     if modern {
         reg_w(
             base,
@@ -73,14 +84,20 @@ pub unsafe fn init(base: usize) -> KResult<()> {
             VIRTIO_S_ACK | VIRTIO_S_DRIVER | VIRTIO_S_FEATURES_OK,
         );
         if reg_r(base, R_STATUS) & VIRTIO_S_FEATURES_OK == 0 {
-            return Err(Errno::Inval);
+            // sedna's virtio emulation never sets FEATURES_OK, yet it still
+            // accepts DRIVER_OK — don't fail the whole device over it.
+            crate::kwrn!("virtio-net", "device did not set FEATURES_OK, continuing");
         }
     }
     // MAC address lives at device-specific config offset 0x100 in legacy MMIO.
     for i in 0..6 {
         G_NET.mac[i] = Mmio::<u8>::at(base + 0x100 + i).read();
     }
-    setup_rx_queue()?;
+    // Only expose the device to the network stack once the queues are fully
+    // set up — G_NET.base non-zero is the "ready" signal used by present().
+    setup_rx_queue(base)?;
+    G_NET.base = base;
+    G_NET.modern = modern;
     reg_w(
         base,
         R_STATUS,
@@ -89,8 +106,7 @@ pub unsafe fn init(base: usize) -> KResult<()> {
     Ok(())
 }
 
-unsafe fn setup_rx_queue() -> KResult<()> {
-    let base = G_NET.base;
+unsafe fn setup_rx_queue(base: usize) -> KResult<()> {
     reg_w(base, R_QUEUE_SEL, 0);
     reg_w(base, R_QUEUE_NUM, VIRTQ_SIZE as u32);
     let desc_pa = pmm::alloc_zero()? as usize;
@@ -121,6 +137,9 @@ unsafe fn setup_rx_queue() -> KResult<()> {
 }
 
 pub(crate) unsafe fn push_avail(idx: usize) {
+    if G_NET.avail.is_null() {
+        return;
+    }
     let i = ptr::read_volatile(ptr::addr_of!((*G_NET.avail).idx));
     ptr::write_volatile(
         ptr::addr_of_mut!((*G_NET.avail).ring[(i as usize) % VIRTQ_SIZE]),

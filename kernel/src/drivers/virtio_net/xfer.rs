@@ -9,6 +9,9 @@ use onyx_core::errno::{Errno, KResult};
 /// Returns the number of bytes received, or `Err(NoEnt)` if no frame is ready.
 pub fn recv_into(out: &mut [u8]) -> KResult<usize> {
     unsafe {
+        if G_NET.base == 0 || G_NET.avail.is_null() || G_NET.used.is_null() {
+            return Err(Errno::Io);
+        }
         let used_idx = ptr::read_volatile(ptr::addr_of!((*G_NET.used).idx));
         if used_idx == G_NET.last_used {
             return Err(Errno::NoEnt);
@@ -31,6 +34,13 @@ pub fn send(frame: &[u8]) -> KResult<()> {
         return Err(Errno::Inval);
     }
     unsafe {
+        // Never dereference a half-initialized device: init() exposes the
+        // global only after the queues are up, but keep the guard as defense
+        // in depth so a stray caller can't fault the kernel on a NULL pointer.
+        if G_NET.base == 0 || G_NET.desc.is_null() || G_NET.avail.is_null() || G_NET.used.is_null()
+        {
+            return Err(Errno::Io);
+        }
         let hdr_pa = pmm::alloc_zero()? as *mut u8;
         let frame_pa = pmm::alloc_zero()? as *mut u8;
         ptr::copy_nonoverlapping(frame.as_ptr(), frame_pa, frame.len());
@@ -51,12 +61,26 @@ pub fn send(frame: &[u8]) -> KResult<()> {
         let base = G_NET.base;
         crate::drivers::virtio::reg_w(base, R_QUEUE_NOTIFY, 0);
         let last = ptr::read_volatile(ptr::addr_of!((*G_NET.used).idx));
-        // Wait for one new used entry.
+        // Wait for one new used entry. sedna's VirtIONetworkDevice only marks
+        // the TX descriptor used when the OC2R network stack pulls the frame
+        // on its own tick (async w.r.t. the guest), so a fixed small spin
+        // bound would fail a live link. Bound by uptime instead, with a hard
+        // spin cap as a fail-safe in case the timer does not advance.
+        let deadline = crate::srv::timer::uptime_us().wrapping_add(250_000);
+        let mut spins = 0u64;
         loop {
             let cur = ptr::read_volatile(ptr::addr_of!((*G_NET.used).idx));
             if cur != last {
-                let _ = last;
                 break;
+            }
+            spins += 1;
+            if spins >= 10_000_000 || crate::srv::timer::uptime_us() >= deadline {
+                // Do NOT free the buffers here: sedna's network stack pulls TX
+                // chains asynchronously on its own tick and may still consume
+                // the (stale) descriptors, so freeing would be a use-after-free.
+                // Two leaked pages per failed send is fine — this only happens
+                // when no network peer is present (DHCP falls back and moves on).
+                return Err(Errno::Io);
             }
         }
         pmm::free(hdr_pa as u64);
