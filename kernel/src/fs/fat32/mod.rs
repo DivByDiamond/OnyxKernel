@@ -39,9 +39,11 @@ pub(crate) unsafe fn is_eoc(v: u32) -> bool {
 
 mod dir;
 mod helpers;
+mod write;
 
 pub use dir::*;
 pub(crate) use helpers::*;
+pub use write::*;
 
 #[cfg(test)]
 mod tests;
