@@ -1,0 +1,40 @@
+name: OnyxKernel CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          targets: riscv64gc-unknown-none-elf
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build kernel
+        run: cargo build --release -p onyx_kernel --target riscv64gc-unknown-none-elf
+
+      - name: Build tools
+        run: cargo build --release -p onyx_tools
+
+      - name: Run core tests
+        run: cargo test -p onyx_core
+
+      - name: Upload kernel
+        uses: actions/upload-artifact@v6
+        with:
+          name: onyxkernel-elf
+          path: target/riscv64gc-unknown-none-elf/release/onyx-kernel
