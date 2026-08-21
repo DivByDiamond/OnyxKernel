@@ -81,15 +81,8 @@ pub unsafe fn sys_truncate(path: u64) -> i64 {
 }
 
 /// truncate2(path, length) — POSIX-style truncate with explicit length.
-/// Currently the OnyxFS VFS layer only supports full truncation (length=0).
-///
-/// Audit fix (🟡 #4): the previous code accepted a non-zero length but
-/// treated it as a silent no-op, returning success while leaving the
-/// file unchanged. That gives callers (libc truncate(3), cp -n, etc.)
-/// the illusion that the operation worked, which can corrupt files
-/// and break size assumptions. We now return -ENOSYS for non-zero
-/// lengths so callers see an explicit "not implemented" and can fall
-/// back to a portable read-truncate-write loop.
+/// Now delegates to OnyxFS `truncate_to_length` which supports all three
+/// cases (zero, shrink, extend with zero-fill).
 pub unsafe fn sys_truncate2(path: u64, length: u64) -> i64 {
     let mut path_buf = [0u8; 256];
     let path_len = match parse_user_path(path, &mut path_buf) {
@@ -101,32 +94,20 @@ pub unsafe fn sys_truncate2(path: u64, length: u64) -> i64 {
         Ok(t) => t,
         Err(e) => return e.as_i64(),
     };
-    let r = if length == 0 {
-        match vfs::truncate(token) {
-            Ok(()) => 0,
-            Err(e) => e.as_i64(),
-        }
-    } else {
-        // Non-zero length truncation is not yet implemented in the VFS —
-        // fail loudly instead of silently succeeding.
-        Errno::NoSys.as_i64()
+    let r = match vfs::truncate_to_length(token, length) {
+        Ok(()) => 0,
+        Err(e) => e.as_i64(),
     };
     vfs::close(token).ok();
     r
 }
 
 /// ftruncate(fd, length) — same as truncate2 but takes an fd.
-///
-/// Audit fix (🟡 #4): same rationale as sys_truncate2 — non-zero length
-/// used to silently succeed. Now returns -ENOSYS.
+/// Now uses truncate_to_length to support non-zero lengths.
 pub unsafe fn sys_ftruncate(fd: u64, length: u64) -> i64 {
-    if length == 0 {
-        match vfs::truncate(fd) {
-            Ok(()) => 0,
-            Err(e) => e.as_i64(),
-        }
-    } else {
-        Errno::NoSys.as_i64()
+    match vfs::truncate_to_length(fd, length) {
+        Ok(()) => 0,
+        Err(e) => e.as_i64(),
     }
 }
 
