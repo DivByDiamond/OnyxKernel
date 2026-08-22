@@ -1,3 +1,5 @@
+[![OnyxKernel CI](https://github.com/DivByDiamond/OnyxKernel/actions/workflows/ci.yml/badge.svg)](https://github.com/DivByDiamond/OnyxKernel/actions/workflows/ci.yml)
+
 <p align="center">
   <img src="https://img.shields.io/badge/platform-RISC--V%2064--bit-green" alt="RISC-V 64">
   <img src="https://img.shields.io/badge/language-Rust%20%7E98%25-orange" alt="Rust ~98%">
