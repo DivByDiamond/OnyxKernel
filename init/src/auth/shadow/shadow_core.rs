@@ -2,10 +2,10 @@
 // items unused by one binary are used by others (dead_code/unused_imports fire per-bin).
 #![allow(dead_code, unused_imports)]
 
-use crate::auth::SHADOW_PATH;
 use crate::auth::crypto::{
     bytes_to_hex, const_time_eq, generate_salt, hash_password, hex_decode_8,
 };
+use crate::auth::SHADOW_PATH;
 use crate::syscalls;
 
 pub fn read_shadow_password(username: &[u8]) -> Result<[u8; 128], i64> {
