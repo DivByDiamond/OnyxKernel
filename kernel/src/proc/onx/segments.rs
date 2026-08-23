@@ -9,7 +9,7 @@ pub unsafe fn map_segment_data(
     s: &OnxSegment,
     image: *const u8,
     compressed: bool,
-) -> KResult<()> {
+) -> KResult<()> { unsafe {
     let seg_flags = (s.flags as u64) | PTE_U | PTE_A | PTE_D;
     let mut va = s.vaddr;
     let end = s.vaddr + s.memsz;
@@ -24,8 +24,21 @@ pub unsafe fn map_segment_data(
         let existing_pa = vmm::translate_user(root_pa, page_base);
         if existing_pa == 0 {
             // Page not mapped as a user page — allocate a fresh zero page.
-            let page_pa = pmm::alloc_zero()?;
-            vmm::map_one_pub(root_pa, page_base, page_pa, seg_flags, 0)?;
+            crate::proc::limits::user_page_take()?;
+            let page_pa = match pmm::alloc_zero() {
+                Ok(pa) => pa,
+                Err(e) => {
+                    crate::proc::limits::user_pages_release(1);
+                    return Err(e);
+                }
+            };
+            if let Err(e) = vmm::map_one_pub(root_pa, page_base, page_pa, seg_flags, 0) {
+                // Page never entered the table — release it here so both
+                // the physical page and its budget slot are reclaimed.
+                pmm::free(page_pa);
+                crate::proc::limits::user_pages_release(1);
+                return Err(e);
+            }
         } else {
             // Page is already mapped as a user page (from a previous
             // segment that shares this page). Upgrade permissions: OR
@@ -48,9 +61,9 @@ pub unsafe fn map_segment_data(
     } else {
         copy_raw_to_pages(root_pa, s, image)
     }
-}
+}}
 
-unsafe fn decompress_to_pages(root_pa: u64, s: &OnxSegment, image: *const u8) -> KResult<()> {
+unsafe fn decompress_to_pages(root_pa: u64, s: &OnxSegment, image: *const u8) -> KResult<()> { unsafe {
     let src = image.add(s.offset as usize);
     let comp_end = s.compressed_size as usize;
     let file_end = s.vaddr + s.filesz;
@@ -95,9 +108,9 @@ unsafe fn decompress_to_pages(root_pa: u64, s: &OnxSegment, image: *const u8) ->
         }
     }
     Ok(())
-}
+}}
 
-unsafe fn copy_raw_to_pages(root_pa: u64, s: &OnxSegment, image: *const u8) -> KResult<()> {
+unsafe fn copy_raw_to_pages(root_pa: u64, s: &OnxSegment, image: *const u8) -> KResult<()> { unsafe {
     let mut va = s.vaddr;
     let end = s.vaddr + s.memsz;
     let mut file_pos: u64 = 0;
@@ -117,4 +130,4 @@ unsafe fn copy_raw_to_pages(root_pa: u64, s: &OnxSegment, image: *const u8) -> K
         va = page_va_end;
     }
     Ok(())
-}
+}}

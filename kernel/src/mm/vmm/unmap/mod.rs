@@ -9,14 +9,14 @@ use super::walk::walk;
 #[cfg(target_pointer_width = "32")]
 use super::walk::walk;
 
-pub unsafe fn unmap(root_pa: u64, vaddr: u64, size: usize) -> KResult<()> {
+pub unsafe fn unmap(root_pa: u64, vaddr: u64, size: usize) -> KResult<()> { unsafe {
     super::lock::vmm_lock();
     let r = unmap_impl(root_pa, vaddr, size);
     super::lock::vmm_unlock();
     r
-}
+}}
 
-unsafe fn unmap_impl(root_pa: u64, vaddr: u64, size: usize) -> KResult<()> {
+unsafe fn unmap_impl(root_pa: u64, vaddr: u64, size: usize) -> KResult<()> { unsafe {
     let mut va = vaddr;
     let size_aligned = (size + 4095) & !4095;
     let mut remaining = size_aligned;
@@ -49,12 +49,15 @@ unsafe fn unmap_impl(root_pa: u64, vaddr: u64, size: usize) -> KResult<()> {
             let paddr = (pte & PTE_PPN_MASK) >> PTE_PPN_SHIFT << 12;
             if pmm::is_managed(paddr) {
                 pmm::free(paddr);
+                // User pages freed here were accounted at map time
+                // (mmap / brk growth / exec load).
+                crate::proc::limits::user_pages_release(1);
             }
         }
-        ptr::write_volatile(pte_ptr as *mut u64, 0);
+        ptr::write_volatile(pte_ptr, 0);
         csr::sfence_vma(va, 0);
         va += 4096;
         remaining -= 4096;
     }
     Ok(())
-}
+}}

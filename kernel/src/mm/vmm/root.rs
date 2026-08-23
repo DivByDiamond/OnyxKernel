@@ -13,11 +13,11 @@ use onyx_core::errno::KResult;
 
 pub(super) static mut G_KERNEL_ROOT_PA: u64 = 0;
 
-pub unsafe fn new_root() -> KResult<u64> {
+pub unsafe fn new_root() -> KResult<u64> { unsafe {
     pmm::alloc_zero()
-}
+}}
 
-pub unsafe fn install_root(root_pa: u64) {
+pub unsafe fn install_root(root_pa: u64) { unsafe {
     #[cfg(target_pointer_width = "64")]
     {
         csr::write_satp(crate::arch::regs::SATP_MODE_SV39 | (root_pa >> 12));
@@ -28,9 +28,9 @@ pub unsafe fn install_root(root_pa: u64) {
         csr::write_satp(satp as u64);
     }
     csr::sfence_vma_all();
-}
+}}
 
-pub unsafe fn init() -> KResult<u64> {
+pub unsafe fn init() -> KResult<u64> { unsafe {
     let root_pa = new_root()?;
     crate::arch::smp::G_KERNEL_ROOT_PA = root_pa;
     let root = root_pa as *mut u64;
@@ -56,13 +56,13 @@ pub unsafe fn init() -> KResult<u64> {
     *p = root_pa;
     install_root(root_pa);
     Ok(root_pa)
-}
+}}
 
 pub fn kernel_root() -> u64 {
-    unsafe { *(&raw const G_KERNEL_ROOT_PA) }
+    unsafe { G_KERNEL_ROOT_PA }
 }
 
-pub unsafe fn destroy_root(root_pa: u64) {
+pub unsafe fn destroy_root(root_pa: u64) { unsafe {
     super::lock::vmm_lock();
     let root = root_pa as *mut u64;
     #[cfg(target_pointer_width = "64")]
@@ -72,9 +72,9 @@ pub unsafe fn destroy_root(root_pa: u64) {
     super::lock::vmm_unlock();
     pmm::free(root_pa);
     csr::sfence_vma_all();
-}
+}}
 
-unsafe fn free_subtree(table: *mut u64, level: u32) {
+unsafe fn free_subtree(table: *mut u64, level: u32) { unsafe {
     #[cfg(target_pointer_width = "64")]
     let entries = SV39_PTES_PER_TABLE;
     #[cfg(target_pointer_width = "32")]
@@ -88,6 +88,11 @@ unsafe fn free_subtree(table: *mut u64, level: u32) {
         let child_pa = (pte & PTE_PPN_MASK) >> PTE_PPN_SHIFT << 12;
         if is_leaf {
             if pmm::is_managed(child_pa) {
+                // Only PTE_U leaves are user pages accounted by
+                // proc::limits; kernel-identity placeholders are not.
+                if pte & PTE_U != 0 {
+                    crate::proc::limits::user_pages_release(1);
+                }
                 pmm::free(child_pa);
             }
         } else if level > 0 {
@@ -95,4 +100,4 @@ unsafe fn free_subtree(table: *mut u64, level: u32) {
             pmm::free(child_pa);
         }
     }
-}
+}}

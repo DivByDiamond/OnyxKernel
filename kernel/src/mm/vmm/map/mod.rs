@@ -1,6 +1,5 @@
 use crate::arch::regs::*;
 use crate::mm::pmm;
-use core::ptr;
 use onyx_core::errno::{Errno, KResult};
 use onyx_core::fmt::Arg;
 
@@ -9,14 +8,14 @@ use super::walk::walk;
 #[cfg(target_pointer_width = "32")]
 use super::walk::walk;
 
-pub unsafe fn map(root_pa: u64, vaddr: u64, paddr: u64, size: usize, flags: u64) -> KResult<()> {
+pub unsafe fn map(root_pa: u64, vaddr: u64, paddr: u64, size: usize, flags: u64) -> KResult<()> { unsafe {
     super::lock::vmm_lock();
     let r = map_impl(root_pa, vaddr, paddr, size, flags);
     super::lock::vmm_unlock();
     r
-}
+}}
 
-unsafe fn map_impl(root_pa: u64, vaddr: u64, paddr: u64, size: usize, flags: u64) -> KResult<()> {
+unsafe fn map_impl(root_pa: u64, vaddr: u64, paddr: u64, size: usize, flags: u64) -> KResult<()> { unsafe {
     let mut va = vaddr;
     let mut pa = paddr;
     let mut remaining = size as u64;
@@ -43,35 +42,50 @@ unsafe fn map_impl(root_pa: u64, vaddr: u64, paddr: u64, size: usize, flags: u64
         remaining -= chunk;
     }
     Ok(())
-}
+}}
 
-pub unsafe fn map_anon(root_pa: u64, vaddr: u64, size: usize, flags: u64) -> KResult<()> {
+pub unsafe fn map_anon(root_pa: u64, vaddr: u64, size: usize, flags: u64) -> KResult<()> { unsafe {
     super::lock::vmm_lock();
     let r = map_anon_impl(root_pa, vaddr, size, flags);
     super::lock::vmm_unlock();
     r
-}
+}}
 
-unsafe fn map_anon_impl(root_pa: u64, vaddr: u64, size: usize, flags: u64) -> KResult<()> {
+unsafe fn map_anon_impl(root_pa: u64, vaddr: u64, size: usize, flags: u64) -> KResult<()> { unsafe {
     let mut va = vaddr;
     let size_aligned = (size + 4095) & !4095;
     let mut remaining = size_aligned as u64;
     let mut allocated: [u64; 1024] = [0; 1024];
     let mut n_allocated: usize = 0;
+    // Pages accounted against the system-wide user-memory budget so far.
+    let mut n_counted: usize = 0;
     while remaining > 0 {
+        // Reserve against USER_MEM_MAX_BYTES before touching the PMM so a
+        // runaway mmap fails cleanly with ENOMEM instead of draining RAM.
+        if let Err(e) = crate::proc::limits::user_page_take() {
+            for &pa in &allocated[..n_allocated] {
+                pmm::free(pa);
+            }
+            crate::proc::limits::user_pages_release(n_counted);
+            return Err(e);
+        }
         let page_pa = match pmm::alloc_zero() {
             Ok(pa) => pa,
             Err(e) => {
-                for i in 0..n_allocated {
-                    pmm::free(allocated[i]);
+                // The take above succeeded but no page was mapped — undo it
+                // along with every previously counted page of this call.
+                crate::proc::limits::user_pages_release(n_counted + 1);
+                for &pa in &allocated[..n_allocated] {
+                    pmm::free(pa);
                 }
                 return Err(e);
             }
         };
         if let Err(e) = map_one(root_pa, va, page_pa, flags | PTE_A | PTE_D, 0) {
             pmm::free(page_pa);
-            for i in 0..n_allocated {
-                pmm::free(allocated[i]);
+            crate::proc::limits::user_pages_release(n_counted + 1);
+            for &pa in &allocated[..n_allocated] {
+                pmm::free(pa);
             }
             return Err(e);
         }
@@ -79,13 +93,14 @@ unsafe fn map_anon_impl(root_pa: u64, vaddr: u64, size: usize, flags: u64) -> KR
             allocated[n_allocated] = page_pa;
             n_allocated += 1;
         }
+        n_counted += 1;
         va += 1u64 << 12;
         remaining -= 1u64 << 12;
     }
     Ok(())
-}
+}}
 
-unsafe fn map_one(root_pa: u64, vaddr: u64, paddr: u64, flags: u64, level: u32) -> KResult<()> {
+unsafe fn map_one(root_pa: u64, vaddr: u64, paddr: u64, flags: u64, level: u32) -> KResult<()> { unsafe {
     #[cfg(target_pointer_width = "64")]
     if level == 1 && paddr & ((1u64 << 21) - 1) != 0 {
         return Err(Errno::Inval);
@@ -117,7 +132,7 @@ unsafe fn map_one(root_pa: u64, vaddr: u64, paddr: u64, flags: u64, level: u32) 
     core::ptr::write_volatile(pte_ptr, pte);
     crate::arch::csr::sfence_vma(vaddr, 0);
     Ok(())
-}
+}}
 
 pub unsafe fn map_one_pub(
     root_pa: u64,
@@ -125,12 +140,12 @@ pub unsafe fn map_one_pub(
     paddr: u64,
     flags: u64,
     level: u32,
-) -> KResult<()> {
+) -> KResult<()> { unsafe {
     super::lock::vmm_lock();
     let r = map_one(root_pa, vaddr, paddr, flags, level);
     super::lock::vmm_unlock();
     r
-}
+}}
 
 #[cfg(target_pointer_width = "64")]
 fn best_level(va: u64, pa: u64, remaining: u64) -> u32 {

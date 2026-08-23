@@ -1,7 +1,7 @@
 use crate::arch::regs::*;
 use core::ptr;
 
-pub unsafe fn translate(root_pa: u64, vaddr: u64) -> u64 {
+pub unsafe fn translate(root_pa: u64, vaddr: u64) -> u64 { unsafe {
     if root_pa == 0 {
         crate::kerr!(
             "translate",
@@ -35,9 +35,9 @@ pub unsafe fn translate(root_pa: u64, vaddr: u64) -> u64 {
         pa = (pte & PTE_PPN_MASK) >> PTE_PPN_SHIFT << 12;
     }
     0
-}
+}}
 
-pub unsafe fn translate_user(root_pa: u64, vaddr: u64) -> u64 {
+pub unsafe fn translate_user(root_pa: u64, vaddr: u64) -> u64 { unsafe {
     if root_pa == 0 {
         return 0;
     }
@@ -69,9 +69,9 @@ pub unsafe fn translate_user(root_pa: u64, vaddr: u64) -> u64 {
         pa = (pte & PTE_PPN_MASK) >> PTE_PPN_SHIFT << 12;
     }
     0
-}
+}}
 
-pub unsafe fn translate_user_write(root_pa: u64, vaddr: u64) -> u64 {
+pub unsafe fn translate_user_write(root_pa: u64, vaddr: u64) -> u64 { unsafe {
     if root_pa == 0 {
         return 0;
     }
@@ -103,9 +103,9 @@ pub unsafe fn translate_user_write(root_pa: u64, vaddr: u64) -> u64 {
         pa = (pte & PTE_PPN_MASK) >> PTE_PPN_SHIFT << 12;
     }
     0
-}
+}}
 
-pub unsafe fn pte_user_flags(root_pa: u64, vaddr: u64) -> u64 {
+pub unsafe fn pte_user_flags(root_pa: u64, vaddr: u64) -> u64 { unsafe {
     if root_pa == 0 {
         return 0;
     }
@@ -130,12 +130,12 @@ pub unsafe fn pte_user_flags(root_pa: u64, vaddr: u64) -> u64 {
         pa = (pte & PTE_PPN_MASK) >> PTE_PPN_SHIFT << 12;
     }
     0
-}
+}}
 
 /// OR `add_flags` into an existing level-0 user PTE. Returns `false` if the
 /// page is not mapped as a user leaf at level 0 (caller must then fall back
 /// to a fresh mapping or report an error).
-pub unsafe fn update_user_pte(root_pa: u64, vaddr: u64, add_flags: u64) -> bool {
+pub unsafe fn update_user_pte(root_pa: u64, vaddr: u64, add_flags: u64) -> bool { unsafe {
     if root_pa == 0 {
         return false;
     }
@@ -163,4 +163,4 @@ pub unsafe fn update_user_pte(root_pa: u64, vaddr: u64, add_flags: u64) -> bool 
         pa = (pte & PTE_PPN_MASK) >> PTE_PPN_SHIFT << 12;
     }
     false
-}
+}}

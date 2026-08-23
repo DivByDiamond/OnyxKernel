@@ -6,7 +6,7 @@ use crate::arch::trap_frame::TrapFrame;
 use crate::mm::heap;
 use onyx_core::errno::{Errno, KResult};
 
-pub unsafe fn wait(tf: &mut TrapFrame, status_out: *mut i32) -> KResult<u32> {
+pub unsafe fn wait(tf: &mut TrapFrame, status_out: *mut i32) -> KResult<u32> { unsafe {
     let my_pid = current_pid();
     proc_list_lock();
     let mut cur = G_ALL_PROCS;
@@ -54,4 +54,4 @@ pub unsafe fn wait(tf: &mut TrapFrame, status_out: *mut i32) -> KResult<u32> {
     }
     super::super::scheduler::sched_yield(tf);
     Err(Errno::NoEnt)
-}
+}}
