@@ -18,6 +18,9 @@ pub unsafe fn init() { unsafe {
 
 pub unsafe fn init_hart() { unsafe {
     crate::arch::csr::write_stvec(crate::arch::asm::trap_entry as *const () as usize as u64);
+    // Enable cycle/instret/time for U-mode (S-mode access is gated by
+    // mcounteren, set in the M-mode boot path / by the firmware).
+    crate::arch::csr::write_scounteren(0x7);
     let hartid = crate::arch::smp::current_hart();
     let _ = hartid;
     // sscratch = 0 while in kernel mode (trap_entry uses it as the
@@ -57,8 +60,16 @@ pub unsafe fn handle(tf: &mut TrapFrame) { unsafe {
                 // signal handler's return address and a0 would be lost.
                 // Special-case sigreturn: skip the post-handle fixups.
                 let is_sigreturn = tf.a7 == SYS_sigreturn;
+                // SYS_exit must never return to userspace: when the handler
+                // returns, the process is already torn down (address space
+                // destroyed, state = Exited), so "advancing" sepc past the
+                // ecall would only fabricate a live-looking frame pointing
+                // into dead code. Skip the fixups; the post-trap check at
+                // the bottom of this function sees state == Exited and
+                // context-switches away instead of ever returning here.
+                let is_exit = tf.a7 == crate::syscall::abi::SYS_exit;
                 let ret = handler::handle(tf);
-                if !is_sigreturn {
+                if !is_sigreturn && !is_exit {
                     tf.a0 = ret as u64;
                     tf.sepc = tf.sepc.wrapping_add(4);
                 }
@@ -130,6 +141,35 @@ pub unsafe fn handle(tf: &mut TrapFrame) { unsafe {
     // Signal delivery: check the current process for pending unblocked
     // signals. KILL terminates the process; other signals are cleared (MVP).
     proc::signal_check(tf);
+    // Kernel-stack overflow detector: alloc_proc plants KSTACK_CANARY at
+    // the bottom of the embedded kstack, where nothing legitimate ever
+    // writes (stack usage grows down from the top of the array). A clobbered
+    // canary means some syscall path exceeded KSTACK_SIZE and has been
+    // smashing the Proc header — pid/ring/state read as garbage afterwards,
+    // which historically turned a live login into "pid=0" and made SYS_exit
+    // a silent no-op. Log it loudly so the offending path gets identified
+    // instead of failing mysteriously later.
+    {
+        let cur = proc::current_opt();
+        if let Some(p) = cur {
+            let canary = core::ptr::read_volatile(p.kstack.as_ptr() as *const u64);
+            static OVFL_LOGGED: core::sync::atomic::AtomicU32 =
+                core::sync::atomic::AtomicU32::new(0);
+            if canary != crate::proc::KSTACK_CANARY
+                && OVFL_LOGGED.load(core::sync::atomic::Ordering::Relaxed) < 8
+            {
+                OVFL_LOGGED.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
+                crate::kerr!(
+                    "trap",
+                    "KERNEL STACK OVERFLOW: kstack canary corrupted pid=%d ring=%d scause=%p sepc=%p",
+                    onyx_core::fmt::Arg::from(p.pid),
+                    onyx_core::fmt::Arg::from(p.ring as u32),
+                    onyx_core::fmt::Arg::from(scause),
+                    onyx_core::fmt::Arg::from(tf.sepc)
+                );
+            }
+        }
+    }
     let pid = proc::current_pid();
     if pid != 0
         && let Some(p) = proc::by_pid(pid)

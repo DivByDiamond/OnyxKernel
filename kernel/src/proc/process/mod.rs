@@ -10,6 +10,6 @@ pub use globals::{
     set_current_for_hart,
 };
 pub use types::{
-    KSTACK_SIZE, PROC_MAX_FDS, PROC_PID_INIT, PROC_RING_KERNEL, PROC_RING_ROOT, PROC_RING_USER,
-    Proc, ProcState,
+    KSTACK_CANARY, KSTACK_SIZE, PROC_MAX_FDS, PROC_PID_INIT, PROC_RING_KERNEL, PROC_RING_ROOT,
+    PROC_RING_USER, Proc, ProcState,
 };

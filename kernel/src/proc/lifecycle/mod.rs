@@ -50,6 +50,8 @@ pub(super) unsafe fn alloc_proc() -> KResult<*mut Proc> { unsafe {
     (*p).affinity = -1;
     (*p).on_rq = false;
     (*p).raw_stdin = false;
+    // Plant the kstack overflow canary (see KSTACK_CANARY in types.rs).
+    ptr::write_volatile((*p).kstack.as_mut_ptr() as *mut u64, crate::proc::KSTACK_CANARY);
     G_ALL_PROCS = p;
     Ok(p)
 }}
