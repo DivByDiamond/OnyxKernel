@@ -12,7 +12,7 @@ const TIOCSRAW: u64 = 0x5421;
 const TIOCRRAW: u64 = 0x5422;
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn _start(argc: usize, argv: *const u64) -> ! {
+pub unsafe extern "C" fn _start(argc: usize, argv: *const u64, _envp: *const u64) -> ! {
     let mut target_user = [0u8; 32];
     let mut target_len = 0usize;
 

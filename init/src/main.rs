@@ -13,7 +13,7 @@ mod util;
 const BANNER: &[u8] = b"[init] OnyxOS init v0.4 (service manager)\n";
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn _start(argc: usize, argv: *const u64) -> ! {
+pub unsafe extern "C" fn _start(argc: usize, argv: *const u64, _envp: *const u64) -> ! {
     syscalls::write(1, BANNER.as_ptr(), BANNER.len());
 
     if argc > 0 {
