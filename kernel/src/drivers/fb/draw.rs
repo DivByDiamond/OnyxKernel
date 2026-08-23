@@ -1,5 +1,4 @@
-use super::put_pixel;
-use super::FB_WIDTH;
+use super::{put_pixel, width};
 use crate::font;
 
 pub fn draw_char(x: usize, y: usize, c: u8, fg: u32, bg: u32) {
@@ -44,7 +43,7 @@ pub fn draw_str(mut x: usize, y: usize, s: &str, fg: u32, bg: u32) {
             b'\r' => x = 0,
             b'\t' => x = (x / (4 * font::FONT_W) + 1) * (4 * font::FONT_W),
             _ => {
-                if x + font::FONT_W > FB_WIDTH {
+                if x + font::FONT_W > width() {
                     return;
                 }
                 draw_char(x, y, b, fg, bg);
@@ -102,7 +101,7 @@ pub fn draw_unicode_str(mut x: usize, y: usize, s: &str, fg: u32, bg: u32) {
                 | ((bytes[i + 3] & 0x3F) as u32);
             i += 4;
         }
-        if x + fw > FB_WIDTH {
+        if x + fw > width() {
             return;
         }
         draw_unicode_char(x, y, cp, fg, bg);

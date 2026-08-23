@@ -23,14 +23,14 @@ impl FbWriter {
             b'\n' => {
                 self.col = 0;
                 self.row += 1;
-                if self.row >= fb::FB_HEIGHT / font::FONT_H {
+                if self.row >= fb::height() / font::FONT_H {
                     fb::scroll();
-                    self.row = fb::FB_HEIGHT / font::FONT_H - 1;
+                    self.row = fb::height() / font::FONT_H - 1;
                 }
             }
             b'\r' => self.col = 0,
             _ => {
-                let max_col = fb::FB_WIDTH / font::FONT_W;
+                let max_col = fb::width() / font::FONT_W;
                 fb::draw_char(
                     self.col * font::FONT_W,
                     self.row * font::FONT_H,
@@ -42,9 +42,9 @@ impl FbWriter {
                 if self.col >= max_col {
                     self.col = 0;
                     self.row += 1;
-                    if self.row >= fb::FB_HEIGHT / font::FONT_H {
+                    if self.row >= fb::height() / font::FONT_H {
                         fb::scroll();
-                        self.row = fb::FB_HEIGHT / font::FONT_H - 1;
+                        self.row = fb::height() / font::FONT_H - 1;
                     }
                 }
             }

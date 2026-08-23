@@ -35,7 +35,7 @@ pub fn stat(ino: u32) -> KResult<DevfsStat> {
         }),
         DEVFS_FB0_INO => Ok(DevfsStat {
             ino,
-            size: fb::FB_SIZE as u32,
+            size: fb::size_bytes() as u32,
             mode: 0o100666,
         }),
         DEVFS_BLK0_INO => Ok(DevfsStat {
@@ -50,7 +50,7 @@ pub fn stat(ino: u32) -> KResult<DevfsStat> {
 pub unsafe fn read(ino: u32, buf: *mut u8, offset: u32, len: u32) -> KResult<u32> {
     match ino {
         DEVFS_FB0_INO => {
-            let size = fb::FB_SIZE as u32;
+            let size = fb::size_bytes() as u32;
             let to_read = len.min(size.saturating_sub(offset));
             if to_read == 0 {
                 return Ok(0);
@@ -78,7 +78,7 @@ pub unsafe fn read(ino: u32, buf: *mut u8, offset: u32, len: u32) -> KResult<u32
 pub unsafe fn write(ino: u32, buf: *const u8, offset: u32, len: u32) -> KResult<u32> {
     match ino {
         DEVFS_FB0_INO => {
-            let size = fb::FB_SIZE as u32;
+            let size = fb::size_bytes() as u32;
             let to_write = len.min(size.saturating_sub(offset));
             if to_write == 0 {
                 return Ok(0);
@@ -129,7 +129,7 @@ pub unsafe fn mmap(ino: u32, vaddr: u64, length: u64, pte_flags: u64) -> KResult
     match ino {
         DEVFS_FB0_INO => {
             let fb_pa = fb::fb_base_pa();
-            let fb_size = fb::FB_SIZE as u64;
+            let fb_size = fb::size_bytes() as u64;
             let map_len = length.min(fb_size);
             let p = crate::proc::current();
             let flags = pte_flags | crate::arch::regs::PTE_A | crate::arch::regs::PTE_D;
@@ -152,11 +152,11 @@ pub unsafe fn ioctl(ino: u32, request: u64, arg: u64) -> KResult<i64> {
                     return Err(Errno::Inval);
                 }
                 let dst = pa as *mut u32;
-                *dst = fb::FB_WIDTH as u32;
-                *dst.add(1) = fb::FB_HEIGHT as u32;
-                *dst.add(2) = fb::FB_BPP as u32;
-                *dst.add(3) = fb::FB_PITCH as u32;
-                *dst.add(4) = fb::FB_SIZE as u32;
+                *dst = fb::width() as u32;
+                *dst.add(1) = fb::height() as u32;
+                *dst.add(2) = fb::bpp() as u32;
+                *dst.add(3) = fb::pitch() as u32;
+                *dst.add(4) = fb::size_bytes() as u32;
                 Ok(0)
             }
             _ => Err(Errno::NoSys),
