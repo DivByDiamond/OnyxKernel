@@ -18,38 +18,36 @@
 //! dirent blocks) is not critical for crash recovery.
 use super::{read_block, write_block, G_JOURNAL_HEAD, G_SB};
 use onyx_core::errno::{Errno, KResult};
-use onyx_core::formats::ONYFS_BLOCK_SIZE;
-
-const JOURNAL_TYPE_COMMIT_START: u32 = 0;
-const JOURNAL_TYPE_BLOCK_WRITE: u32 = 1;
-const JOURNAL_TYPE_COMMIT_END: u32 = 2;
-const JOURNAL_DATA_SIZE: usize = ONYFS_BLOCK_SIZE - 8;
+use onyx_core::formats::{
+    journal_entry_type, journal_replay_entry, journal_scan_step, JournalScanStep, ONYFS_BLOCK_SIZE,
+    ONYFS_JOURNAL_BLOCK_WRITE, ONYFS_JOURNAL_COMMIT_END, ONYFS_JOURNAL_DATA_SIZE,
+};
 
 /// Append a `block_write` entry to the journal containing the NEW contents
 /// of `block_num`. Called BEFORE the actual `write_block` so that a crash
 /// between the journal append and the data write leaves a recoverable redo
 /// entry on disk. No-op if the filesystem has no journal configured.
 #[inline(never)]
-pub(super) unsafe fn journal_log(block_num: u32, data: &[u8; ONYFS_BLOCK_SIZE]) -> KResult<()> {
+pub(super) unsafe fn journal_log(block_num: u32, data: &[u8; ONYFS_BLOCK_SIZE]) -> KResult<()> { unsafe {
     let sb_ptr = &raw const G_SB;
     let journal_start = (*sb_ptr).journal_start;
     if journal_start == 0 || (*sb_ptr).journal_size == 0 {
         return Ok(());
     }
-    let head = *(&raw const G_JOURNAL_HEAD);
+    let head = G_JOURNAL_HEAD;
     if head >= (*sb_ptr).journal_size {
         // Journal full — caller should have committed by now. Bail out.
         return Err(Errno::NoSpace);
     }
     let mut entry = [0u8; ONYFS_BLOCK_SIZE];
-    entry[0..4].copy_from_slice(&JOURNAL_TYPE_BLOCK_WRITE.to_le_bytes());
+    entry[0..4].copy_from_slice(&ONYFS_JOURNAL_BLOCK_WRITE.to_le_bytes());
     entry[4..8].copy_from_slice(&block_num.to_le_bytes());
-    let copy_n = JOURNAL_DATA_SIZE.min(ONYFS_BLOCK_SIZE);
+    let copy_n = ONYFS_JOURNAL_DATA_SIZE.min(ONYFS_BLOCK_SIZE);
     entry[8..8 + copy_n].copy_from_slice(&data[..copy_n]);
     write_block(journal_start + head, &entry)?;
-    *(&raw mut G_JOURNAL_HEAD) = head + 1;
+    G_JOURNAL_HEAD = head + 1;
     Ok(())
-}
+}}
 
 /// Mark the current transaction as committed by appending a `commit_end`
 /// entry. After this, the journal entries are considered durable and will be
@@ -68,22 +66,22 @@ pub(super) unsafe fn journal_log(block_num: u32, data: &[u8; ONYFS_BLOCK_SIZE]) 
 /// entries after commit ensures the next transaction always starts with
 /// a clean slate on disk.
 #[inline(never)]
-pub(super) unsafe fn journal_commit() -> KResult<()> {
+pub(super) unsafe fn journal_commit() -> KResult<()> { unsafe {
     let sb_ptr = &raw const G_SB;
     let journal_start = (*sb_ptr).journal_start;
     if journal_start == 0 || (*sb_ptr).journal_size == 0 {
         return Ok(());
     }
-    let head = *(&raw const G_JOURNAL_HEAD);
+    let head = G_JOURNAL_HEAD;
     if head == 0 {
         return Ok(()); // nothing to commit
     }
     if head < (*sb_ptr).journal_size {
         let mut entry = [0u8; ONYFS_BLOCK_SIZE];
-        entry[0..4].copy_from_slice(&JOURNAL_TYPE_COMMIT_END.to_le_bytes());
+        entry[0..4].copy_from_slice(&ONYFS_JOURNAL_COMMIT_END.to_le_bytes());
         write_block(journal_start + head, &entry)?;
     }
-    *(&raw mut G_JOURNAL_HEAD) = 0;
+    G_JOURNAL_HEAD = 0;
     // Zero every entry that was part of this transaction (positions 0..head).
     // The commit_end marker at `head` is left in place for now so a crash
     // mid-zero still results in correct replay on the next mount — once all
@@ -99,14 +97,14 @@ pub(super) unsafe fn journal_commit() -> KResult<()> {
         write_block(journal_start + head, &zero)?;
     }
     Ok(())
-}
+}}
 
 /// Replay journal on mount (crash recovery). Scans the journal area for a
 /// `commit_end` marker. If found, every preceding `block_write` entry is
 /// re-applied to its target block (redo). Incomplete transactions (no
 /// `commit_end`) are discarded. The journal is then zeroed so future mounts
 /// start with a clean log.
-pub unsafe fn journal_recover() -> KResult<()> {
+pub unsafe fn journal_recover() -> KResult<()> { unsafe {
     let sb_ptr = &raw const G_SB;
     let journal_start = (*sb_ptr).journal_start;
     if journal_start == 0 || (*sb_ptr).journal_size == 0 {
@@ -119,39 +117,32 @@ pub unsafe fn journal_recover() -> KResult<()> {
     let mut i: u32 = 0;
     while i < journal_size {
         read_block(journal_start + i, &mut entry)?;
-        let entry_type = u32::from_le_bytes([entry[0], entry[1], entry[2], entry[3]]);
-        match entry_type {
-            JOURNAL_TYPE_COMMIT_START => {}
-            JOURNAL_TYPE_BLOCK_WRITE => {}
-            JOURNAL_TYPE_COMMIT_END => {
+        match journal_scan_step(journal_entry_type(&entry)) {
+            JournalScanStep::Continue => {}
+            JournalScanStep::Commit => {
                 found_commit = true;
                 commit_at = i;
                 break;
             }
-            _ => break, // empty slot or garbage — stop scanning
+            JournalScanStep::Stop => break, // empty slot or garbage — stop scanning
         }
         i += 1;
     }
     if !found_commit {
-        *(&raw mut G_JOURNAL_HEAD) = 0;
+        G_JOURNAL_HEAD = 0;
         return Ok(());
     }
     // Replay every `block_write` entry before the commit marker.
     for j in 0..commit_at {
         read_block(journal_start + j, &mut entry)?;
-        let entry_type = u32::from_le_bytes([entry[0], entry[1], entry[2], entry[3]]);
-        if entry_type != JOURNAL_TYPE_BLOCK_WRITE {
+        let Some((block_num, data)) = journal_replay_entry(&entry) else {
             continue;
-        }
-        let block_num = u32::from_le_bytes([entry[4], entry[5], entry[6], entry[7]]);
+        };
         // Read the current block contents (to preserve the un-journaled tail)
         // and overwrite the first JOURNAL_DATA_SIZE bytes from the entry.
         let mut blk_buf = [0u8; ONYFS_BLOCK_SIZE];
         let _ = read_block(block_num, &mut blk_buf);
-        let copy_n = JOURNAL_DATA_SIZE.min(ONYFS_BLOCK_SIZE);
-        for k in 0..copy_n {
-            blk_buf[k] = entry[8 + k];
-        }
+        blk_buf[..data.len()].copy_from_slice(&data);
         write_block(block_num, &blk_buf)?;
     }
     // Clear the journal area so future mounts see an empty log.
@@ -159,6 +150,6 @@ pub unsafe fn journal_recover() -> KResult<()> {
     for j in 0..=commit_at {
         write_block(journal_start + j, &zero)?;
     }
-    *(&raw mut G_JOURNAL_HEAD) = 0;
+    G_JOURNAL_HEAD = 0;
     Ok(())
-}
+}}

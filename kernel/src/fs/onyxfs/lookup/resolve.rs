@@ -6,7 +6,7 @@ use onyx_core::formats::{
     ONYFS_DIRECT_BLKS, ONYFS_DT_DIR, ONYFS_NAME_MAX, ONYFS_ROOT_INO, OnyfsInode,
 };
 
-pub unsafe fn lookup_in(dir_ino: u32, name: &[u8], out: &mut OnyfsStat) -> KResult<u32> {
+pub unsafe fn lookup_in(dir_ino: u32, name: &[u8], out: &mut OnyfsStat) -> KResult<u32> { unsafe {
     let mut inode = OnyfsInode {
         mode: 0,
         size: 0,
@@ -55,9 +55,9 @@ pub unsafe fn lookup_in(dir_ino: u32, name: &[u8], out: &mut OnyfsStat) -> KResu
         }
     }
     Err(Errno::NoEnt)
-}
+}}
 
-pub unsafe fn lookup(path: &[u8], out: &mut OnyfsStat) -> KResult<u32> {
+pub unsafe fn lookup(path: &[u8], out: &mut OnyfsStat) -> KResult<u32> { unsafe {
     let mut cur_ino = ONYFS_ROOT_INO;
     let mut remaining = path;
     loop {
@@ -83,13 +83,13 @@ pub unsafe fn lookup(path: &[u8], out: &mut OnyfsStat) -> KResult<u32> {
     }
     stat(cur_ino, out)?;
     Ok(cur_ino)
-}
+}}
 
-pub unsafe fn resolve_dir(path: &[u8]) -> KResult<u32> {
+pub unsafe fn resolve_dir(path: &[u8]) -> KResult<u32> { unsafe {
     let mut st = OnyfsStat::default();
     let ino = lookup(path, &mut st)?;
     if st.mode & 0o170000 != ONYFS_DT_DIR & 0o170000 {
         return Err(Errno::NotDir);
     }
     Ok(ino)
-}
+}}

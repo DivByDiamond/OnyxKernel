@@ -46,6 +46,48 @@ pub struct OnyfsSuper {
     pub reserved: [u32; 10],      // future expansion
 }
 
+/// Hard cap for grow-on-mount: never grow a filesystem beyond 1 GiB even if
+/// the backing device is larger. 1 GiB / 4096 = 262144 blocks.
+pub const ONYFS_MAX_TOTAL_BLOCKS: u32 = (1024 * 1024 * 1024 / ONYFS_BLOCK_SIZE) as u32;
+/// The v2 data-area bitmap is exactly ONE block written by mkimage at block
+/// index 2, so at most `4096 * 8` data blocks can ever be addressed without a
+/// format change. This is the real ceiling for grow-on-mount (~128 MiB of
+/// data area on top of the fixed metadata prefix).
+pub const ONYFS_BITMAP_CAPACITY_BLOCKS: u32 = (ONYFS_BLOCK_SIZE * 8) as u32;
+
+/// Maximum total_blocks reachable by growing a filesystem whose data area
+/// starts at `data_blocks_start`: bounded both by the single-block bitmap
+/// capacity and the 1 GiB sanity cap.
+#[inline]
+pub fn onyxfs_growth_limit(data_blocks_start: u32) -> u64 {
+    let bitmap_cap = data_blocks_start as u64 + ONYFS_BITMAP_CAPACITY_BLOCKS as u64;
+    bitmap_cap.min(ONYFS_MAX_TOTAL_BLOCKS as u64)
+}
+
+/// Grow-on-mount target: given the current `total_blocks`, the start of the
+/// data area, and the device size in FS blocks, return the new `total_blocks`
+/// to use, or `None` if the device is not larger than the filesystem.
+///
+/// The result never exceeds the growth limit above. No bitmap rewrite is
+/// needed: mkimage leaves every data-bitmap bit beyond the built image at
+/// zero (= free), so newly exposed blocks are immediately allocatable.
+pub fn onyxfs_growth_target(
+    cur_total_blocks: u32,
+    data_blocks_start: u32,
+    device_blocks: u64,
+) -> Option<u32> {
+    if device_blocks <= cur_total_blocks as u64 {
+        return None;
+    }
+    let new_total = device_blocks.min(onyxfs_growth_limit(data_blocks_start));
+    let new_total = u32::try_from(new_total).ok()?;
+    if new_total > cur_total_blocks {
+        Some(new_total)
+    } else {
+        None
+    }
+}
+
 impl OnyfsSuper {
     pub const SIZE: usize = 128;
 

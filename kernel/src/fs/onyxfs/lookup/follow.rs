@@ -5,7 +5,7 @@ use super::lookup_in;
 use onyx_core::errno::{Errno, KResult};
 use onyx_core::formats::{ONYFS_BLOCK_SIZE, ONYFS_DT_LNK, ONYFS_ROOT_INO};
 
-pub unsafe fn lookup_follow(path: &[u8], out: &mut OnyfsStat, depth: u32) -> KResult<u32> {
+pub unsafe fn lookup_follow(path: &[u8], out: &mut OnyfsStat, depth: u32) -> KResult<u32> { unsafe {
     if depth > 8 {
         return Err(Errno::Loop);
     }
@@ -73,4 +73,4 @@ pub unsafe fn lookup_follow(path: &[u8], out: &mut OnyfsStat, depth: u32) -> KRe
     }
     stat(cur_ino, out)?;
     Ok(cur_ino)
-}
+}}

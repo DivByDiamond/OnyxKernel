@@ -1,11 +1,11 @@
 use super::super::super::inode;
 use super::super::super::journal::journal_log;
-use super::super::super::{read_block, write_block, G_BUF};
+use super::super::super::{G_BUF, read_block, write_block};
 use super::free_data_block;
 use onyx_core::errno::{Errno, KResult};
-use onyx_core::formats::{OnyfsInode, ONYFS_BLOCK_SIZE, ONYFS_DIRECT_BLKS};
+use onyx_core::formats::{ONYFS_BLOCK_SIZE, ONYFS_DIRECT_BLKS, OnyfsInode};
 
-pub unsafe fn alloc_inode() -> KResult<u32> {
+pub unsafe fn alloc_inode() -> KResult<u32> { unsafe {
     const INODE_BITMAP_BLK: u32 = 1;
     let pb = &raw mut G_BUF;
     read_block(INODE_BITMAP_BLK, &mut *pb)?;
@@ -24,10 +24,10 @@ pub unsafe fn alloc_inode() -> KResult<u32> {
         }
     }
     Err(Errno::NoSpace)
-}
+}}
 
 #[inline(never)]
-pub unsafe fn free_inode(ino: u32) -> KResult<()> {
+pub unsafe fn free_inode(ino: u32) -> KResult<()> { unsafe {
     if ino == 0 {
         return Err(Errno::Inval);
     }
@@ -136,4 +136,4 @@ pub unsafe fn free_inode(ino: u32) -> KResult<()> {
         write_block(INODE_BITMAP_BLK, &*pb)?;
     }
     Ok(())
-}
+}}

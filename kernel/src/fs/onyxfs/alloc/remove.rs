@@ -13,7 +13,7 @@ use onyx_core::formats::{
 /// Bug #19 fix: previously this only scanned `dir_inode.blocks[0]`, so
 /// entries that lived in blocks[1..9] could never be removed (returned
 /// NoEnt). We now scan every direct block.
-pub unsafe fn remove_dirent(dir_ino: u32, name: &[u8]) -> KResult<()> {
+pub unsafe fn remove_dirent(dir_ino: u32, name: &[u8]) -> KResult<()> { unsafe {
     let mut dir_inode = OnyfsInode {
         mode: 0,
         size: 0,
@@ -32,7 +32,7 @@ pub unsafe fn remove_dirent(dir_ino: u32, name: &[u8]) -> KResult<()> {
     };
     inode::read_inode(dir_ino, &mut dir_inode)?;
     let dpb = dirents_per_block();
-    let entry_size = match *(&raw const G_VERSION) {
+    let entry_size = match G_VERSION {
         ONYFS_V1 => ONYFS_V1_DIRENT_SIZE,
         _ => OnyfsDirent::SIZE,
     };
@@ -85,4 +85,4 @@ pub unsafe fn remove_dirent(dir_ino: u32, name: &[u8]) -> KResult<()> {
         }
     }
     Err(Errno::NoEnt)
-}
+}}

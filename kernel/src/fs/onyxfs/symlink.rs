@@ -8,8 +8,8 @@ use onyx_core::formats::{
     ONYFS_BLOCK_SIZE, ONYFS_DIRECT_BLKS, ONYFS_DT_LNK, ONYFS_NAME_MAX, OnyfsInode,
 };
 
-pub unsafe fn symlink(dir_ino: u32, name: &[u8], target: &[u8]) -> KResult<u32> {
-    if *(&raw const G_VERSION) == ONYFS_V1 {
+pub unsafe fn symlink(dir_ino: u32, name: &[u8], target: &[u8]) -> KResult<u32> { unsafe {
+    if G_VERSION == ONYFS_V1 {
         return Err(Errno::NoSys);
     }
     if name.is_empty() || name.len() > ONYFS_NAME_MAX {
@@ -19,7 +19,7 @@ pub unsafe fn symlink(dir_ino: u32, name: &[u8], target: &[u8]) -> KResult<u32> 
         return Err(Errno::Inval);
     }
     let new_ino = alloc_inode()?;
-    let now = *(&raw const timer::G_JIFFIES);
+    let now = timer::G_JIFFIES;
     let data_blk = alloc_data_block()?;
     let mut inode = OnyfsInode {
         mode: ONYFS_DT_LNK,
@@ -40,12 +40,9 @@ pub unsafe fn symlink(dir_ino: u32, name: &[u8], target: &[u8]) -> KResult<u32> 
     inode.blocks[0] = data_blk;
     {
         let pb = &raw mut G_BUF;
-        for b in (*pb).iter_mut() {
-            *b = 0;
-        }
-        for i in 0..target.len().min(ONYFS_BLOCK_SIZE) {
-            (*pb)[i] = target[i];
-        }
+        (*pb).fill(0);
+        let n = target.len().min(ONYFS_BLOCK_SIZE);
+        (&mut *pb)[..n].copy_from_slice(&target[..n]);
         journal_log(data_blk, &*pb)?;
         write_block(data_blk, &*pb)?;
     }
@@ -53,10 +50,10 @@ pub unsafe fn symlink(dir_ino: u32, name: &[u8], target: &[u8]) -> KResult<u32> 
     add_dirent(dir_ino, name, new_ino, /*dtype=*/ 10)?;
     journal_commit()?;
     Ok(new_ino)
-}
+}}
 
-pub unsafe fn readlink(ino: u32, buf: *mut u8, len: u32) -> KResult<u32> {
-    if *(&raw const G_VERSION) == ONYFS_V1 {
+pub unsafe fn readlink(ino: u32, buf: *mut u8, len: u32) -> KResult<u32> { unsafe {
+    if G_VERSION == ONYFS_V1 {
         return Err(Errno::NoSys);
     }
     let mut inode = OnyfsInode {
@@ -92,4 +89,4 @@ pub unsafe fn readlink(ino: u32, buf: *mut u8, len: u32) -> KResult<u32> {
         }
     }
     Ok(target_len as u32)
-}
+}}

@@ -1,11 +1,11 @@
 //! File read path — `read` from a regular file inode.
 use super::inode::read_inode;
-use super::{read_block, G_BUF, G_VERSION, ONYFS_V1};
-use onyx_core::errno::{Errno, KResult};
-use onyx_core::formats::{OnyfsInode, ONYFS_BLOCK_SIZE, ONYFS_DIRECT_BLKS};
+use super::{G_BUF, ONYFS_V1, read_block};
+use onyx_core::errno::KResult;
+use onyx_core::formats::{ONYFS_BLOCK_SIZE, ONYFS_DIRECT_BLKS, OnyfsInode};
 
 #[inline(never)]
-pub unsafe fn read(ino: u32, buf: *mut u8, off: u32, len: u32) -> KResult<u32> {
+pub unsafe fn read(ino: u32, buf: *mut u8, off: u32, len: u32) -> KResult<u32> { unsafe {
     let mut inode = OnyfsInode {
         mode: 0,
         size: 0,
@@ -80,7 +80,7 @@ pub unsafe fn read(ino: u32, buf: *mut u8, off: u32, len: u32) -> KResult<u32> {
         let chunk_off = (off % bs) as usize;
         let chunk = (bs - off % bs).min(remaining) as usize;
         core::ptr::copy_nonoverlapping(
-            (*(&raw const G_BUF)).as_ptr().add(chunk_off),
+            (G_BUF).as_ptr().add(chunk_off),
             buf.add(read_total as usize),
             chunk,
         );
@@ -90,4 +90,4 @@ pub unsafe fn read(ino: u32, buf: *mut u8, off: u32, len: u32) -> KResult<u32> {
         abs_blk_idx += 1;
     }
     Ok(read_total)
-}
+}}

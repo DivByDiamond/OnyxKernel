@@ -1,7 +1,7 @@
 use super::super::inode;
 use super::super::journal::journal_log;
 use super::super::{
-    G_BUF, G_SB, G_VERSION, ONYFS_V1, ONYFS_V1_DIRENT_SIZE, dirents_per_block, read_block,
+    G_BUF, G_VERSION, ONYFS_V1, ONYFS_V1_DIRENT_SIZE, dirents_per_block, read_block,
     write_block,
 };
 use super::bitmap::alloc_data_block;
@@ -22,7 +22,7 @@ use onyx_core::formats::{
 ///   3. If no free slot exists in any existing block, allocate a fresh
 ///      direct block in the first empty `blocks[i]` slot, zero it, and
 ///      write the new entry as its first slot.
-pub unsafe fn add_dirent(dir_ino: u32, name: &[u8], target_ino: u32, dtype: u8) -> KResult<()> {
+pub unsafe fn add_dirent(dir_ino: u32, name: &[u8], target_ino: u32, dtype: u8) -> KResult<()> { unsafe {
     let mut dir_inode = OnyfsInode {
         mode: 0,
         size: 0,
@@ -41,7 +41,7 @@ pub unsafe fn add_dirent(dir_ino: u32, name: &[u8], target_ino: u32, dtype: u8) 
     };
     inode::read_inode(dir_ino, &mut dir_inode)?;
     let dpb = dirents_per_block();
-    let entry_size = match *(&raw const G_VERSION) {
+    let entry_size = match G_VERSION {
         ONYFS_V1 => ONYFS_V1_DIRENT_SIZE,
         _ => OnyfsDirent::SIZE,
     };
@@ -65,7 +65,7 @@ pub unsafe fn add_dirent(dir_ino: u32, name: &[u8], target_ino: u32, dtype: u8) 
             for j in n..ONYFS_NAME_MAX {
                 ($pb)[off + j] = 0;
             }
-            if *(&raw const G_VERSION) != ONYFS_V1 {
+            if G_VERSION != ONYFS_V1 {
                 ($pb)[off + 36] = dtype;
                 ($pb)[off + 37] = n as u8;
             }
@@ -170,4 +170,4 @@ pub unsafe fn add_dirent(dir_ino: u32, name: &[u8], target_ino: u32, dtype: u8) 
     // All direct blocks are full and there's no room for a new one —
     // would need to spill into the indirect block. Not implemented yet.
     Err(Errno::NoSpace)
-}
+}}

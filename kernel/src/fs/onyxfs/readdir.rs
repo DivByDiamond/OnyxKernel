@@ -14,7 +14,7 @@ pub unsafe fn readdir_entry(
     entry_idx: u32,
     name_out: *mut u8,
     name_len: usize,
-) -> KResult<Option<u32>> {
+) -> KResult<Option<u32>> { unsafe {
     let mut inode = OnyfsInode {
         mode: 0,
         size: 0,
@@ -83,4 +83,4 @@ pub unsafe fn readdir_entry(
     }
 
     Ok(None)
-}
+}}
