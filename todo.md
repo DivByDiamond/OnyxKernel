@@ -18,6 +18,11 @@
    см. секцию «Будущее» внизу.
 
 ## ✅ Готово:
+0. **QEMU smoke-инфраструктура + критический баг exit** — scripts/qemu-smoke.sh (headless) и
+   qemu-interactive-smoke.sh (login→osh→exit) в OnyxOS; найден и починен древний баг: kstack
+   32KB переполнялся execve (~39.5KB) и затирал заголовок Proc → pid=0 → SYS_exit no-op →
+   вечный illegal-loop после `exit` из osh. Фикс: KSTACK 64KB, canary-проверка на каждом трапе,
+   SYS_exit не возвращается в userspace, init перезапускает /bin/login
 1. **Полный рерайт на Rust** (~98%, assembly через global_asm!)
 2. **Динамические процессы** — нет PROC_MAX, heap-allocated linked list
 3. **OnyxExec v2** — dynamic segments (до 256), ring1 flag, compression flag
