@@ -27,7 +27,7 @@ pub(super) const SNAPSHOT_SLOT_BLKS: u32 = 2;
 /// (inode-table + data-bitmap + used data blocks), RLE-compress each block,
 /// and store the compressed data in the snapshot area. Also writes a
 /// `SnapshotMeta` record and bumps `snapshot_count`. Returns the new ID.
-pub unsafe fn snapshot_create(name: &[u8]) -> KResult<u32> {
+pub unsafe fn snapshot_create(name: &[u8]) -> KResult<u32> { unsafe {
     let sb_ptr = &raw const G_SB;
     if (*sb_ptr).snapshot_area_start == 0 || (*sb_ptr).feature_flags & ONYFS_FEAT_SNAPSHOTS == 0 {
         return Err(Errno::NoSys);
@@ -89,8 +89,8 @@ pub unsafe fn snapshot_create(name: &[u8]) -> KResult<u32> {
     // Compress and store each block in its 2-block slot.
     let mut comp_buf = [0u8; 8192];
     let mut blk_buf = [0u8; ONYFS_BLOCK_SIZE];
-    for i in 0..n_blocks {
-        let block_num = blocks[i].0;
+    for (i, blk) in blocks.iter_mut().enumerate().take(n_blocks) {
+        let block_num = blk.0;
         read_block(block_num, &mut blk_buf)?;
         let comp_size = rle_compress(&blk_buf, &mut comp_buf);
         let stored_size: u32 = if comp_size == 0 || comp_size > 8192 {
@@ -105,16 +105,16 @@ pub unsafe fn snapshot_create(name: &[u8]) -> KResult<u32> {
         write_block(slot_start, &out_blk)?;
         out_blk.copy_from_slice(&comp_buf[ONYFS_BLOCK_SIZE..8192]);
         write_block(slot_start + 1, &out_blk)?;
-        blocks[i].1 = stored_size;
+        blk.1 = stored_size;
     }
 
     // Write header block: n_entries + (block_num, comp_size) pairs.
     let mut header = [0u8; ONYFS_BLOCK_SIZE];
     header[0..4].copy_from_slice(&(n_blocks as u32).to_le_bytes());
-    for i in 0..n_blocks {
+    for (i, blk) in blocks.iter().enumerate().take(n_blocks) {
         let off = 4 + i * 8;
-        header[off..off + 4].copy_from_slice(&blocks[i].0.to_le_bytes());
-        header[off + 4..off + 8].copy_from_slice(&blocks[i].1.to_le_bytes());
+        header[off..off + 4].copy_from_slice(&blk.0.to_le_bytes());
+        header[off + 4..off + 8].copy_from_slice(&blk.1.to_le_bytes());
     }
     write_block(snap_data_start, &header)?;
 
@@ -124,7 +124,7 @@ pub unsafe fn snapshot_create(name: &[u8]) -> KResult<u32> {
     name_buf[..n].copy_from_slice(&name[..n]);
     let meta = SnapshotMeta {
         id: new_id,
-        timestamp: *(&raw const timer::G_JIFFIES),
+        timestamp: timer::G_JIFFIES,
         root_inode_snapshot: (*sb_ptr).root_inode,
         block_count: n_blocks as u32,
         name: name_buf,
@@ -139,12 +139,10 @@ pub unsafe fn snapshot_create(name: &[u8]) -> KResult<u32> {
         return Err(Errno::NoMem);
     }
     let meta_bytes = meta.to_bytes();
-    for i in 0..SnapshotMeta::SIZE {
-        (*pb)[meta_off + i] = meta_bytes[i];
-    }
+    (&mut *pb)[meta_off..(SnapshotMeta::SIZE + meta_off)].copy_from_slice(&meta_bytes);
     write_block((*sb_ptr).snapshot_area_start, &*pb)?;
 
-    (*(&raw mut G_SB)).snapshot_count = new_id;
+    G_SB.snapshot_count = new_id;
     persist_superblock()?;
     Ok(new_id)
-}
+}}

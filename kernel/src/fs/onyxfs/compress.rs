@@ -88,9 +88,7 @@ pub(super) unsafe fn rle_decompress(src: &[u8], dst: &mut [u8]) -> usize {
             if i + count > src.len() || out + count > dst.len() {
                 return 0;
             }
-            for j in 0..count {
-                dst[out + j] = src[i + j];
-            }
+            dst[out..(count + out)].copy_from_slice(&src[i..(count + i)]);
             i += count;
             out += count;
         }

@@ -7,13 +7,13 @@ use crate::srv::timer;
 use onyx_core::errno::{Errno, KResult};
 use onyx_core::formats::{ONYFS_BLOCK_SIZE, ONYFS_DIRECT_BLKS, ONYFS_NAME_MAX, OnyfsInode};
 
-pub unsafe fn create(dir_ino: u32, name: &[u8], mode: u32) -> KResult<u32> {
+pub unsafe fn create(dir_ino: u32, name: &[u8], mode: u32) -> KResult<u32> { unsafe {
     check_v2()?;
     if name.is_empty() || name.len() > ONYFS_NAME_MAX {
         return Err(Errno::Inval);
     }
     let new_ino = alloc_inode()?;
-    let now = *(&raw const timer::G_JIFFIES);
+    let now = timer::G_JIFFIES;
     let inode = OnyfsInode {
         mode,
         size: 0,
@@ -34,13 +34,13 @@ pub unsafe fn create(dir_ino: u32, name: &[u8], mode: u32) -> KResult<u32> {
     add_dirent(dir_ino, name, new_ino, 8)?;
     journal_commit()?;
     Ok(new_ino)
-}
+}}
 
 /// Free all data blocks held by `inode`, both direct and indirect.
 /// Used by `truncate(ino)` (zero-length) and as a building block for
 /// partial truncation. Does NOT touch the inode itself — caller is
 /// responsible for updating inode.blocks/indirect/size.
-pub(super) unsafe fn free_all_blocks(inode: &mut OnyfsInode) -> KResult<()> {
+pub(super) unsafe fn free_all_blocks(inode: &mut OnyfsInode) -> KResult<()> { unsafe {
     for &blk in inode.blocks.iter() {
         if blk != 0 {
             free_data_block(blk)?;
@@ -91,10 +91,10 @@ pub(super) unsafe fn free_all_blocks(inode: &mut OnyfsInode) -> KResult<()> {
         inode.double_indirect = 0;
     }
     Ok(())
-}
+}}
 
 /// Truncate the file to exactly 0 bytes — frees all data blocks.
-pub unsafe fn truncate(ino: u32) -> KResult<()> {
+pub unsafe fn truncate(ino: u32) -> KResult<()> { unsafe {
     check_v2()?;
     let mut inode = OnyfsInode {
         mode: 0,
@@ -115,11 +115,11 @@ pub unsafe fn truncate(ino: u32) -> KResult<()> {
     read_inode(ino, &mut inode)?;
     free_all_blocks(&mut inode)?;
     inode.size = 0;
-    inode.mtime = *(&raw const timer::G_JIFFIES);
+    inode.mtime = timer::G_JIFFIES;
     write_inode(ino, &inode)?;
     journal_commit()?;
     Ok(())
-}
+}}
 
 /// Truncate the file to exactly `length` bytes (POSIX truncate/ftruncate).
 ///
@@ -137,7 +137,7 @@ pub unsafe fn truncate(ino: u32) -> KResult<()> {
 ///   block_index = floor(offset / bs)
 ///   blocks 0..10 are direct; blocks 10..(10 + bs/4) are in the single
 ///   indirect block.
-pub unsafe fn truncate_to_length(ino: u32, length: u64) -> KResult<()> {
+pub unsafe fn truncate_to_length(ino: u32, length: u64) -> KResult<()> { unsafe {
     check_v2()?;
     let mut inode = OnyfsInode {
         mode: 0,
@@ -232,7 +232,11 @@ pub unsafe fn truncate_to_length(ino: u32, length: u64) -> KResult<()> {
         // that range. We leave double_indirect alone for safety.
     } else {
         // Extend. Allocate zero-filled blocks to cover [cur_size, length).
-        let first_new_block: u64 = if cur_size == 0 { 0 } else { (cur_size - 1) / bs + 1 };
+        let first_new_block: u64 = if cur_size == 0 {
+            0
+        } else {
+            (cur_size - 1) / bs + 1
+        };
         let last_block_needed: u64 = (length - 1) / bs;
         // For each block index in [first_new_block..=last_block_needed],
         // ensure a data block exists.
@@ -302,8 +306,8 @@ pub unsafe fn truncate_to_length(ino: u32, length: u64) -> KResult<()> {
     }
 
     inode.size = length;
-    inode.mtime = *(&raw const timer::G_JIFFIES);
+    inode.mtime = timer::G_JIFFIES;
     write_inode(ino, &inode)?;
     journal_commit()?;
     Ok(())
-}
+}}

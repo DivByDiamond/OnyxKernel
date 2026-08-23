@@ -7,21 +7,21 @@ use super::{G_BUF, G_VERSION, ONYFS_V1, write_block};
 use crate::srv::timer;
 use onyx_core::errno::{Errno, KResult};
 use onyx_core::formats::{
-    ONYFS_BLOCK_SIZE, ONYFS_DIRECT_BLKS, ONYFS_DT_DIR, ONYFS_NAME_MAX, OnyfsDirent, OnyfsInode,
+    ONYFS_DIRECT_BLKS, ONYFS_DT_DIR, ONYFS_NAME_MAX, OnyfsDirent, OnyfsInode,
 };
 
 /// Create a new directory. Returns the new inode number. Like `create()` but
 /// with `mode = ONYFS_DT_DIR`, and the new directory is given its own data
 /// block pre-populated with the conventional "." and ".." entries.
-pub unsafe fn mkdir(dir_ino: u32, name: &[u8]) -> KResult<u32> {
-    if *(&raw const G_VERSION) == ONYFS_V1 {
+pub unsafe fn mkdir(dir_ino: u32, name: &[u8]) -> KResult<u32> { unsafe {
+    if G_VERSION == ONYFS_V1 {
         return Err(Errno::NoSys);
     }
     if name.is_empty() || name.len() > ONYFS_NAME_MAX {
         return Err(Errno::Inval);
     }
     let new_ino = alloc_inode()?;
-    let now = *(&raw const timer::G_JIFFIES);
+    let now = timer::G_JIFFIES;
     let mut inode = OnyfsInode {
         mode: ONYFS_DT_DIR,
         size: 0,
@@ -67,10 +67,9 @@ pub unsafe fn mkdir(dir_ino: u32, name: &[u8]) -> KResult<u32> {
         };
         let db1 = dot.to_bytes();
         let db2 = dotdot.to_bytes();
-        for j in 0..OnyfsDirent::SIZE {
-            (*pb)[j] = db1[j];
-            (*pb)[OnyfsDirent::SIZE + j] = db2[j];
-        }
+        let blk = &mut *pb;
+        blk[..OnyfsDirent::SIZE].copy_from_slice(&db1);
+        blk[OnyfsDirent::SIZE..(2 * OnyfsDirent::SIZE)].copy_from_slice(&db2);
         journal_log(dir_blk, &*pb)?;
         write_block(dir_blk, &*pb)?;
     }
@@ -78,4 +77,4 @@ pub unsafe fn mkdir(dir_ino: u32, name: &[u8]) -> KResult<u32> {
     add_dirent(dir_ino, name, new_ino, /*dtype=*/ 4)?;
     journal_commit()?;
     Ok(new_ino)
-}
+}}

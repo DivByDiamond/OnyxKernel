@@ -3,8 +3,10 @@
 //! can use `onyx_core::formats::OnyfsSuper` etc.
 pub mod dirent;
 pub mod inode;
+pub mod journal;
 pub mod superblock;
 
 pub use dirent::*;
 pub use inode::*;
+pub use journal::*;
 pub use superblock::*;

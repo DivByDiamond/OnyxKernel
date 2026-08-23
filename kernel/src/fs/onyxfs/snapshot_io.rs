@@ -26,7 +26,7 @@ use onyx_core::formats::{ONYFS_BLOCK_SIZE, SnapshotMeta};
 /// transaction via `journal_commit` at the end. If a crash occurs mid-
 /// rollback, the next mount's `journal_recover` will replay the remaining
 /// writes and bring the filesystem to a consistent snapshot-restored state.
-pub unsafe fn snapshot_rollback(snapshot_id: u32) -> KResult<()> {
+pub unsafe fn snapshot_rollback(snapshot_id: u32) -> KResult<()> { unsafe {
     let sb_ptr = &raw const G_SB;
     if (*sb_ptr).snapshot_area_start == 0 {
         return Err(Errno::NoSys);
@@ -91,11 +91,11 @@ pub unsafe fn snapshot_rollback(snapshot_id: u32) -> KResult<()> {
     // remaining writes.
     journal_commit()?;
     Ok(())
-}
+}}
 
 /// List all snapshots: write each snapshot name (NUL-terminated, newline-
 /// separated) into `names_out`. Returns the number of snapshots listed.
-pub unsafe fn snapshot_list(names_out: *mut u8, max_len: usize) -> KResult<u32> {
+pub unsafe fn snapshot_list(names_out: *mut u8, max_len: usize) -> KResult<u32> { unsafe {
     let sb_ptr = &raw const G_SB;
     if (*sb_ptr).snapshot_area_start == 0 {
         return Ok(0);
@@ -144,4 +144,4 @@ pub unsafe fn snapshot_list(names_out: *mut u8, max_len: usize) -> KResult<u32> 
         *names_out.add(written) = 0;
     }
     Ok(listed)
-}
+}}

@@ -5,7 +5,7 @@ use super::lookup::lookup;
 use onyx_core::errno::{Errno, KResult};
 use onyx_core::formats::ONYFS_ROOT_INO;
 
-pub unsafe fn rename(old_path: &[u8], new_path: &[u8]) -> KResult<()> {
+pub unsafe fn rename(old_path: &[u8], new_path: &[u8]) -> KResult<()> { unsafe {
     if old_path.is_empty() || old_path[0] != b'/' || new_path.is_empty() || new_path[0] != b'/' {
         return Err(Errno::Inval);
     }
@@ -49,4 +49,4 @@ pub unsafe fn rename(old_path: &[u8], new_path: &[u8]) -> KResult<()> {
     remove_dirent(old_parent_ino, old_filename)?;
     journal_commit()?;
     Ok(())
-}
+}}

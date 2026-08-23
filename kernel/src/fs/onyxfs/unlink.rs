@@ -5,7 +5,7 @@ use super::lookup::lookup;
 use onyx_core::errno::{Errno, KResult};
 use onyx_core::formats::ONYFS_ROOT_INO;
 
-pub unsafe fn unlink(path: &[u8]) -> KResult<()> {
+pub unsafe fn unlink(path: &[u8]) -> KResult<()> { unsafe {
     if path.is_empty() || path[0] != b'/' {
         return Err(Errno::Inval);
     }
@@ -49,4 +49,4 @@ pub unsafe fn unlink(path: &[u8]) -> KResult<()> {
     free_inode(target_ino)?;
     journal_commit()?;
     Ok(())
-}
+}}

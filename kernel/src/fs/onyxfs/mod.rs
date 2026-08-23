@@ -25,7 +25,6 @@ pub mod symlink;
 pub mod unlink;
 pub mod write;
 
-pub use compress::*;
 pub use inode::*;
 pub use journal::*;
 pub use lookup::*;
@@ -101,40 +100,40 @@ pub(super) static mut G_BUF: [u8; ONYFS_BLOCK_SIZE] = [0; ONYFS_BLOCK_SIZE];
 /// Next free journal slot (block offset from `journal_start`).
 pub(super) static mut G_JOURNAL_HEAD: u32 = 0;
 
-pub(super) unsafe fn read_block(blk: u32, buf: &mut [u8; ONYFS_BLOCK_SIZE]) -> KResult<()> {
-    let lba = (*(&raw const G_LBA_BASE) as u64) + (blk as u64) * 8;
+pub(super) unsafe fn read_block(blk: u32, buf: &mut [u8; ONYFS_BLOCK_SIZE]) -> KResult<()> { unsafe {
+    let lba = (G_LBA_BASE as u64) + (blk as u64) * 8;
     // A single OnyxFS block is 4096 bytes = 8 × 512-byte sectors. We issue
     // ONE batched `virtio_req::read_multi` call covering all 8 sectors rather
     // than 8 sequential single-sector reads. Today `read_multi` internally
     // loops over single-sector ops, but the seam is in place for a future
     // scatter-gather optimization in the virtio-blk driver.
-    virtio_req::read_multi(*(&raw const G_DEV), lba, 8, buf.as_mut_ptr())
-}
+    virtio_req::read_multi(G_DEV, lba, 8, buf.as_mut_ptr())
+}}
 
 /// Write a 4096-byte block back to disk. Used by `update_mtime`,
 /// `write_inode`, and the snapshot management stubs.
-pub(super) unsafe fn write_block(blk: u32, buf: &[u8; ONYFS_BLOCK_SIZE]) -> KResult<()> {
-    let lba = (*(&raw const G_LBA_BASE) as u64) + (blk as u64) * 8;
+pub(super) unsafe fn write_block(blk: u32, buf: &[u8; ONYFS_BLOCK_SIZE]) -> KResult<()> { unsafe {
+    let lba = (G_LBA_BASE as u64) + (blk as u64) * 8;
     // Same batching as `read_block` — a single `write_multi` call for the
     // whole 8-sector block.
-    virtio_req::write_multi(*(&raw const G_DEV), lba, 8, buf.as_ptr())
-}
+    virtio_req::write_multi(G_DEV, lba, 8, buf.as_ptr())
+}}
 
 #[inline]
-pub(super) unsafe fn inodes_per_block() -> usize {
-    match *(&raw const G_VERSION) {
+pub(super) unsafe fn inodes_per_block() -> usize { unsafe {
+    match G_VERSION {
         ONYFS_V1 => ONYFS_BLOCK_SIZE / ONYFS_V1_INODE_SIZE, // 64
         _ => ONYFS_BLOCK_SIZE / onyx_core::formats::OnyfsInode::SIZE, // 32 (v2)
     }
-}
+}}
 
 #[inline]
-pub(super) unsafe fn dirents_per_block() -> usize {
-    match *(&raw const G_VERSION) {
+pub(super) unsafe fn dirents_per_block() -> usize { unsafe {
+    match G_VERSION {
         ONYFS_V1 => ONYFS_BLOCK_SIZE / ONYFS_V1_DIRENT_SIZE, // 113
         _ => ONYFS_BLOCK_SIZE / onyx_core::formats::OnyfsDirent::SIZE, // 102 (v2)
     }
-}
+}}
 
 #[cfg(test)]
 mod tests {
