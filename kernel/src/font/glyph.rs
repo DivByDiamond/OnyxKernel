@@ -17,9 +17,9 @@ pub fn glyph_for_unicode(cp: u32) -> Option<u32> {
         }
     }
     unsafe {
-        for i in 0..G_UNI_MAP_LEN {
-            if G_UNI_MAP[i].codepoint == cp {
-                return Some(G_UNI_MAP[i].glyph_idx);
+        for entry in G_UNI_MAP.iter().take(G_UNI_MAP_LEN) {
+            if entry.codepoint == cp {
+                return Some(entry.glyph_idx);
             }
         }
     }
@@ -78,7 +78,7 @@ pub fn glyph_for_cp(cp: u32) -> Option<u8> {
     unsafe {
         let f = G_FONT?;
         if f.unicode.is_null() || f.unicode_len == 0 {
-            return (cp as u8 <= 0x7F || (f.num_glyphs > 256 && cp < 256)).then(|| cp as u8);
+            return (cp as u8 <= 0x7F || (f.num_glyphs > 256 && cp < 256)).then_some(cp as u8);
         }
         let mut pos = 0usize;
         let mut glyph: u32 = 0;
@@ -97,7 +97,7 @@ pub fn glyph_for_cp(cp: u32) -> Option<u8> {
 }
 
 pub fn glyph_or_default(cp: u32) -> u8 {
-    glyph_for_cp(cp).unwrap_or_else(|| if cp < 256 { cp as u8 } else { b'?' })
+    glyph_for_cp(cp).unwrap_or(if cp < 256 { cp as u8 } else { b'?' })
 }
 
 static BLANK_GLYPH: [u8; FONT_GLYPH_BYTES] = [0u8; FONT_GLYPH_BYTES];

@@ -33,10 +33,10 @@ pub(super) const PS_BUFFER_READ_ENABLE: u32 = 1 << 11;
 pub(super) const PS_CARD_INSERTED: u32 = 1 << 16;
 pub(super) const PS_CARD_STATE_STABLE: u32 = 1 << 17;
 
-pub(super) const CMD_RESP_NONE: u16 = 0 << 0;
+pub(super) const CMD_RESP_NONE: u16 = 0;
 pub(super) const CMD_RESP_136: u16 = 1 << 0;
-pub(super) const CMD_RESP_48: u16 = 2 << 0;
-pub(super) const CMD_RESP_48_BUSY: u16 = 3 << 0;
+pub(super) const CMD_RESP_48: u16 = 2;
+pub(super) const CMD_RESP_48_BUSY: u16 = 3;
 pub(super) const CMD_CRC_ENABLE: u16 = 1 << 3;
 pub(super) const CMD_INDEX_ENABLE: u16 = 1 << 4;
 pub(super) const CMD_DATA_PRESENT: u16 = 1 << 5;
@@ -89,21 +89,21 @@ pub(super) const SDHCI_TIMEOUT: u32 = 1_000_000;
 pub const PLIC_PRIO_SDHCI: u32 = 0x07;
 
 #[inline]
-pub(super) unsafe fn reg_r(base: usize, off: u32) -> u32 {
+pub(super) unsafe fn reg_r(base: usize, off: u32) -> u32 { unsafe {
     Mmio::<u32>::at(base + off as usize).read()
-}
+}}
 
 #[inline]
-pub(super) unsafe fn reg_w(base: usize, off: u32, v: u32) {
+pub(super) unsafe fn reg_w(base: usize, off: u32, v: u32) { unsafe {
     Mmio::<u32>::at(base + off as usize).write(v);
-}
+}}
 
 #[inline]
-pub(super) unsafe fn reg_r16(base: usize, off: u32) -> u16 {
+pub(super) unsafe fn reg_r16(base: usize, off: u32) -> u16 { unsafe {
     Mmio::<u16>::at(base + off as usize).read()
-}
+}}
 
 #[inline]
-pub(super) unsafe fn reg_w16(base: usize, off: u32, v: u16) {
+pub(super) unsafe fn reg_w16(base: usize, off: u32, v: u16) { unsafe {
     Mmio::<u16>::at(base + off as usize).write(v);
-}
+}}

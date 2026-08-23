@@ -1,11 +1,10 @@
 use crate::arch::csr;
-use crate::arch::regs::*;
 use onyx_core::fmt::{Arg, Write, vformat};
 
 const MAX_BT_DEPTH: usize = 64;
 
 #[cfg(not(test))]
-unsafe fn backtrace(w: &mut impl Write) {
+unsafe fn backtrace(w: &mut impl Write) { unsafe {
     let mut fp: u64;
     core::arch::asm!("mv {}, s0", out(reg) fp);
     for i in 0..MAX_BT_DEPTH {
@@ -21,9 +20,9 @@ unsafe fn backtrace(w: &mut impl Write) {
         }
         fp = old_fp;
     }
-}
+}}
 
-pub unsafe fn kdump() {
+pub unsafe fn kdump() { unsafe {
     #[cfg(not(test))]
     {
         let mut w = crate::srv::klog::PanicWriter;
@@ -77,4 +76,4 @@ pub unsafe fn kdump() {
 
         w.write_str("--- END KDUMP ---\n");
     }
-}
+}}

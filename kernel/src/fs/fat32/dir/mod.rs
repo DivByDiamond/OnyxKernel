@@ -1,9 +1,8 @@
 mod read;
-use core::ptr;
 use onyx_core::errno::{Errno, KResult};
 
 use super::{
-    ATTR_DIRECTORY, ATTR_LFN, DIR_ENTRY_SIZE, ENTRIES_PER_SECTOR, FAT32_EOC, G_ROOT_CLUSTER, G_SPC,
+    ATTR_LFN, DIR_ENTRY_SIZE, ENTRIES_PER_SECTOR, G_ROOT_CLUSTER, G_SPC,
     fat_entry, fat32_name_8_3, is_eoc, is_valid_cluster, read_cluster_sector, scan_dir_entries,
 };
 
@@ -13,7 +12,7 @@ unsafe fn lookup_component(
     out_cluster: &mut u32,
     out_size: &mut u32,
     out_is_dir: &mut bool,
-) -> KResult<()> {
+) -> KResult<()> { unsafe {
     let needle = fat32_name_8_3(component);
     let mut buf = [0u8; 512];
     scan_dir_entries(
@@ -24,9 +23,9 @@ unsafe fn lookup_component(
         out_is_dir,
         &mut buf,
     )
-}
+}}
 
-pub unsafe fn lookup(path: &[u8], out_cluster: &mut u32, out_size: &mut u32) -> KResult<()> {
+pub unsafe fn lookup(path: &[u8], out_cluster: &mut u32, out_size: &mut u32) -> KResult<()> { unsafe {
     if path.is_empty() || path == b"/" || path == b"." {
         *out_cluster = G_ROOT_CLUSTER;
         *out_size = 0;
@@ -70,7 +69,7 @@ pub unsafe fn lookup(path: &[u8], out_cluster: &mut u32, out_size: &mut u32) -> 
     *out_cluster = current_cluster;
     *out_size = 0;
     Ok(())
-}
+}}
 
 pub use read::*;
 
@@ -79,7 +78,7 @@ pub unsafe fn readdir_entry(
     entry_idx: u32,
     name_out: *mut u8,
     name_len: usize,
-) -> Option<u32> {
+) -> Option<u32> { unsafe {
     if !is_valid_cluster(dir_cluster) {
         return None;
     }
@@ -128,7 +127,7 @@ pub unsafe fn readdir_entry(
                     let c = buf[off + i];
                     name_out
                         .add(out_pos)
-                        .write(if c >= b'A' && c <= b'Z' { c + 32 } else { c });
+                        .write(if c.is_ascii_uppercase() { c + 32 } else { c });
                     out_pos += 1;
                 }
                 let mut ext_end = 11usize;
@@ -148,7 +147,7 @@ pub unsafe fn readdir_entry(
                             break;
                         }
                         let c = buf[off + i];
-                        name_out.add(out_pos).write(if c >= b'A' && c <= b'Z' {
+                        name_out.add(out_pos).write(if c.is_ascii_uppercase() {
                             c + 32
                         } else {
                             c
@@ -178,4 +177,4 @@ pub unsafe fn readdir_entry(
         }
         cluster = next;
     }
-}
+}}

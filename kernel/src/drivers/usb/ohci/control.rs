@@ -5,7 +5,7 @@ use super::{
     ED_FA_SHIFT, ED_MPS_SHIFT, ED_SPEED_FULL, ED_SPEED_LOW, ED_TERMINATE, G_OHCI_N_PORTS,
     MAX_OHCI_TD, OHCI_CMD_CLF, OHCI_CTRL_CLE, OHCI_CTRL_HCFS_MASK, OHCI_CTRL_HCFS_OPER,
     OHCI_HC_COMMAND_STATUS, OHCI_HC_CONTROL, OHCI_HC_CONTROL_CURRENT_ED, OHCI_HC_CONTROL_HEAD_ED,
-    OHCI_HC_REV, OHCI_HC_RH_PORT_STATUS, OhciED, OhciTD, RH_PS_LSDA, RH_PS_PES, RH_PS_PPS,
+    OHCI_HC_REV, OHCI_HC_RH_PORT_STATUS, RH_PS_LSDA, RH_PS_PES, RH_PS_PPS,
     RH_PS_PRS, TD_CC_MASK, TD_CC_NOT_ACCESSED, TD_DI_NO_INTR, TD_DP_IN, TD_DP_OUT, TD_DP_SETUP,
     TD_R_3, TD_T_DATA0, TD_T_DATA1, TD_TERMINATE, ohci_alloc_ed, ohci_alloc_td, ohci_ed_phys,
     ohci_ed_ptr, ohci_rd, ohci_td_phys, ohci_td_ptr, ohci_wr,
@@ -18,7 +18,7 @@ pub unsafe fn ohci_control_transfer(
     data_in: bool,
     max_pkt: u32,
     speed: u8,
-) -> KResult<u32> {
+) -> KResult<u32> { unsafe {
     let data_len = data.as_ref().map(|d| d.len() as u32).unwrap_or(0);
 
     if 2 + if data_len > 0 { 1 } else { 0 } > MAX_OHCI_TD as u32 {
@@ -148,25 +148,25 @@ pub unsafe fn ohci_control_transfer(
         }
         timeout -= 1;
     }
-}
+}}
 
-pub unsafe fn probe_ohci(base: usize) -> bool {
+pub unsafe fn probe_ohci(base: usize) -> bool { unsafe {
     if base == 0 {
         return false;
     }
     let v = Mmio::<u32>::at(base + OHCI_HC_REV as usize).read();
     (v & 0xFF) == 0 && ((v >> 16) & 0xFFFF) >= 0x10
-}
+}}
 
-pub unsafe fn ohci_port_status(idx: u8) -> KResult<u32> {
+pub unsafe fn ohci_port_status(idx: u8) -> KResult<u32> { unsafe {
     if idx >= G_OHCI_N_PORTS {
         return Err(Errno::Range);
     }
     let reg = OHCI_HC_RH_PORT_STATUS + 4 * idx as u32;
     Ok(ohci_rd(reg))
-}
+}}
 
-pub unsafe fn ohci_port_reset(idx: u8) -> KResult<()> {
+pub unsafe fn ohci_port_reset(idx: u8) -> KResult<()> { unsafe {
     if idx >= G_OHCI_N_PORTS {
         return Err(Errno::Range);
     }
@@ -182,18 +182,18 @@ pub unsafe fn ohci_port_reset(idx: u8) -> KResult<()> {
     }
     ohci_wr(reg, ohci_rd(reg) | RH_PS_PES);
     Ok(())
-}
+}}
 
-pub unsafe fn ohci_port_enable(idx: u8) -> KResult<()> {
+pub unsafe fn ohci_port_enable(idx: u8) -> KResult<()> { unsafe {
     if idx >= G_OHCI_N_PORTS {
         return Err(Errno::Range);
     }
     let reg = OHCI_HC_RH_PORT_STATUS + 4 * idx as u32;
     ohci_wr(reg, ohci_rd(reg) | RH_PS_PES);
     Ok(())
-}
+}}
 
-pub unsafe fn ohci_port_speed(idx: u8) -> KResult<u8> {
+pub unsafe fn ohci_port_speed(idx: u8) -> KResult<u8> { unsafe {
     let ps = ohci_port_status(idx)?;
     Ok(if (ps & RH_PS_LSDA) != 0 { 1 } else { 0 })
-}
+}}

@@ -24,17 +24,13 @@ pub struct EdidInfo {
 }
 
 fn edid_checksum(data: &[u8; 128]) -> bool {
-    let mut sum: u8 = 0;
-    for i in 0..128 {
-        sum = sum.wrapping_add(data[i]);
-    }
-    sum == 0
+    data.iter().fold(0u8, |acc, &b| acc.wrapping_add(b)) == 0
 }
 
 unsafe fn parse_detailed_timing(block: &[u8]) -> EdidTiming {
-    let w = ((block[4] as u16) >> 4) as u16 | ((block[2] as u16) << 4);
-    let h = ((block[7] as u16) >> 4) as u16 | ((block[5] as u16) << 4);
-    let vf = ((block[3] >> 6) as u8) | (block[7] & 0x0F);
+    let w = ((block[4] as u16) >> 4) | ((block[2] as u16) << 4);
+    let h = ((block[7] as u16) >> 4) | ((block[5] as u16) << 4);
+    let vf = (block[3] >> 6) | (block[7] & 0x0F);
     let vrate = if vf > 0 {
         (block[3] & 0x3F).max(60)
     } else {
@@ -42,7 +38,7 @@ unsafe fn parse_detailed_timing(block: &[u8]) -> EdidTiming {
     };
     let interlaced = (block[3] >> 7) & 1 != 0;
     let hsync = (block[17] >> 1) & 1 != 0;
-    let vsync = (block[17] >> 0) & 1 != 0;
+    let vsync = block[17] & 1 != 0;
     EdidTiming {
         width: w,
         height: h,
@@ -86,7 +82,7 @@ unsafe fn parse_established(data: &[u8; 128], timings: &mut [EdidTiming; 8], n: 
     }
 }
 
-pub unsafe fn parse_edid(data: &[u8; 128]) -> KResult<EdidInfo> {
+pub unsafe fn parse_edid(data: &[u8; 128]) -> KResult<EdidInfo> { unsafe {
     if data[0] != 0x00
         || data[1] != 0xFF
         || data[2] != 0xFF
@@ -154,11 +150,8 @@ pub unsafe fn parse_edid(data: &[u8; 128]) -> KResult<EdidInfo> {
             break;
         }
         let tag = data[off + 3];
-        if tag == 0xFF {
-        } else if tag == 0xFE {
-        } else if tag == 0xFC {
-        } else if tag == 0xFD {
-        } else if tag <= 0x0F {
+        // Tags 0xFC..=0xFF (monitor descriptors) are skipped.
+        if tag <= 0x0F {
             let t = parse_detailed_timing(&data[off..off + 18]);
             if i == 0 {
                 preferred_width = t.width;
@@ -181,4 +174,4 @@ pub unsafe fn parse_edid(data: &[u8; 128]) -> KResult<EdidInfo> {
         preferred_width,
         preferred_height,
     })
-}
+}}

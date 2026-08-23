@@ -36,15 +36,21 @@ static mut G_CPU_ONLINE: [bool; MAX_HARTS] =
     [true, false, false, false, false, false, false, false];
 
 pub fn cpu_online(hart: usize) -> bool {
-    unsafe { (*(&raw const G_CPU_ONLINE))[hart] }
+    unsafe { (G_CPU_ONLINE)[hart] }
 }
 
-pub unsafe fn set_cpu_online(hart: usize, v: bool) {
-    (*(&raw mut G_CPU_ONLINE))[hart] = v;
-}
+pub unsafe fn set_cpu_online(hart: usize, v: bool) { unsafe {
+    G_CPU_ONLINE[hart] = v;
+}}
 
 pub struct SpinLock {
     locked: AtomicBool,
+}
+
+impl Default for SpinLock {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl SpinLock {
@@ -65,19 +71,19 @@ impl SpinLock {
     }
 }
 
-pub unsafe fn release_secondary_harts() {
+pub unsafe fn release_secondary_harts() { unsafe {
     // Bug (syscall SERIOUS #9): use an atomic store with SeqCst so the
     // secondary harts (which spin on a read_volatile + wfi loop) are
     // guaranteed to observe the release on all cores. The previous
     // write_volatile was fine for a single secondary hart but had no
     // ordering guarantee for multi-hart systems.
-    core::sync::atomic::AtomicU64::from_ptr(core::ptr::addr_of_mut!(G_RELEASE) as *mut u64)
+    core::sync::atomic::AtomicU64::from_ptr(core::ptr::addr_of_mut!(G_RELEASE))
         .store(1, Ordering::SeqCst);
-}
+}}
 
 #[cfg(not(test))]
 #[unsafe(no_mangle)]
-pub unsafe extern "Rust" fn secondary_entry() -> ! {
+pub unsafe extern "Rust" fn secondary_entry() -> ! { unsafe {
     let hartid: usize;
     core::arch::asm!("mv {0}, tp", out(reg) hartid);
     loop {
@@ -135,7 +141,7 @@ pub unsafe extern "Rust" fn secondary_entry() -> ! {
         in(reg) satp,
         options(noreturn),
     );
-}
+}}
 
 #[cfg(test)]
 #[unsafe(no_mangle)]
@@ -145,13 +151,13 @@ pub unsafe extern "Rust" fn secondary_entry() -> ! {
 
 #[cfg(not(test))]
 #[unsafe(no_mangle)]
-pub unsafe extern "Rust" fn secondary_kmain() -> ! {
+pub unsafe extern "Rust" fn secondary_kmain() -> ! { unsafe {
     let hartid: usize;
     core::arch::asm!("mv {0}, tp", out(reg) hartid);
     crate::proc::process::set_cpu_online(hartid, true);
     G_ONLINE_HARTS.fetch_add(1, Ordering::SeqCst);
     crate::proc::scheduler::sched_enter_idle()
-}
+}}
 
 #[cfg(test)]
 #[unsafe(no_mangle)]

@@ -68,9 +68,9 @@ pub(crate) static mut G_GPU: VirtioGpuDev = VirtioGpuDev {
     height: 0,
 };
 
-pub unsafe fn probe(base: usize) -> bool {
+pub unsafe fn probe(base: usize) -> bool { unsafe {
     reg_r(base, R_MAGIC_VALUE) == 0x7472_6976 && reg_r(base, R_DEVICE_ID) == VIRTIO_ID_GPU
-}
+}}
 
 unsafe fn hdr(t: u32) -> GpuCtrlHdr {
     GpuCtrlHdr {
@@ -82,7 +82,7 @@ unsafe fn hdr(t: u32) -> GpuCtrlHdr {
     }
 }
 
-pub unsafe fn init(base: usize, width: u32, height: u32) -> KResult<()> {
+pub unsafe fn init(base: usize, width: u32, height: u32) -> KResult<()> { unsafe {
     if G_GPU.base != 0 {
         return Err(Errno::Busy);
     }
@@ -120,7 +120,7 @@ pub unsafe fn init(base: usize, width: u32, height: u32) -> KResult<()> {
         R_STATUS,
         VIRTIO_S_ACK | VIRTIO_S_DRIVER | VIRTIO_S_DRIVER_OK,
     );
-    let fb_pages = (width as usize * height as usize * 4 + 4095) / 4096;
+    let fb_pages = (width as usize * height as usize * 4).div_ceil(4096);
     let fb_pa = pmm::alloc_n(fb_pages)? as *mut u8;
     G_GPU.fb = fb_pa;
     let rid = 1u32;
@@ -164,7 +164,7 @@ pub unsafe fn init(base: usize, width: u32, height: u32) -> KResult<()> {
         24,
     )?;
     Ok(())
-}
+}}
 
 pub fn fb_addr() -> *mut u8 {
     unsafe { G_GPU.fb }

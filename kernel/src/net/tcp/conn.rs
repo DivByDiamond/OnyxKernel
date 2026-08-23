@@ -1,6 +1,5 @@
 use crate::net::G_IP;
 use crate::net::ip;
-use onyx_core::errno::KResult;
 
 pub(super) const MAX_CONNS: usize = 8;
 pub(super) const BUF_SIZE: usize = 2048;
@@ -35,7 +34,7 @@ fn tcp_checksum(src_ip: &[u8; 4], dst_ip: &[u8; 4], segment: &[u8]) -> u16 {
     sum = sum.wrapping_add(0x0006u32);
     sum = sum.wrapping_add(segment.len() as u32);
     let mut i = 0;
-    let pad = if segment.len() % 2 != 0 { 1 } else { 0 };
+    let pad = if !segment.len().is_multiple_of(2) { 1 } else { 0 };
     while i + 1 < segment.len() + pad {
         let b0 = if i < segment.len() { segment[i] } else { 0 };
         let b1 = if i + 1 < segment.len() {
@@ -75,14 +74,7 @@ pub(super) fn send_tcp_seg(c: &TcpConn, flags: u8, data: &[u8]) {
 }
 
 pub(super) fn alloc_conn() -> Option<usize> {
-    for i in 0..MAX_CONNS {
-        unsafe {
-            if CONNS[i].is_none() {
-                return Some(i);
-            }
-        }
-    }
-    None
+    unsafe { CONNS.iter().position(Option::is_none) }
 }
 
 pub(super) fn next_port() -> u16 {

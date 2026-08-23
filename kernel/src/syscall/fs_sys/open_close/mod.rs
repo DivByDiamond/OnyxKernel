@@ -15,21 +15,21 @@ use crate::fs::vfs;
 use crate::syscall::abi::{F_DUPFD, F_GETFD, F_GETFL, F_SETFD, F_SETFL, FD_CLOEXEC, O_RDONLY};
 use onyx_core::errno::Errno;
 
-pub(in super::super) unsafe fn sys_close(token: u64) -> i64 {
+pub(in super::super) unsafe fn sys_close(token: u64) -> i64 { unsafe {
     match vfs::close(token) {
         Ok(()) => 0,
         Err(e) => e.as_i64(),
     }
-}
+}}
 
-pub(in super::super) unsafe fn sys_lseek(token: u64, off: i64, whence: u32) -> i64 {
+pub(in super::super) unsafe fn sys_lseek(token: u64, off: i64, whence: u32) -> i64 { unsafe {
     match vfs::lseek(token, off, whence) {
         Ok(pos) => pos as i64,
         Err(e) => e.as_i64(),
     }
-}
+}}
 
-pub(in super::super) unsafe fn sys_fcntl(fd: u64, cmd: u32, arg: u64) -> i64 {
+pub(in super::super) unsafe fn sys_fcntl(fd: u64, cmd: u32, arg: u64) -> i64 { unsafe {
     match cmd {
         F_DUPFD => vfs::dup(fd)
             .map(|t| t as i64)
@@ -60,7 +60,7 @@ pub(in super::super) unsafe fn sys_fcntl(fd: u64, cmd: u32, arg: u64) -> i64 {
         }
         _ => Errno::NoSys.as_i64(),
     }
-}
+}}
 
 pub use crate::syscall::abi::{
     O_ACCMODE as _O_ACCMODE, O_APPEND as _O_APPEND, O_CREAT as _O_CREAT,

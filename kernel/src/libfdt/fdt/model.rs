@@ -12,9 +12,7 @@ fn copy_prop(data: &[u8]) {
             .position(|&b| b == 0)
             .unwrap_or(data.len())
             .min(63);
-        for i in 0..len {
-            (*m)[i] = data[i];
-        }
+        (&mut *m)[..len].copy_from_slice(&data[..len]);
     }
 }
 
@@ -30,7 +28,7 @@ fn stored() -> &'static str {
 }
 
 /// Read the root node's `model` property into a static buffer.
-pub unsafe fn model() -> &'static str {
+pub unsafe fn model() -> &'static str { unsafe {
     let mut found = false;
     walk(&mut |_name, props: &[(u32, &[u8])]| {
         for (name_off, data) in props {
@@ -42,12 +40,8 @@ pub unsafe fn model() -> &'static str {
         }
         false
     });
-    if found {
-        stored()
-    } else {
-        "unknown"
-    }
-}
+    if found { stored() } else { "unknown" }
+}}
 
 /// Detect the OC2R/sedna platform. The device tree carries the root
 /// compatible "riscv-sedna" and/or the model "riscv-virtio,sedna" — both
@@ -55,8 +49,8 @@ pub unsafe fn model() -> &'static str {
 /// platform the peripheral nodes (UART/PLIC/CLINT/virtio) are NOT present in
 /// the device tree — the stock minux firmware uses hardcoded addresses, so
 /// we do too.
-pub unsafe fn is_sedna() -> bool {
-    let dtb = *(&raw const super::G_DTB);
+pub unsafe fn is_sedna() -> bool { unsafe {
+    let dtb = super::G_DTB;
     if dtb == 0 {
         return false;
     }
@@ -75,7 +69,7 @@ pub unsafe fn is_sedna() -> bool {
         }
     }
     false
-}
+}}
 
 /// Detect the QEMU virt machine. The device tree model is
 /// "riscv-virtio,qemu" and the root compatible contains "qemu". Like
@@ -83,8 +77,8 @@ pub unsafe fn is_sedna() -> bool {
 /// virt there is no USB host controller by default, so probing the
 /// SG2000 EHCI/OHCI addresses (0x04C00000) would raise a load access
 /// fault on unmapped MMIO.
-pub unsafe fn is_qemu() -> bool {
-    let dtb = *(&raw const super::G_DTB);
+pub unsafe fn is_qemu() -> bool { unsafe {
+    let dtb = super::G_DTB;
     if dtb == 0 {
         return false;
     }
@@ -103,4 +97,4 @@ pub unsafe fn is_qemu() -> bool {
         }
     }
     false
-}
+}}

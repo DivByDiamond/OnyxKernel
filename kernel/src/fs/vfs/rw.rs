@@ -2,7 +2,7 @@ use super::{FdToken, Fs, PERM_READ, PERM_WRITE, fd_check, fd_check_perm, fd_get,
 use crate::fs::{devfs, fat32, ipcfs, onyxfs, procfs};
 use onyx_core::errno::{Errno, KResult};
 
-pub unsafe fn read(token: FdToken, buf: *mut u8, len: u32) -> KResult<u32> {
+pub unsafe fn read(token: FdToken, buf: *mut u8, len: u32) -> KResult<u32> { unsafe {
     let idx = fd_check_perm(token, PERM_READ)?;
     let fd = fd_get(idx);
     let avail = fd.size.saturating_sub(fd.pos);
@@ -20,9 +20,9 @@ pub unsafe fn read(token: FdToken, buf: *mut u8, len: u32) -> KResult<u32> {
     };
     fd_update_pos(idx, fd.pos + read_n);
     Ok(read_n)
-}
+}}
 
-pub unsafe fn write(token: FdToken, buf: *const u8, len: u32) -> KResult<u32> {
+pub unsafe fn write(token: FdToken, buf: *const u8, len: u32) -> KResult<u32> { unsafe {
     let idx = fd_check_perm(token, PERM_WRITE)?;
     let fd = fd_get(idx);
     let written = match fd.fs {
@@ -47,11 +47,11 @@ pub unsafe fn write(token: FdToken, buf: *const u8, len: u32) -> KResult<u32> {
         }
     }
     Ok(written)
-}
+}}
 
-pub unsafe fn stat(token: FdToken, size_out: &mut u32) -> KResult<()> {
+pub unsafe fn stat(token: FdToken, size_out: &mut u32) -> KResult<()> { unsafe {
     let idx = fd_check(token)?;
     let fd = fd_get(idx);
     *size_out = fd.size;
     Ok(())
-}
+}}

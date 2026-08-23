@@ -3,7 +3,7 @@ use super::{G_CON, push};
 use crate::drivers::virtio::{R_QUEUE_NOTIFY, VqDesc};
 use crate::mm::pmm;
 use core::ptr;
-use onyx_core::errno::{Errno, KResult};
+use onyx_core::errno::KResult;
 
 /// Poll for one received byte, or `None` if no data is available.
 pub fn getc() -> Option<u8> {

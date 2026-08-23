@@ -4,7 +4,7 @@ use crate::mm::heap;
 use onyx_core::errno::KResult;
 use onyx_core::fmt::Arg;
 
-pub(crate) unsafe fn setup(ndevs: usize) {
+pub(crate) unsafe fn setup(ndevs: usize) { unsafe {
     vfs::init();
     if ndevs > 0 {
         // OC2R: the OnyxFS disk is not necessarily dev 0 (vda=bootfs,
@@ -42,9 +42,9 @@ pub(crate) unsafe fn setup(ndevs: usize) {
     crate::kinf!("vfs", "ipcfs mounted at /ipc");
     vfs::mount_devfs();
     crate::kinf!("vfs", "devfs mounted at /dev");
-}
+}}
 
-pub(crate) unsafe fn load_font() {
+pub(crate) unsafe fn load_font() { unsafe {
     (|| -> KResult<()> {
         let token = vfs::open(b"/font/default.psf", vfs::PERM_READ)?;
         let mut size = 0u32;
@@ -62,4 +62,4 @@ pub(crate) unsafe fn load_font() {
         Ok(())
     })()
     .unwrap_or_else(|_| crate::kwrn!("font", "no /font/default.psf, using blank font"));
-}
+}}

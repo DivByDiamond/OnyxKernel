@@ -26,7 +26,7 @@ fn scan_fdt_in_ram() -> Option<usize> {
     None
 }
 
-unsafe fn init_from(dtb_pa: usize) -> bool {
+unsafe fn init_from(dtb_pa: usize) -> bool { unsafe {
     let hdr = dtb_pa as *const u8;
     let magic = rd32(hdr);
     if magic != FDT_MAGIC {
@@ -40,14 +40,14 @@ unsafe fn init_from(dtb_pa: usize) -> bool {
     // boards where size_dt_struct > size_dt_strings (e.g. sedna/OC2R), so
     // nodes past that offset (UART) were never found.
     let struct_size = rd32(hdr.add(4 * 9)) as usize;
-    *(&raw mut G_DTB) = dtb_pa;
-    *(&raw mut G_STRUCT) = dtb_pa + struct_off;
-    *(&raw mut G_STRINGS) = dtb_pa + strings_off;
-    *(&raw mut G_STRUCT_SIZE) = struct_size;
+    G_DTB = dtb_pa;
+    G_STRUCT = dtb_pa + struct_off;
+    G_STRINGS = dtb_pa + strings_off;
+    G_STRUCT_SIZE = struct_size;
     true
-}
+}}
 
-pub unsafe fn init(dtb_pa: usize) -> bool {
+pub unsafe fn init(dtb_pa: usize) -> bool { unsafe {
     if dtb_pa != 0 && init_from(dtb_pa) {
         return true;
     }
@@ -55,4 +55,4 @@ pub unsafe fn init(dtb_pa: usize) -> bool {
         return init_from(found);
     }
     false
-}
+}}

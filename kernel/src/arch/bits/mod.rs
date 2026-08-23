@@ -46,17 +46,17 @@ mod layout;
 mod pte;
 
 #[cfg(target_pointer_width = "64")]
-pub type usize_val = u64;
+pub type UsizeVal = u64;
 #[cfg(target_pointer_width = "32")]
-pub type usize_val = u32;
+pub type UsizeVal = u32;
 
 #[cfg(target_pointer_width = "64")]
 pub type PteVal = u64;
 #[cfg(target_pointer_width = "32")]
 pub type PteVal = u32;
 
-pub type Va = usize_val;
-pub type Pa = usize_val;
+pub type Va = UsizeVal;
+pub type Pa = UsizeVal;
 
 pub use pte::SATP_MODE_PAGING;
 pub use pte::SATP_MODE_SV32;

@@ -3,7 +3,7 @@ use core::hint::spin_loop;
 use core::ptr;
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
-use super::types::{Proc, PROC_PID_INIT};
+use super::types::{PROC_PID_INIT, Proc};
 use crate::arch::smp;
 
 pub const MAX_HARTS: usize = smp::MAX_HARTS;
@@ -60,7 +60,7 @@ pub fn hart_id() -> usize {
     }
 }
 
-pub unsafe fn init() {
+pub unsafe fn init() { unsafe {
     G_ALL_PROCS = ptr::null_mut();
     G_CURRENT = ptr::null_mut();
     for i in 0..MAX_HARTS {
@@ -68,7 +68,7 @@ pub unsafe fn init() {
         G_NEED_RESCHED[i].store(false, Ordering::Release);
     }
     G_NEXT_PID.store(PROC_PID_INIT + 1, Ordering::Release);
-}
+}}
 
 pub fn alloc_pid() -> u32 {
     // Bug (syscall SERIOUS #6): use atomic fetch_add to avoid races between
@@ -78,23 +78,23 @@ pub fn alloc_pid() -> u32 {
     G_NEXT_PID.fetch_add(1, Ordering::SeqCst)
 }
 
-pub unsafe fn current_for_hart(hartid: usize) -> *mut Proc {
+pub unsafe fn current_for_hart(hartid: usize) -> *mut Proc { unsafe {
     if hartid < MAX_HARTS {
         G_HART_CURRENT[hartid]
     } else {
         ptr::null_mut()
     }
-}
+}}
 
-pub unsafe fn set_current_for_hart(hartid: usize, p: *mut Proc) {
+pub unsafe fn set_current_for_hart(hartid: usize, p: *mut Proc) { unsafe {
     if hartid < MAX_HARTS {
         G_HART_CURRENT[hartid] = p;
         if hartid == 0 {
             G_CURRENT = p;
         }
     }
-}
+}}
 
-pub unsafe fn set_cpu_online(hart: usize, v: bool) {
+pub unsafe fn set_cpu_online(hart: usize, v: bool) { unsafe {
     smp::set_cpu_online(hart, v);
-}
+}}

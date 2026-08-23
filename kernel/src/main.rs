@@ -11,50 +11,27 @@
 #![cfg_attr(not(test), no_std)]
 #![cfg_attr(not(test), no_main)]
 #![warn(clippy::all)]
+#![deny(clippy::correctness)]
+#![warn(clippy::suspicious, clippy::style, clippy::complexity, clippy::perf)]
+// SYS_* constants and G_* globals deliberately mirror the Linux/ABI naming
+// used across syscall tables, ACLs and match dispatch sites.
+#![allow(non_upper_case_globals)]
+// Kernel-wide deliberate exceptions:
+// - static_mut_refs: bare-static register/blocking state is pervasive in no_std kernel code
+// - too_many_arguments / type_complexity: syscall & trap-frame APIs mirror hardware layout
 #![allow(
-    clippy::module_inception,
-    clippy::missing_safety_doc,
+    static_mut_refs,
     clippy::too_many_arguments,
-    clippy::needless_pass_by_value,
     clippy::type_complexity,
-    clippy::cast_possible_truncation,
-    clippy::cast_possible_wrap,
-    clippy::cast_sign_loss,
-    clippy::match_same_arms,
-    clippy::manual_range_contains,
-    clippy::manual_memcpy,
-    clippy::manual_div_ceil,
-    clippy::must_use_candidate,
+    clippy::missing_safety_doc,
     clippy::missing_errors_doc,
     clippy::missing_panics_doc,
+    clippy::must_use_candidate,
     clippy::module_name_repetitions,
     clippy::similar_names,
-    clippy::needless_range_loop,
-    clippy::unnecessary_wraps,
-    clippy::new_without_default,
-    clippy::should_implement_trait,
-    clippy::not_unsafe_ptr_arg_deref,
-    clippy::deref_addrof,
-    clippy::collapsible_if,
-    unused_imports,
-    unused_parens,
-    unsafe_op_in_unsafe_fn,
-    static_mut_refs,
-    non_upper_case_globals,
-    non_snake_case,
-    non_camel_case_types,
-    clippy::unnecessary_cast,
-    clippy::identity_op,
-    clippy::if_same_then_else,
-    clippy::let_unit_value,
-    clippy::unnecessary_lazy_evaluations,
-    clippy::clone_on_copy,
-    clippy::upper_case_acronyms,
-    clippy::explicit_auto_deref,
-    clippy::manual_is_multiple_of,
-    clippy::unusual_byte_groupings,
-    clippy::doc_overindented_list_items,
-    clippy::empty_line_after_doc_comments
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::cast_sign_loss
 )]
 
 extern crate alloc;
@@ -77,7 +54,8 @@ use core::panic::PanicInfo;
 
 #[unsafe(no_mangle)]
 pub unsafe extern "Rust" fn kmain(hartid: usize, fdt_addr: usize) -> ! {
-    crate::srv::main::kmain(hartid, fdt_addr)
+    // Called from early boot once per hart; invariants are established by boot.S.
+    unsafe { crate::srv::main::kmain(hartid, fdt_addr) }
 }
 
 #[cfg(not(test))]

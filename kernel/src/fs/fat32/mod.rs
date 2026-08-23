@@ -1,6 +1,6 @@
 //! FAT32 read-only driver.
 use crate::drivers::virtio_req;
-use onyx_core::errno::{Errno, KResult};
+use onyx_core::errno::KResult;
 
 const ATTR_DIRECTORY: u8 = 0x10;
 const ATTR_LFN: u8 = 0x0F;
@@ -15,15 +15,15 @@ pub(crate) static mut G_FAT_SZ: u32 = 0;
 pub(crate) static mut G_ROOT_CLUSTER: u32 = 0;
 pub(crate) static mut G_DATA_LBA: u32 = 0;
 
-pub(crate) unsafe fn read_sec(lba: u64, buf: &mut [u8; 512]) -> KResult<()> {
+pub(crate) unsafe fn read_sec(lba: u64, buf: &mut [u8; 512]) -> KResult<()> { unsafe {
     virtio_req::read(G_DEV, lba, buf.as_mut_ptr())
-}
+}}
 
-pub(crate) unsafe fn cluster_to_lba(cluster: u32) -> u64 {
+pub(crate) unsafe fn cluster_to_lba(cluster: u32) -> u64 { unsafe {
     (G_DATA_LBA as u64) + ((cluster - 2) as u64) * (G_SPC as u64)
-}
+}}
 
-pub(crate) unsafe fn fat_entry(cluster: u32, buf: &mut [u8; 512]) -> u32 {
+pub(crate) unsafe fn fat_entry(cluster: u32, buf: &mut [u8; 512]) -> u32 { unsafe {
     let fat_off = cluster as u64 * 4;
     let fat_lba = G_RESVD as u64 + fat_off / 512;
     if read_sec(fat_lba, buf).is_err() {
@@ -31,7 +31,7 @@ pub(crate) unsafe fn fat_entry(cluster: u32, buf: &mut [u8; 512]) -> u32 {
     }
     let off = (fat_off % 512) as usize;
     u32::from_le_bytes([buf[off], buf[off + 1], buf[off + 2], buf[off + 3]]) & 0x0FFF_FFFF
-}
+}}
 
 pub(crate) unsafe fn is_eoc(v: u32) -> bool {
     v >= FAT32_EOC

@@ -29,7 +29,7 @@ pub(crate) static mut G_UNI_MAP: [UniMapEntry; UNICODE_MAP_SIZE] = [UniMapEntry 
 }; UNICODE_MAP_SIZE];
 pub(crate) static mut G_UNI_MAP_LEN: usize = 0;
 
-pub(crate) unsafe fn uni_map_insert(cp: u32, idx: u32) {
+pub(crate) unsafe fn uni_map_insert(cp: u32, idx: u32) { unsafe {
     if G_UNI_MAP_LEN < UNICODE_MAP_SIZE {
         G_UNI_MAP[G_UNI_MAP_LEN] = UniMapEntry {
             codepoint: cp,
@@ -37,7 +37,7 @@ pub(crate) unsafe fn uni_map_insert(cp: u32, idx: u32) {
         };
         G_UNI_MAP_LEN += 1;
     }
-}
+}}
 
 pub fn font() -> Option<PcfFont> {
     unsafe { G_FONT }

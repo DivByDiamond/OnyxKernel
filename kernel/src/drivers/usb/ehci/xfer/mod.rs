@@ -2,10 +2,10 @@ pub(super) mod bulk;
 use onyx_core::errno::{Errno, KResult};
 
 use super::{
-    G_ASYNCLIST_ENABLED, MAX_QTD, OP_USBCMD, OP_USBSTS, QH, QH_DEV_ADDR_SHIFT, QH_DTC, QH_EPS_HIGH,
-    QH_MPL_SHIFT, QH_TERMINATE, QTD, QTD_ACTIVE, QTD_BUF_SIZE, QTD_CERR_3, QTD_ERROR, QTD_PID_IN,
+    G_ASYNCLIST_ENABLED, MAX_QTD, OP_USBSTS, QH_DEV_ADDR_SHIFT, QH_DTC, QH_EPS_HIGH,
+    QH_MPL_SHIFT, QH_TERMINATE, QTD_ACTIVE, QTD_BUF_SIZE, QTD_CERR_3, QTD_ERROR, QTD_PID_IN,
     QTD_PID_OUT, QTD_PID_SETUP, QTD_TOGGLE, QTD_TOTAL_LEN_SHIFT, STS_HCHALTED, alloc_qh, alloc_qtd,
-    op_rd, op_wr, qh_phys, qh_ptr, qtd_phys, qtd_ptr,
+    op_rd, qh_ptr, qtd_phys, qtd_ptr,
 };
 
 pub unsafe fn ehci_control_transfer(
@@ -14,13 +14,13 @@ pub unsafe fn ehci_control_transfer(
     mut data: Option<&mut [u8]>,
     data_in: bool,
     max_pkt: u32,
-) -> KResult<u32> {
+) -> KResult<u32> { unsafe {
     if !G_ASYNCLIST_ENABLED {
         super::queue::init_async_list()?;
     }
     let data_len = data.as_ref().map(|d| d.len() as u32).unwrap_or(0);
     let data_qtds = if data_len > 0 {
-        (data_len + QTD_BUF_SIZE - 1) / QTD_BUF_SIZE
+        data_len.div_ceil(QTD_BUF_SIZE)
     } else {
         0
     };
@@ -33,8 +33,8 @@ pub unsafe fn ehci_control_transfer(
     let setup_phys = setup_pkt.as_ptr() as u32;
     let data_pid = if data_in { QTD_PID_IN } else { QTD_PID_OUT };
     let mut qtd_indices = [0usize; 64];
-    for i in 0..qtd_count as usize {
-        qtd_indices[i] = alloc_qtd()?;
+    for idx in qtd_indices.iter_mut().take(qtd_count as usize) {
+        *idx = alloc_qtd()?;
     }
     let sqtd = qtd_ptr(qtd_indices[0]);
     let next_phys = if qtd_count > 1 {
@@ -127,4 +127,4 @@ pub unsafe fn ehci_control_transfer(
         }
         timeout -= 1;
     }
-}
+}}

@@ -1,5 +1,3 @@
-use crate::arch::mmio::Mmio;
-use crate::mm::pmm;
 use core::ptr;
 use onyx_core::errno::{Errno, KResult};
 
@@ -61,18 +59,18 @@ pub(crate) static mut G_XHCI: XhciCtx = XhciCtx {
 
 pub use init::init;
 
-pub unsafe fn probe(base: usize) -> bool {
+pub unsafe fn probe(base: usize) -> bool { unsafe {
     let hci_ver = regs::read_hciversion(base);
     hci_ver >= 0x100
-}
+}}
 
-pub unsafe fn port_connect(port: u8) -> bool {
+pub unsafe fn port_connect(port: u8) -> bool { unsafe {
     let reg = regs::OP_PORTSC + (port as u32) * 0x10;
     let v = regs::op_r32(G_XHCI.obase, reg);
     (v & regs::PORT_CCS) != 0
-}
+}}
 
-pub unsafe fn enable_slot() -> KResult<u8> {
+pub unsafe fn enable_slot() -> KResult<u8> { unsafe {
     let mut trb = ring::Trb::zero();
     trb.set_type(ring::TRB_ENABLE_SLOT);
     trb.set_flags(ring::TRB_IOC);
@@ -83,9 +81,9 @@ pub unsafe fn enable_slot() -> KResult<u8> {
     }
     G_XHCI.slot = slot_id;
     Ok(slot_id)
-}
+}}
 
-pub unsafe fn address_device(slot_id: u8, input_ctx_pa: u64) -> KResult<()> {
+pub unsafe fn address_device(slot_id: u8, input_ctx_pa: u64) -> KResult<()> { unsafe {
     let mut trb = ring::Trb::zero();
     trb.params[0] = input_ctx_pa as u32;
     trb.params[1] = (input_ctx_pa >> 32) as u32;
@@ -99,9 +97,9 @@ pub unsafe fn address_device(slot_id: u8, input_ctx_pa: u64) -> KResult<()> {
         return Err(Errno::Io);
     }
     Ok(())
-}
+}}
 
-pub unsafe fn irq_handler() {
+pub unsafe fn irq_handler() { unsafe {
     let ctx = &raw const G_XHCI;
     if !(*ctx).operational {
         return;
@@ -110,4 +108,4 @@ pub unsafe fn irq_handler() {
     if (iman & regs::IMAN_IP) != 0 {
         regs::rt_w32((*ctx).rtsoff, 0, regs::RTS_IMAN, regs::IMAN_IP);
     }
-}
+}}

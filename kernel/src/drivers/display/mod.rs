@@ -75,7 +75,7 @@ pub unsafe fn probe_all() -> KResult<()> {
     Err(Errno::NoEnt)
 }
 
-pub unsafe fn set_mode(mode: &DisplayMode) -> KResult<()> {
+pub unsafe fn set_mode(mode: &DisplayMode) -> KResult<()> { unsafe {
     if !G_DISPLAY.enabled {
         return Err(Errno::NoSys);
     }
@@ -83,7 +83,7 @@ pub unsafe fn set_mode(mode: &DisplayMode) -> KResult<()> {
     let h = mode.height as u32;
     let bpp = mode.bpp as u32;
     let fb_size = w as usize * h as usize * (bpp as usize / 8);
-    let fb_pages = (fb_size + 4095) / 4096;
+    let fb_pages = fb_size.div_ceil(4096);
     let fb_pa = pmm::alloc_n(fb_pages)?;
     G_DISPLAY.fb_base = fb_pa as *mut u8;
     G_DISPLAY.fb_size = fb_size;
@@ -99,9 +99,9 @@ pub unsafe fn set_mode(mode: &DisplayMode) -> KResult<()> {
         virtio_gpu::init(virtio_gpu::G_GPU.base, w, h).ok();
     }
     Ok(())
-}
+}}
 
-pub unsafe fn init_display(_fdt_addr: usize) -> KResult<()> {
+pub unsafe fn init_display(_fdt_addr: usize) -> KResult<()> { unsafe {
     let mut found_virtio_gpu = false;
     let virtio_bases = [
         0x1000_1000usize,
@@ -130,7 +130,7 @@ pub unsafe fn init_display(_fdt_addr: usize) -> KResult<()> {
         }
     }
     if !found_virtio_gpu {
-        let fb_pages = (fb::FB_SIZE + 4095) / 4096;
+        let fb_pages = fb::FB_SIZE.div_ceil(4096);
         if let Ok(pa) = pmm::alloc_n(fb_pages) {
             fb::init(pa as usize).ok();
             G_DISPLAY.fb_base = pa as *mut u8;
@@ -142,7 +142,7 @@ pub unsafe fn init_display(_fdt_addr: usize) -> KResult<()> {
         }
     }
     Ok(())
-}
+}}
 
 pub fn current_mode() -> &'static DisplayMode {
     unsafe { &G_DISPLAY.mode }

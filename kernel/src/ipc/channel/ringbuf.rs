@@ -15,14 +15,14 @@ fn pid_allowed(ch: &Channel, pid: u32) -> bool {
     false
 }
 
-unsafe fn wait_enqueue(wait_head: &mut *mut crate::proc::Proc) {
+unsafe fn wait_enqueue(wait_head: &mut *mut crate::proc::Proc) { unsafe {
     let p = crate::proc::current() as *mut crate::proc::Proc;
     (*p).state = crate::proc::ProcState::Waiting;
     (*p).wait_next = *wait_head;
     *wait_head = p;
-}
+}}
 
-unsafe fn wait_wake_all(wait_head: &mut *mut crate::proc::Proc) {
+unsafe fn wait_wake_all(wait_head: &mut *mut crate::proc::Proc) { unsafe {
     let mut cur = *wait_head;
     while !cur.is_null() {
         let next = (*cur).wait_next;
@@ -31,14 +31,14 @@ unsafe fn wait_wake_all(wait_head: &mut *mut crate::proc::Proc) {
         cur = next;
     }
     *wait_head = core::ptr::null_mut();
-}
+}}
 
 pub unsafe fn send(
     chan_id: u32,
     buf: *const u8,
     len: u32,
     tf: Option<&mut TrapFrame>,
-) -> KResult<u32> {
+) -> KResult<u32> { unsafe {
     if chan_id as usize >= CHAN_MAX {
         return Err(Errno::Inval);
     }
@@ -75,14 +75,14 @@ pub unsafe fn send(
         crate::proc::scheduler::set_need_resched(crate::proc::hart_id(), true);
     }
     Ok(written)
-}
+}}
 
 pub unsafe fn recv(
     chan_id: u32,
     buf: *mut u8,
     len: u32,
     tf: Option<&mut TrapFrame>,
-) -> KResult<u32> {
+) -> KResult<u32> { unsafe {
     if chan_id as usize >= CHAN_MAX {
         return Err(Errno::Inval);
     }
@@ -120,4 +120,4 @@ pub unsafe fn recv(
         crate::proc::scheduler::set_need_resched(crate::proc::hart_id(), true);
     }
     Ok(read)
-}
+}}

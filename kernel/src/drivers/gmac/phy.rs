@@ -32,7 +32,7 @@ pub struct PhyInfo {
     pub link_partner: u16,
 }
 
-unsafe fn mdio_read(phy: u8, reg: u8) -> KResult<u16> {
+unsafe fn mdio_read(phy: u8, reg: u8) -> KResult<u16> { unsafe {
     let base = G_GMAC.base;
     let v = ((phy as u32 & 0x1F) << 11) | ((reg as u32 & 0x1F) << 6) | regs::MII_CR_42;
     regs::reg_w(base, regs::MII_ADDR, v);
@@ -45,9 +45,9 @@ unsafe fn mdio_read(phy: u8, reg: u8) -> KResult<u16> {
         return Err(Errno::Io);
     }
     Ok(regs::reg_r(base, regs::MII_DATA) as u16)
-}
+}}
 
-unsafe fn mdio_write(phy: u8, reg: u8, data: u16) -> KResult<()> {
+unsafe fn mdio_write(phy: u8, reg: u8, data: u16) -> KResult<()> { unsafe {
     let base = G_GMAC.base;
     let v = ((phy as u32 & 0x1F) << 11) | ((reg as u32 & 0x1F) << 6) | regs::MII_CR_42;
     regs::reg_w(base, regs::MII_ADDR, v);
@@ -61,9 +61,9 @@ unsafe fn mdio_write(phy: u8, reg: u8, data: u16) -> KResult<()> {
         return Err(Errno::Io);
     }
     Ok(())
-}
+}}
 
-pub unsafe fn identify(phy_addr: u8) -> KResult<PhyInfo> {
+pub unsafe fn identify(phy_addr: u8) -> KResult<PhyInfo> { unsafe {
     let id1 = mdio_read(phy_addr, PHY_ID1)?;
     let id2 = mdio_read(phy_addr, PHY_ID2)?;
     let adv = mdio_read(phy_addr, AN_ADV).unwrap_or(0);
@@ -74,28 +74,27 @@ pub unsafe fn identify(phy_addr: u8) -> KResult<PhyInfo> {
         advertised: adv,
         link_partner: lpa,
     })
-}
+}}
 
-pub unsafe fn autoneg(phy_addr: u8) -> KResult<()> {
+pub unsafe fn autoneg(phy_addr: u8) -> KResult<()> { unsafe {
     let adv = AN_ADV_100TX_FD | AN_ADV_100TX | AN_ADV_10T_FD | AN_ADV_10T;
     mdio_write(phy_addr, AN_ADV, adv)?;
     let bmcr = mdio_read(phy_addr, BMCR)?;
     mdio_write(phy_addr, BMCR, bmcr | BMCR_AN_EN | BMCR_RESTART_AN)?;
     Ok(())
-}
+}}
 
-pub unsafe fn wait_link(phy_addr: u8) -> bool {
+pub unsafe fn wait_link(phy_addr: u8) -> bool { unsafe {
     for _ in 0..500_000 {
-        if let Ok(bmsr) = mdio_read(phy_addr, BMSR) {
-            if bmsr & BMSR_LINK_STATUS != 0 {
+        if let Ok(bmsr) = mdio_read(phy_addr, BMSR)
+            && bmsr & BMSR_LINK_STATUS != 0 {
                 return true;
             }
-        }
     }
     false
-}
+}}
 
-pub unsafe fn speed_duplex(phy_addr: u8) -> (u8, bool) {
+pub unsafe fn speed_duplex(phy_addr: u8) -> (u8, bool) { unsafe {
     let lpa = mdio_read(phy_addr, LPA).unwrap_or(0);
     let adv = mdio_read(phy_addr, AN_ADV).unwrap_or(0);
     let combined = lpa & adv;
@@ -108,4 +107,4 @@ pub unsafe fn speed_duplex(phy_addr: u8) -> (u8, bool) {
     } else {
         (0, false)
     }
-}
+}}

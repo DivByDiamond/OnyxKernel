@@ -15,7 +15,7 @@ pub fn user_ptr_ok(p: u64, len: u64) -> bool {
     p >= USER_BASE && p.checked_add(len).is_some_and(|end| end <= USER_TOP)
 }
 
-pub unsafe fn parse_user_path(path: u64, out: &mut [u8; 256]) -> Option<usize> {
+pub unsafe fn parse_user_path(path: u64, out: &mut [u8; 256]) -> Option<usize> { unsafe {
     if !user_ptr_ok(path, 256) {
         return None;
     }
@@ -26,9 +26,9 @@ pub unsafe fn parse_user_path(path: u64, out: &mut [u8; 256]) -> Option<usize> {
     }
     core::ptr::copy_nonoverlapping(p, out.as_mut_ptr(), len);
     Some(len)
-}
+}}
 
-pub unsafe fn handle(tf: &mut TrapFrame) -> i64 {
+pub unsafe fn handle(tf: &mut TrapFrame) -> i64 { unsafe {
     let nr = tf.a7;
     let a0 = tf.a0;
     let a1 = tf.a1;
@@ -136,4 +136,4 @@ pub unsafe fn handle(tf: &mut TrapFrame) -> i64 {
         SYS_fchown => crate::syscall::fs_sys3::sys_fchown(a0, a1 as u32, a2 as u32),
         _ => Errno::NoSys.as_i64(),
     }
-}
+}}

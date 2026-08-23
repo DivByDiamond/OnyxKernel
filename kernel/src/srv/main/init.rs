@@ -5,7 +5,7 @@ use crate::mm::heap;
 use crate::proc;
 use onyx_core::fmt::Arg;
 
-pub(crate) unsafe fn launch() -> ! {
+pub(crate) unsafe fn launch() -> ! { unsafe {
     let path = b"/bin/init";
     let token = match vfs::open(path, vfs::PERM_READ | vfs::PERM_SEEK) {
         Ok(t) => t,
@@ -77,4 +77,4 @@ pub(crate) unsafe fn launch() -> ! {
     );
     crate::arch::smp::release_secondary_harts();
     proc::enter_user(1);
-}
+}}

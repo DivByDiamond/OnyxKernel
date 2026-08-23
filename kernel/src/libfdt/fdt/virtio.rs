@@ -1,8 +1,8 @@
+use super::FdtMmio;
 use super::reader::{cstr_at, rd32, reg_base};
 use super::walk::walk;
-use super::FdtMmio;
 
-pub unsafe fn find_virtio(out: &mut [FdtMmio], max: usize) -> usize {
+pub unsafe fn find_virtio(out: &mut [FdtMmio], max: usize) -> usize { unsafe {
     let mut count = 0;
     walk(&mut |_name, props: &[(u32, &[u8])]| {
         if count >= max {
@@ -42,4 +42,4 @@ pub unsafe fn find_virtio(out: &mut [FdtMmio], max: usize) -> usize {
         false
     });
     count
-}
+}}

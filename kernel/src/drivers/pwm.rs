@@ -30,25 +30,25 @@ static mut G_CHANNELS: [Channel; N_CHANNELS] = [Channel {
 }; N_CHANNELS];
 
 #[inline]
-unsafe fn reg(chan: usize, off: u32) -> usize {
+unsafe fn reg(chan: usize, off: u32) -> usize { unsafe {
     G_BASE + 0x10 + chan * 0x10 + off as usize
-}
+}}
 
 #[inline]
-unsafe fn _rd(chan: usize, off: u32) -> u32 {
+unsafe fn _rd(chan: usize, off: u32) -> u32 { unsafe {
     Mmio::<u32>::at(reg(chan, off)).read()
-}
+}}
 
 #[inline]
-unsafe fn wr(chan: usize, off: u32, v: u32) {
+unsafe fn wr(chan: usize, off: u32, v: u32) { unsafe {
     Mmio::<u32>::at(reg(chan, off)).write(v);
-}
+}}
 
-pub unsafe fn init(base: usize) {
+pub unsafe fn init(base: usize) { unsafe {
     G_BASE = base;
     // Scale: bits 0..3 = scale value; 0 = no scaling.
     Mmio::<u32>::at(G_BASE + R_CFG as usize).write(0);
-}
+}}
 
 fn check_chan(chan: usize) -> KResult<()> {
     if chan >= N_CHANNELS {

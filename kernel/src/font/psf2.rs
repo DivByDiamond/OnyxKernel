@@ -3,7 +3,7 @@ use onyx_core::errno::{Errno, KResult};
 
 const PSF2_HAS_UNICODE_TABLE: u32 = 1;
 
-pub(super) unsafe fn init_psf2(data: &[u8]) -> KResult<()> {
+pub(super) unsafe fn init_psf2(data: &[u8]) -> KResult<()> { unsafe {
     if data.len() < 32 {
         return Err(Errno::Io);
     }
@@ -37,9 +37,9 @@ pub(super) unsafe fn init_psf2(data: &[u8]) -> KResult<()> {
         parse_psf2_unicode_table(data, hdr_size, num_glyphs, charsize);
     }
     Ok(())
-}
+}}
 
-unsafe fn parse_psf2_unicode_table(data: &[u8], hdr_size: usize, num_glyphs: u32, charsize: u32) {
+unsafe fn parse_psf2_unicode_table(data: &[u8], hdr_size: usize, num_glyphs: u32, charsize: u32) { unsafe {
     let glyph_bytes = (num_glyphs as usize) * (charsize as usize);
     let table_start = hdr_size + glyph_bytes;
     if table_start >= data.len() {
@@ -70,7 +70,7 @@ unsafe fn parse_psf2_unicode_table(data: &[u8], hdr_size: usize, num_glyphs: u32
             i += 1;
         }
     }
-}
+}}
 
 unsafe fn decode_utf8(data: &[u8], pos: &mut usize) -> u32 {
     if *pos >= data.len() {

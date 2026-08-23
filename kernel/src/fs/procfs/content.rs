@@ -7,7 +7,7 @@ use onyx_core::errno::{Errno, KResult};
 use super::consts::*;
 use super::fmt;
 
-pub unsafe fn read(ino: u32, buf: *mut u8, offset: u32, len: u32) -> KResult<u32> {
+pub unsafe fn read(ino: u32, buf: *mut u8, offset: u32, len: u32) -> KResult<u32> { unsafe {
     let content = generate_content(ino)?;
     let avail = (content.len() as u32).saturating_sub(offset);
     let to_copy = len.min(avail) as usize;
@@ -15,9 +15,9 @@ pub unsafe fn read(ino: u32, buf: *mut u8, offset: u32, len: u32) -> KResult<u32
         core::ptr::copy_nonoverlapping(content.as_ptr().add(offset as usize), buf, to_copy);
     }
     Ok(to_copy as u32)
-}
+}}
 
-unsafe fn generate_content(ino: u32) -> KResult<&'static [u8]> {
+unsafe fn generate_content(ino: u32) -> KResult<&'static [u8]> { unsafe {
     static mut G_PROCBUF: [u8; PROCFS_MAX_SIZE as usize] = [0; PROCFS_MAX_SIZE as usize];
     let pb = &raw mut G_PROCBUF;
     let s = match ino {
@@ -112,4 +112,4 @@ unsafe fn generate_content(ino: u32) -> KResult<&'static [u8]> {
         _ => return Err(Errno::NoEnt),
     };
     Ok(s.as_bytes())
-}
+}}

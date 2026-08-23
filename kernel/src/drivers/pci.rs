@@ -14,16 +14,16 @@ const PCI_VENDOR_ID: u32 = 0x00;
 const PCI_CLASS_REV: u32 = 0x08;
 const PCI_BAR0: u32 = 0x10;
 
-unsafe fn cfg_rd(bus: u8, dev: u8, fun: u8, off: u32) -> u32 {
+unsafe fn cfg_rd(bus: u8, dev: u8, fun: u8, off: u32) -> u32 { unsafe {
     let addr = ECAM_BASE
         + ((bus as usize) << 20)
         + ((dev as usize) << 15)
         + ((fun as usize) << 12)
         + (off as usize);
     Mmio::<u32>::at(addr).read()
-}
+}}
 
-pub unsafe fn find_vga_fb() -> KResult<usize> {
+pub unsafe fn find_vga_fb() -> KResult<usize> { unsafe {
     for bus in 0u8..16 {
         // Probe dev 0, func 0 for any device on this bus
         let probe = cfg_rd(bus, 0, 0, PCI_VENDOR_ID) & 0xFFFF;
@@ -103,4 +103,4 @@ pub unsafe fn find_vga_fb() -> KResult<usize> {
         }
     }
     Err(Errno::NoEnt)
-}
+}}

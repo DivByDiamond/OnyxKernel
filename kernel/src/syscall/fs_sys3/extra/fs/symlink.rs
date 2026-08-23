@@ -1,11 +1,10 @@
 use onyx_core::errno::Errno;
 
 use crate::fs::vfs;
-use crate::mm::vmm;
 use crate::proc;
 use crate::syscall::handler::{parse_user_path, user_ptr_ok};
 
-pub unsafe fn sys_readlink(path: u64, buf: u64, bufsiz: u64) -> i64 {
+pub unsafe fn sys_readlink(path: u64, buf: u64, bufsiz: u64) -> i64 { unsafe {
     let mut path_buf = [0u8; 256];
     let path_len = match parse_user_path(path, &mut path_buf) {
         Some(l) => l,
@@ -23,9 +22,9 @@ pub unsafe fn sys_readlink(path: u64, buf: u64, bufsiz: u64) -> i64 {
         Ok(n) => n as i64,
         Err(e) => e.as_i64(),
     }
-}
+}}
 
-pub unsafe fn sys_symlink(target: u64, linkpath: u64) -> i64 {
+pub unsafe fn sys_symlink(target: u64, linkpath: u64) -> i64 { unsafe {
     let mut target_buf = [0u8; 256];
     let target_len = match parse_user_path(target, &mut target_buf) {
         Some(l) => l,
@@ -42,4 +41,4 @@ pub unsafe fn sys_symlink(target: u64, linkpath: u64) -> i64 {
         Ok(()) => 0,
         Err(e) => e.as_i64(),
     }
-}
+}}

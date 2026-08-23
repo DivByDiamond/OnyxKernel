@@ -1,4 +1,3 @@
-use crate::drivers::virtio_net::NET_MTU;
 use crate::net::G_IP;
 use crate::net::eth;
 use onyx_core::errno::{Errno, KResult};
@@ -26,7 +25,7 @@ pub fn checksum(data: &[u8]) -> u16 {
     !(sum as u16)
 }
 
-pub unsafe fn send_packet(dst_ip: [u8; 4], protocol: u8, payload: &[u8]) -> KResult<()> {
+pub unsafe fn send_packet(dst_ip: [u8; 4], protocol: u8, payload: &[u8]) -> KResult<()> { unsafe {
     let dst_mac = if dst_ip == [255, 255, 255, 255] {
         [0xFF; 6]
     } else {
@@ -74,7 +73,7 @@ pub unsafe fn send_packet(dst_ip: [u8; 4], protocol: u8, payload: &[u8]) -> KRes
     pkt[10..12].copy_from_slice(&ck.to_be_bytes());
     eth::send_frame(dst_mac, eth::ET_IP, &pkt);
     Ok(())
-}
+}}
 
 pub unsafe fn handle_ip(frame: &[u8]) {
     if frame.len() < eth::ETH_HLEN + IP_HLEN {
@@ -92,7 +91,7 @@ pub unsafe fn handle_ip(frame: &[u8]) {
     }
 }
 
-unsafe fn handle_icmp(frame: &[u8], ip_start: usize, _ihl: usize, _total_len: usize) {
+unsafe fn handle_icmp(frame: &[u8], ip_start: usize, _ihl: usize, _total_len: usize) { unsafe {
     let icmp_start = ip_start + IP_HLEN;
     if frame.len() < icmp_start + 8 {
         return;
@@ -128,4 +127,4 @@ unsafe fn handle_icmp(frame: &[u8], ip_start: usize, _ihl: usize, _total_len: us
     ip_pkt[20..].copy_from_slice(&reply);
     let src_mac = [frame[6], frame[7], frame[8], frame[9], frame[10], frame[11]];
     eth::send_frame(src_mac, eth::ET_IP, &ip_pkt);
-}
+}}

@@ -32,7 +32,7 @@ fn dns_skip_name(msg: &[u8], mut off: usize) -> Option<usize> {
     }
 }
 
-pub unsafe fn dns_resolve(hostname: &[u8], dns_server: [u8; 4]) -> KResult<[u8; 4]> {
+pub unsafe fn dns_resolve(hostname: &[u8], dns_server: [u8; 4]) -> KResult<[u8; 4]> { unsafe {
     let encoded = dns_encode_name(hostname);
     let qlen = encoded.len() + 4;
     let mut query = alloc::vec![0u8; 12 + qlen];
@@ -101,4 +101,4 @@ pub unsafe fn dns_resolve(hostname: &[u8], dns_server: [u8; 4]) -> KResult<[u8; 
     }
     udp::udp_close(sock);
     Err(Errno::Io)
-}
+}}

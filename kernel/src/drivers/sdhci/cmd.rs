@@ -7,7 +7,7 @@ pub(super) unsafe fn send_command(
     arg: u32,
     resp_type: u16,
     has_data: bool,
-) -> u32 {
+) -> u32 { unsafe {
     wait_idle(base);
     clear_interrupts(base);
 
@@ -30,19 +30,16 @@ pub(super) unsafe fn send_command(
     }
 
     if cmd_idx == CMD_GO_IDLE_STATE {
+        // No CRC/index bits for the reset command.
     } else if cmd_idx == CMD_ALL_SEND_CID || cmd_idx == CMD_SEND_CSD {
         cmd_reg |= CMD_CRC_ENABLE;
-    } else if cmd_idx == CMD_SEND_IF_COND || cmd_idx == CMD_APP_CMD {
-        cmd_reg |= CMD_CRC_ENABLE | CMD_INDEX_ENABLE;
-    } else if cmd_idx == CMD_SEND_RELATIVE_ADDR {
-        cmd_reg |= CMD_CRC_ENABLE | CMD_INDEX_ENABLE;
-    } else if cmd_idx == CMD_SELECT_CARD {
-        cmd_reg |= CMD_CRC_ENABLE | CMD_INDEX_ENABLE;
-    } else if cmd_idx == CMD_SET_BLOCKLEN {
-        cmd_reg |= CMD_CRC_ENABLE | CMD_INDEX_ENABLE;
-    } else if cmd_idx == CMD_READ_SINGLE_BLOCK || cmd_idx == CMD_READ_MULTIPLE_BLOCK {
-        cmd_reg |= CMD_CRC_ENABLE | CMD_INDEX_ENABLE;
-    } else if cmd_idx == CMD_WRITE_SINGLE_BLOCK || cmd_idx == CMD_WRITE_MULTIPLE_BLOCK {
+    } else if matches!(
+        cmd_idx,
+        CMD_SEND_IF_COND | CMD_APP_CMD
+            | CMD_SEND_RELATIVE_ADDR | CMD_SELECT_CARD | CMD_SET_BLOCKLEN
+            | CMD_READ_SINGLE_BLOCK | CMD_READ_MULTIPLE_BLOCK
+            | CMD_WRITE_SINGLE_BLOCK | CMD_WRITE_MULTIPLE_BLOCK
+    ) {
         cmd_reg |= CMD_CRC_ENABLE | CMD_INDEX_ENABLE;
     }
 
@@ -68,9 +65,9 @@ pub(super) unsafe fn send_command(
     }
 
     reg_r(base, RESPONSE0)
-}
+}}
 
-pub(super) unsafe fn card_init(base: usize) -> Option<u32> {
+pub(super) unsafe fn card_init(base: usize) -> Option<u32> { unsafe {
     send_command(base, CMD_GO_IDLE_STATE, 0, CMD_RESP_NONE, false);
 
     let mut delay = 100_000u32;
@@ -173,4 +170,4 @@ pub(super) unsafe fn card_init(base: usize) -> Option<u32> {
     reg_w(base, HOST_CONTROL, HC_DATA_WIDTH_4BIT | HC_HIGH_SPEED);
 
     Some(rca)
-}
+}}

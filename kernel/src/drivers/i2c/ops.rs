@@ -32,8 +32,8 @@ pub fn read(addr: u8, reg: Option<u8>, buf: &mut [u8]) -> KResult<()> {
             start(addr, true)?;
         }
         let last = buf.len() - 1;
-        for i in 0..buf.len() {
-            buf[i] = read_byte(i < last, i == last)?;
+        for (i, byte) in buf.iter_mut().enumerate() {
+            *byte = read_byte(i < last, i == last)?;
         }
         wait_not_busy().ok();
         Ok(())

@@ -1,7 +1,7 @@
 use super::shared::{G_FONT, PcfFont, uni_map_insert};
 use onyx_core::errno::{Errno, KResult};
 
-pub(super) unsafe fn init_psf1(data: &[u8]) -> KResult<()> {
+pub(super) unsafe fn init_psf1(data: &[u8]) -> KResult<()> { unsafe {
     if data.len() < 4 {
         return Err(Errno::Io);
     }
@@ -35,9 +35,9 @@ pub(super) unsafe fn init_psf1(data: &[u8]) -> KResult<()> {
         parse_psf1_unicode_table(data, 4, num_glyphs, charsize);
     }
     Ok(())
-}
+}}
 
-unsafe fn parse_psf1_unicode_table(data: &[u8], hdr_size: usize, num_glyphs: u32, charsize: u32) {
+unsafe fn parse_psf1_unicode_table(data: &[u8], hdr_size: usize, num_glyphs: u32, charsize: u32) { unsafe {
     let glyph_bytes = (num_glyphs as usize) * (charsize as usize);
     let table_start = hdr_size + glyph_bytes;
     if table_start + 2 > data.len() {
@@ -63,4 +63,4 @@ unsafe fn parse_psf1_unicode_table(data: &[u8], hdr_size: usize, num_glyphs: u32
             uni_map_insert(cp, glyph_idx);
         }
     }
-}
+}}

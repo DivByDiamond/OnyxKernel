@@ -7,7 +7,7 @@ use super::{
     QH_TERMINATE, STS_ASYNC_ADVANCE, STS_HCHALTED, alloc_qh, op_rd, op_wr, qh_phys, qh_ptr,
 };
 
-pub(super) unsafe fn init_async_list() -> KResult<()> {
+pub(super) unsafe fn init_async_list() -> KResult<()> { unsafe {
     if G_ASYNCLIST_ENABLED {
         return Ok(());
     }
@@ -29,9 +29,9 @@ pub(super) unsafe fn init_async_list() -> KResult<()> {
     }
     G_ASYNCLIST_ENABLED = true;
     Ok(())
-}
+}}
 
-pub(super) unsafe fn qh_insert(idx: usize) {
+pub(super) unsafe fn qh_insert(idx: usize) { unsafe {
     if !G_ASYNCLIST_ENABLED {
         return;
     }
@@ -44,9 +44,9 @@ pub(super) unsafe fn qh_insert(idx: usize) {
     if (op_rd(OP_USBSTS) & STS_ASYNC_ADVANCE) != 0 {
         op_wr(OP_USBSTS, STS_ASYNC_ADVANCE);
     }
-}
+}}
 
-pub(super) unsafe fn qh_remove(idx: usize) {
+pub(super) unsafe fn qh_remove(idx: usize) { unsafe {
     if !G_ASYNCLIST_ENABLED {
         return;
     }
@@ -68,9 +68,9 @@ pub(super) unsafe fn qh_remove(idx: usize) {
         }
         prev_phys = next;
     }
-}
+}}
 
-pub unsafe fn init_ehci(base: usize) -> KResult<()> {
+pub unsafe fn init_ehci(base: usize) -> KResult<()> { unsafe {
     let cap_len = Mmio::<u32>::at(base).read() & 0xFF;
     G_OP_BASE = base + cap_len as usize;
     G_N_PORTS = ((Mmio::<u32>::at(base + EHCI_CAP_HCSPARAMS as usize)).read() >> 24) as u8;
@@ -85,4 +85,4 @@ pub unsafe fn init_ehci(base: usize) -> KResult<()> {
     }
     op_wr(OP_CONFIGFLAG, 1);
     init_async_list()
-}
+}}

@@ -1,9 +1,9 @@
-use super::{by_pid, hart_id, proc_list_lock, proc_list_unlock, ProcState, G_ALL_PROCS, MAX_HARTS};
+use super::{G_ALL_PROCS, MAX_HARTS, ProcState, by_pid, hart_id, proc_list_lock, proc_list_unlock};
 use crate::mm::{heap, vmm};
 use crate::proc::scheduler::{rq_lock, rq_unlock};
 use core::ptr;
 
-pub unsafe fn exit(pid: u32, code: i32) {
+pub unsafe fn exit(pid: u32, code: i32) { unsafe {
     if let Some(p) = by_pid(pid) {
         crate::kerr!(
             "proc",
@@ -39,17 +39,15 @@ pub unsafe fn exit(pid: u32, code: i32) {
         p.exit_code = code;
         p.state = ProcState::Exited;
         let parent = p.parent_pid;
-        if parent != 0 {
-            if let Some(pp) = by_pid(parent) {
-                if matches!(pp.state, ProcState::Waiting) {
+        if parent != 0
+            && let Some(pp) = by_pid(parent)
+                && matches!(pp.state, ProcState::Waiting) {
                     pp.state = ProcState::Ready;
                     let caller_hart = hart_id();
                     rq_lock(caller_hart);
                     crate::proc::scheduler::enqueue(caller_hart, pp as *mut _);
                     rq_unlock(caller_hart);
                 }
-            }
-        }
         proc_list_lock();
         let mut cur = G_ALL_PROCS;
         while !cur.is_null() {
@@ -62,4 +60,4 @@ pub unsafe fn exit(pid: u32, code: i32) {
         }
         proc_list_unlock();
     }
-}
+}}

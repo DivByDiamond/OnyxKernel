@@ -24,9 +24,9 @@ unsafe fn shift_for_pad(pad: u32) -> u32 {
 }
 
 /// Initialise the pinctrl base address.
-pub unsafe fn init(base: usize) {
+pub unsafe fn init(base: usize) { unsafe {
     G_BASE = base;
-}
+}}
 
 /// Set the mux function of a single pad (0..N_PADS). `func` is a 3-bit
 /// function selector. Most pads have function 0 = GPIO, function 1..7

@@ -1,15 +1,15 @@
 use super::*;
 use onyx_core::errno::{Errno, KResult};
 
-pub unsafe fn read_edid(i2c_base: usize) -> KResult<[u8; 128]> {
+pub unsafe fn read_edid(i2c_base: usize) -> KResult<[u8; 128]> { unsafe {
     let old_base = G_BASE;
     G_BASE = i2c_base;
     let mut edid = [0u8; 128];
     start(0x50, false)?;
     write_byte(0x00, false)?;
     start(0x50, true)?;
-    for i in 0..128 {
-        edid[i] = read_byte(i < 127, i == 127)?;
+    for (i, byte) in edid.iter_mut().enumerate() {
+        *byte = read_byte(i < 127, i == 127)?;
     }
     wait_not_busy().ok();
     G_BASE = old_base;
@@ -25,4 +25,4 @@ pub unsafe fn read_edid(i2c_base: usize) -> KResult<[u8; 128]> {
         return Err(Errno::Inval);
     }
     Ok(edid)
-}
+}}

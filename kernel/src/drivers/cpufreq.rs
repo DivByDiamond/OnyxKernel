@@ -28,29 +28,29 @@ static mut G_PLL: usize = PLL_BASE;
 static mut G_CUR_OPP: usize = 1; // default 500 MHz
 
 #[inline]
-unsafe fn cru_rd(off: u32) -> u32 {
+unsafe fn cru_rd(off: u32) -> u32 { unsafe {
     Mmio::<u32>::at(G_CRU + off as usize).read()
-}
+}}
 
 #[inline]
-unsafe fn cru_wr(off: u32, v: u32) {
+unsafe fn cru_wr(off: u32, v: u32) { unsafe {
     Mmio::<u32>::at(G_CRU + off as usize).write(v);
-}
+}}
 
 #[inline]
-unsafe fn pll_rd(off: u32) -> u32 {
+unsafe fn pll_rd(off: u32) -> u32 { unsafe {
     Mmio::<u32>::at(G_PLL + off as usize).read()
-}
+}}
 
 #[inline]
-unsafe fn _pll_wr(off: u32, v: u32) {
+unsafe fn _pll_wr(off: u32, v: u32) { unsafe {
     Mmio::<u32>::at(G_PLL + off as usize).write(v);
-}
+}}
 
-pub unsafe fn init(cru: usize, pll: usize) {
+pub unsafe fn init(cru: usize, pll: usize) { unsafe {
     G_CRU = cru;
     G_PLL = pll;
-}
+}}
 
 /// Read the current CPU frequency in MHz. Derived from PLL0 and the
 /// divider in the CRU.
@@ -60,7 +60,7 @@ pub fn freq_mhz() -> u32 {
         // PLL0 output = refclk * (N + 1) / (M + 1) / (P + 1).
         // Assume refclk = 25 MHz on SG2000 eval boards.
         let n = (pll >> 8) & 0xFF;
-        let m = (pll >> 0) & 0xFF;
+        let m = pll & 0xFF;
         let p = (pll >> 16) & 0x7;
         let refclk = 25u32;
         let vco = refclk * (n + 1) / (m + 1).max(1);
@@ -81,7 +81,7 @@ pub fn set_opp(idx: usize) -> KResult<u32> {
         // Re-derive divider from current PLL0 frequency.
         let pll = pll_rd(R_PLL0_CTRL);
         let n = (pll >> 8) & 0xFF;
-        let m = (pll >> 0) & 0xFF;
+        let m = pll & 0xFF;
         let p = (pll >> 16) & 0x7;
         let refclk = 25u32;
         let vco = refclk * (n + 1) / (m + 1).max(1);

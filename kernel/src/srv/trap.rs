@@ -7,16 +7,16 @@ use crate::srv::timer;
 use crate::syscall::abi::SYS_sigreturn;
 use crate::syscall::handler;
 
-pub unsafe fn init() {
+pub unsafe fn init() { unsafe {
     init_hart();
     crate::kinf!(
         "trap",
         "stvec=%p",
         onyx_core::fmt::Arg::from(crate::arch::asm::trap_entry as *const () as usize as u64)
     );
-}
+}}
 
-pub unsafe fn init_hart() {
+pub unsafe fn init_hart() { unsafe {
     crate::arch::csr::write_stvec(crate::arch::asm::trap_entry as *const () as usize as u64);
     let hartid = crate::arch::smp::current_hart();
     let _ = hartid;
@@ -24,9 +24,9 @@ pub unsafe fn init_hart() {
     // user/kernel discriminator). drop_to_user sets it to the kernel stack
     // top right before entering user space.
     crate::arch::csr::write_sscratch(0);
-}
+}}
 
-pub unsafe fn handle(tf: &mut TrapFrame) {
+pub unsafe fn handle(tf: &mut TrapFrame) { unsafe {
     let scause = crate::arch::csr::read_scause();
     let is_int = scause & SCAUSE_INT != 0;
     let code = scause & !SCAUSE_INT;
@@ -131,20 +131,18 @@ pub unsafe fn handle(tf: &mut TrapFrame) {
     // signals. KILL terminates the process; other signals are cleared (MVP).
     proc::signal_check(tf);
     let pid = proc::current_pid();
-    if pid != 0 {
-        if let Some(p) = proc::by_pid(pid) {
-            if matches!(p.state, proc::ProcState::Exited) {
+    if pid != 0
+        && let Some(p) = proc::by_pid(pid)
+            && matches!(p.state, proc::ProcState::Exited) {
                 proc::sched_yield(tf);
                 // sched_yield returns only if it couldn't context-switch away.
                 // For secondary harts, sched_yield switches to idle (never returns).
                 // If we reach here, no runnable process exists — halt.
                 crate::srv::klog::halt();
             }
-        }
-    }
     if proc::process::G_NEED_RESCHED[proc::process::hart_id()]
         .load(core::sync::atomic::Ordering::Acquire)
     {
         proc::sched_yield(tf);
     }
-}
+}}

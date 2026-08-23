@@ -3,16 +3,16 @@ use super::{
 };
 use onyx_core::errno::{Errno, KResult};
 
-pub unsafe fn dup(token: FdToken) -> KResult<FdToken> {
+pub unsafe fn dup(token: FdToken) -> KResult<FdToken> { unsafe {
     let idx = fd_check(token)?;
     let fd = fd_get(idx);
     let new_idx = alloc_fd(fd.perms)?;
     fd_set(new_idx, fd.ino, fd.size, fd.fs, fd.pos);
     let new_fd = fd_get(new_idx);
     Ok(fd_token(new_idx, new_fd.epoch))
-}
+}}
 
-pub unsafe fn dup2(old_token: FdToken, new_fd: u64) -> KResult<FdToken> {
+pub unsafe fn dup2(old_token: FdToken, new_fd: u64) -> KResult<FdToken> { unsafe {
     let idx = fd_check(old_token)?;
     let fd = fd_get(idx);
     let new_idx = new_fd as usize;
@@ -48,9 +48,9 @@ pub unsafe fn dup2(old_token: FdToken, new_fd: u64) -> KResult<FdToken> {
     }
     let new_fd_entry = fd_get(new_idx);
     Ok(fd_token(new_idx, new_fd_entry.epoch))
-}
+}}
 
-pub unsafe fn create_pipe() -> KResult<(FdToken, FdToken)> {
+pub unsafe fn create_pipe() -> KResult<(FdToken, FdToken)> { unsafe {
     let r_idx = alloc_fd(PERM_READ)?;
     let w_idx = alloc_fd(PERM_WRITE)?;
     // Bug #24 fix: previously used pipe_ino = !0u32 (0xFFFFFFFF). When a
@@ -90,4 +90,4 @@ pub unsafe fn create_pipe() -> KResult<(FdToken, FdToken)> {
     let r_fd = fd_get(r_idx);
     let w_fd = fd_get(w_idx);
     Ok((fd_token(r_idx, r_fd.epoch), fd_token(w_idx, w_fd.epoch)))
-}
+}}

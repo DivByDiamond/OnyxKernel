@@ -1,10 +1,10 @@
 use super::types::{CHAN_BUF_SIZE, CHAN_MAX, CHAN_MAX_CLIENTS, CHAN_NAME_MAX, Channel, G_CHANNELS};
 use onyx_core::errno::{Errno, KResult};
 
-pub unsafe fn create(owner_pid: u32) -> KResult<u32> {
-    for i in 0..CHAN_MAX {
-        if !G_CHANNELS[i].used {
-            G_CHANNELS[i] = Channel {
+pub unsafe fn create(owner_pid: u32) -> KResult<u32> { unsafe {
+    for (i, slot) in G_CHANNELS.iter_mut().enumerate() {
+        if !slot.used {
+            *slot = Channel {
                 buf: [0; CHAN_BUF_SIZE],
                 head: 0,
                 tail: 0,
@@ -22,9 +22,9 @@ pub unsafe fn create(owner_pid: u32) -> KResult<u32> {
         }
     }
     Err(Errno::NoMem)
-}
+}}
 
-pub unsafe fn create_named(name: &[u8], owner_pid: u32) -> KResult<u32> {
+pub unsafe fn create_named(name: &[u8], owner_pid: u32) -> KResult<u32> { unsafe {
     if name.is_empty() || name.len() > CHAN_NAME_MAX - 1 {
         return Err(Errno::Inval);
     }
@@ -37,20 +37,19 @@ pub unsafe fn create_named(name: &[u8], owner_pid: u32) -> KResult<u32> {
     ch.name[..nlen].copy_from_slice(&name[..nlen]);
     ch.name_len = nlen as u8;
     Ok(id)
-}
+}}
 
-pub unsafe fn find_by_name(name: &[u8]) -> Option<u32> {
-    for i in 0..CHAN_MAX {
-        let ch = &G_CHANNELS[i];
+pub unsafe fn find_by_name(name: &[u8]) -> Option<u32> { unsafe {
+    for (i, ch) in G_CHANNELS.iter().enumerate() {
         if ch.used && ch.name_len as usize == name.len() && &ch.name[..ch.name_len as usize] == name
         {
             return Some(i as u32);
         }
     }
     None
-}
+}}
 
-pub unsafe fn open_by_name(name: &[u8], client_pid: u32) -> KResult<u32> {
+pub unsafe fn open_by_name(name: &[u8], client_pid: u32) -> KResult<u32> { unsafe {
     let id = find_by_name(name).ok_or(Errno::NoEnt)?;
     let ch = &mut G_CHANNELS[id as usize];
     if ch.num_clients as usize >= CHAN_MAX_CLIENTS {
@@ -64,9 +63,9 @@ pub unsafe fn open_by_name(name: &[u8], client_pid: u32) -> KResult<u32> {
     ch.clients[ch.num_clients as usize] = client_pid;
     ch.num_clients += 1;
     Ok(id)
-}
+}}
 
-pub unsafe fn disconnect(chan_id: u32, pid: u32) {
+pub unsafe fn disconnect(chan_id: u32, pid: u32) { unsafe {
     if chan_id as usize >= CHAN_MAX {
         return;
     }
@@ -81,9 +80,9 @@ pub unsafe fn disconnect(chan_id: u32, pid: u32) {
             return;
         }
     }
-}
+}}
 
-pub unsafe fn connect(chan_id: u32, client_pid: u32) -> KResult<()> {
+pub unsafe fn connect(chan_id: u32, client_pid: u32) -> KResult<()> { unsafe {
     if chan_id as usize >= CHAN_MAX {
         return Err(Errno::Inval);
     }
@@ -97,9 +96,9 @@ pub unsafe fn connect(chan_id: u32, client_pid: u32) -> KResult<()> {
     ch.clients[ch.num_clients as usize] = client_pid;
     ch.num_clients += 1;
     Ok(())
-}
+}}
 
-pub unsafe fn close(chan_id: u32) -> KResult<()> {
+pub unsafe fn close(chan_id: u32) -> KResult<()> { unsafe {
     if chan_id as usize >= CHAN_MAX {
         return Err(Errno::Inval);
     }
@@ -110,28 +109,25 @@ pub unsafe fn close(chan_id: u32) -> KResult<()> {
     ch.closed = true;
     ch.used = false;
     Ok(())
-}
+}}
 
-pub unsafe fn named_count() -> u32 {
-    let mut n = 0;
-    for i in 0..CHAN_MAX {
-        if G_CHANNELS[i].used && G_CHANNELS[i].name_len > 0 {
-            n += 1;
-        }
-    }
-    n
-}
+pub unsafe fn named_count() -> u32 { unsafe {
+    G_CHANNELS
+        .iter()
+        .filter(|ch| ch.used && ch.name_len > 0)
+        .count() as u32
+}}
 
-pub unsafe fn named_by_index(idx: u32) -> Option<(&'static [u8], u32)> {
+pub unsafe fn named_by_index(idx: u32) -> Option<(&'static [u8], u32)> { unsafe {
     let mut n = 0;
-    for i in 0..CHAN_MAX {
-        if G_CHANNELS[i].used && G_CHANNELS[i].name_len > 0 {
+    for (i, ch) in G_CHANNELS.iter().enumerate() {
+        if ch.used && ch.name_len > 0 {
             if n == idx {
-                let len = G_CHANNELS[i].name_len as usize;
-                return Some((&G_CHANNELS[i].name[..len], i as u32));
+                let len = ch.name_len as usize;
+                return Some((&ch.name[..len], i as u32));
             }
             n += 1;
         }
     }
     None
-}
+}}
