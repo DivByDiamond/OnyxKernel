@@ -77,7 +77,7 @@
 11. **Preemption** — timer tick → sched_tick → NEED_RESCHED → sched_yield
 12. **Блокирующий wait** — Waiting state + sched_yield
 13. **Signal delivery** — SYS_kill, SIGKILL terminates
-14. **Рефакторинг** — все файлы ≤150 строк
+14. **Рефакторинг** — все файлы ≤250 строк (лимит правила 1 шапки)
 15. **QEMU verified** — ядро грузится, init работает в ring 1
 16. **onx::load BSS page-fault fix** — `PTE_A | PTE_D` теперь выставляются для всех
     user-leaf PTE в сегментах / стеке / куче (раньше `map_one_pub` вызывался
@@ -255,9 +255,8 @@ CI-воркфлоу, dead-code зачистка (~25 pub fn), SAFETY-комме�
       деградацию надо сигналировать вызывающему.
 - [ ] Контрактный разрыв: /bin/passwd исполняется в ring 2, create/rename — ring≤1 only
       (handler/acl.rs:76,81) → смену пароля нельзя выполнить даже root'ом.
-      ✅ РЕШЕНИЕ АВТОРА (2026-08-24): известный tradeoff после запрета shadow для ring-2
-      (см. OC2R-секцию «umask/права OnyxFS» ниже); фикс контракта — волна 1, агент D
-      (setuid-хелпер или per-user shadow закрывают и это).
+      → Решение и статус: один канонический пункт «umask/права OnyxFS» в OC2R-секции
+      ниже; фикс контракта — волна 1, агент D.
 - [ ] DHCP/DNS: xid/chaddr не сверяются (net/dhcp/protocol.rs:85-144); DNS id = uptime_us()
       предсказуем (dns.rs:39) → спуфинг ответов в общем L2.
 - [ ] unsafe: 974 вхождения, SAFETY-комментариев 9 (<1%) — проставить SAFETY хотя бы в
@@ -363,10 +362,16 @@ CI-воркфлоу, dead-code зачистка (~25 pub fn), SAFETY-комме�
 - [x] **getentropy** — sys_getentropy теперь через hwrand::fill (Zkr seed CSR → virtio-rng →
       LCG от RTC^cycle); источник логируется при буте; Zkr оставлен заглушкой осознанно
       (illegal-instruction без recovery в trap-хендлере, см. drivers/hwrand.rs)
-- [x] **umask/права OnyxFS** — не-root запретён любой open /etc/shadow на уровне sys_open
-      (uid==0 / ring<=1 обходят). ⚠️ ИЗВЕСТНЫЙ TRADEOFF: ring-2 `passwd` (self-service) тоже
-      читает shadow целиком и теперь получит EPERM — нужен setuid-хелпер или per-user shadow
-      файлы (/etc/shadow/<user>), пока самосмену пароля делаем root'ом
+- [x] **umask/права OnyxFS** — ✅ КАНОНический пункт по passwd↔shadow↔ACL (другие места
+      ссылаются сюда):
+      1) не-root запретён любой open /etc/shadow на уровне sys_open (uid==0 / ring<=1 обходят);
+      2) ⚠️ известный tradeoff: ring-2 `passwd` (self-service) тоже читает shadow целиком и
+         получает EPERM — самосмена пароля сломана осознанно, пока меняем пароль через root;
+      3) контрактный разрыв ACL: create/rename — ring≤1 only, а /bin/passwd живёт в ring 2
+         (handler/acl.rs:76,81), т.е. смена пароля недоступна даже root'ом из osh;
+      4) полное решение (волна 1, агент D): setuid-хелпер или per-user shadow
+         (/etc/shadow/<user>) + правка ACL — закрывает пункты 2 и 3 одновременно; chmod
+         остаётся заглушкой до отдельной задачи
 - [ ] **nanosleep точность** — SBI set_timer vs CLINT на sedna; проверить drift
 
 ### Платформа / SMP:
@@ -384,8 +389,7 @@ CI-воркфлоу, dead-code зачистка (~25 pub fn), SAFETY-комме�
       либо перейти на стандартный формат ($5$ rounds=…), чтобы образы были переносимы
 - [ ] **`passwd` с пустым текущим паролем** — после перевода root на пустой пароль проверить
       смену пароля (verify_old_password должен принимать пустой, если stored пустой)
-- [x] **umask/права OnyxFS** — см. отмеченный пункт выше (deny /etc/shadow для не-root в sys_open);
-      chmod остаётся заглушкой
+- [x] **umask/права OnyxFS** — см. канонический пункт выше («Время / энтропия»)
 - [x] **argv/envp в execve** — sys_execve копирует user char** (лимиты 32 записи/256 байт),
       стек инициализируется по RISC-V ABI (argc/argv/envp); login передаёт argv=["osh"] и
       envp HOME/USER/SHELL/PATH=/bin
