@@ -3,8 +3,7 @@ use crate::font;
 
 pub fn draw_char(x: usize, y: usize, c: u8, fg: u32, bg: u32) {
     let glyph = font::glyph_bitmap(c);
-    for row in 0..font::FONT_H {
-        let bits = glyph[row];
+    for (row, &bits) in glyph.iter().enumerate() {
         for col in 0..font::FONT_W {
             let on = (bits >> (7 - col)) & 1;
             put_pixel(x + col, y + row, if on != 0 { fg } else { bg });
@@ -16,7 +15,7 @@ pub fn draw_unicode_char(x: usize, y: usize, cp: u32, fg: u32, bg: u32) {
     let gd = font::glyph_bitmap_unicode(cp);
     let fh = gd.height as usize;
     let fw = gd.width as usize;
-    let bytes_per_row = (fw + 7) / 8;
+    let bytes_per_row = fw.div_ceil(8);
     for row in 0..fh {
         let row_off = row * bytes_per_row;
         for col in 0..fw {

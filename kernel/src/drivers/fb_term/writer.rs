@@ -8,6 +8,12 @@ pub struct FbWriter {
     pub bg: u32,
 }
 
+impl Default for FbWriter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl FbWriter {
     pub const fn new() -> Self {
         Self {
