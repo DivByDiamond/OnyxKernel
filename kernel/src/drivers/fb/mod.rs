@@ -31,6 +31,27 @@ pub fn enabled() -> bool {
     unsafe { G_FB.enabled }
 }
 
+pub fn width() -> usize {
+    unsafe { G_FB.width }
+}
+
+pub fn height() -> usize {
+    unsafe { G_FB.height }
+}
+
+pub fn bpp() -> usize {
+    unsafe { G_FB.bpp }
+}
+
+pub fn pitch() -> usize {
+    unsafe { G_FB.pitch }
+}
+
+/// Total framebuffer size in bytes for the *current* mode.
+pub fn size_bytes() -> usize {
+    unsafe { G_FB.pitch * G_FB.height }
+}
+
 pub fn fb_base_ptr() -> *mut u8 {
     unsafe { G_FB.base }
 }
@@ -46,12 +67,28 @@ pub unsafe fn init(paddr: usize) -> KResult<()> {
     if paddr < 0x8000_0000 {
         return Err(onyx_core::errno::Errno::Inval);
     }
+    init_device(paddr, FB_WIDTH, FB_HEIGHT, FB_PITCH, FB_BPP)
+}
+
+/// Init from a device-provided framebuffer (FDT `simple-framebuffer` on
+/// OC2R/sedna): the address is MMIO outside pmm-managed RAM, and the geometry
+/// comes from the device tree node, so both differ from the defaults above.
+pub unsafe fn init_device(
+    paddr: usize,
+    width: usize,
+    height: usize,
+    stride: usize,
+    bpp: usize,
+) -> KResult<()> {
+    if paddr == 0 || width == 0 || height == 0 || bpp == 0 || stride < width * (bpp / 8) {
+        return Err(onyx_core::errno::Errno::Inval);
+    }
     G_FB = Fb {
         base: paddr as *mut u8,
-        width: FB_WIDTH,
-        height: FB_HEIGHT,
-        pitch: FB_PITCH,
-        bpp: FB_BPP,
+        width,
+        height,
+        pitch: stride,
+        bpp,
         enabled: true,
     };
     clear();
@@ -78,9 +115,18 @@ fn put_pixel(x: usize, y: usize, color: u32) {
         }
         let off = y * G_FB.pitch + x * (G_FB.bpp / 8);
         let base = G_FB.base;
-        *base.add(off) = (color & 0xFF) as u8;
-        *base.add(off + 1) = ((color >> 8) & 0xFF) as u8;
-        *base.add(off + 2) = ((color >> 16) & 0xFF) as u8;
+        if G_FB.bpp <= 16 {
+            // RGB565 (r5g6b5), little-endian — the OC2R monitor format.
+            let r5 = ((color >> 16) & 0xF8) as u16;
+            let g6 = ((color >> 8) & 0xFC) as u16;
+            let b5 = (color & 0xF8) as u16;
+            let px: u16 = r5 << 11 | g6 << 5 | b5;
+            core::ptr::write_volatile(base.add(off) as *mut u16, px.to_le());
+        } else {
+            *base.add(off) = (color & 0xFF) as u8;
+            *base.add(off + 1) = ((color >> 8) & 0xFF) as u8;
+            *base.add(off + 2) = ((color >> 16) & 0xFF) as u8;
+        }
     }
 }
 

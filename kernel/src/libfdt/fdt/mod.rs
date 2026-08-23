@@ -1,4 +1,5 @@
 mod clint;
+mod framebuffer;
 mod init;
 mod memory;
 mod model;
@@ -16,6 +17,7 @@ pub(crate) use types::{
 };
 
 pub use clint::find_clint;
+pub use framebuffer::find_simple_framebuffer;
 pub use init::init;
 pub use memory::memory;
 pub use model::{is_qemu, is_sedna, model};
