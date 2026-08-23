@@ -68,11 +68,12 @@ pub unsafe extern "C" fn _start() -> ! {
             continue;
         }
         let n = n as usize;
-        let n = if n > 0 && user_buf[n - 1] == b'\n' {
-            n - 1
-        } else {
-            n
-        };
+        // Strip CR as well as LF: terminals (and the OC2R in-game terminal) send Enter
+        // as '\r'; a trailing '\r' would corrupt the username match.
+        let mut n = n;
+        while n > 0 && (user_buf[n - 1] == b'\n' || user_buf[n - 1] == b'\r') {
+            n -= 1;
+        }
         let username = &user_buf[..n];
 
         if username.is_empty() {
@@ -97,17 +98,20 @@ pub unsafe extern "C" fn _start() -> ! {
         let _ = syscalls::ioctl(0, TIOCRRAW, 0);
         syscalls::write(1, b"\n".as_ptr(), 1);
 
-        if pn <= 0 {
+        // An empty submission (just Enter) is a valid password attempt: accounts
+        // seeded with an empty password must be able to log in without typing one.
+        if pn < 0 {
             backoff::backoff_sleep(fails);
             fails = fails.saturating_add(1);
             continue;
         }
         let pn = pn as usize;
-        let pn = if pn > 0 && pass_buf[pn - 1] == b'\n' {
-            pn - 1
-        } else {
-            pn
-        };
+        // Raw mode skips the kernel's CR/LF translation: Enter arrives as '\r', so it must
+        // be stripped here or the password hash never matches.
+        let mut pn = pn;
+        while pn > 0 && (pass_buf[pn - 1] == b'\n' || pass_buf[pn - 1] == b'\r') {
+            pn -= 1;
+        }
         let password = &pass_buf[..pn];
 
         if !auth::verify_shadow_password(username, password) {
