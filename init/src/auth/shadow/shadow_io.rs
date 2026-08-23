@@ -3,8 +3,8 @@
 #![allow(dead_code, unused_imports)]
 
 use super::shadow_core::format_shadow_entry;
-use crate::auth::SHADOW_PATH;
 use crate::auth::group::atomic_rewrite;
+use crate::auth::SHADOW_PATH;
 use crate::syscalls;
 
 pub fn update_shadow_password(username: &[u8], new_password: &[u8]) -> Result<(), i64> {

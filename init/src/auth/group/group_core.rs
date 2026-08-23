@@ -2,8 +2,8 @@
 // items unused by one binary are used by others (dead_code/unused_imports fire per-bin).
 #![allow(dead_code, unused_imports)]
 
-use crate::auth::GROUP_PATH;
 use crate::auth::crypto::{copy_slice, parse_dec};
+use crate::auth::GROUP_PATH;
 use crate::syscalls;
 
 #[derive(Clone, Copy)]
