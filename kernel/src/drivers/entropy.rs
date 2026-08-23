@@ -17,11 +17,13 @@ fn rotl(x: u64, k: u32) -> u64 {
 /// multiple times — the state is replaced wholesale.
 pub fn seed() {
     unsafe {
-        for i in 0..4 {
+        let mut state = [0u64; 4];
+        for v in &mut state {
             let a = hwrand::next_u32() as u64;
             let b = hwrand::next_u32() as u64;
-            G_STATE[i] = (a << 32) | b;
+            *v = (a << 32) | b;
         }
+        G_STATE = state;
         // xoshiro cannot start from all-zero state.
         if G_STATE == [0, 0, 0, 0] {
             G_STATE = [

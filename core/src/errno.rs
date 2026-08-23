@@ -20,6 +20,9 @@ pub enum Errno {
     Child = -16,
     NotEmpty = -17,
     Loop = -18,
+    /// EAGAIN — resource exhaustion (e.g. process-count limit hit by
+    /// fork/spawn); caller should retry later, like POSIX fork(2).
+    Again = -19,
 }
 
 impl Errno {
@@ -49,6 +52,7 @@ impl Errno {
             Self::Child => "ECHILD",
             Self::NotEmpty => "ENOTEMPTY",
             Self::Loop => "ELOOP",
+            Self::Again => "EAGAIN",
         }
     }
 }
@@ -109,6 +113,7 @@ mod tests {
             (Errno::Child, -16, "ECHILD"),
             (Errno::NotEmpty, -17, "ENOTEMPTY"),
             (Errno::Loop, -18, "ELOOP"),
+            (Errno::Again, -19, "EAGAIN"),
         ];
         for (e, code, name) in variants {
             assert_eq!(e.as_i64(), code, "{} code mismatch", name);

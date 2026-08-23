@@ -5,8 +5,8 @@
 //! MMIO constants and provides a single `read()` entry point.
 use crate::drivers::virtio::{
     R_DEVICE_ID, R_GUEST_FEATURES, R_HOST_FEATURES, R_MAGIC_VALUE, R_QUEUE_ALIGN,
-    R_QUEUE_AVAIL_HIGH, R_QUEUE_AVAIL_LOW, R_QUEUE_DESC_HIGH, R_QUEUE_DESC_LOW, R_QUEUE_READY,
-    R_QUEUE_NUM, R_QUEUE_PFN, R_QUEUE_SEL, R_QUEUE_USED_HIGH, R_QUEUE_USED_LOW, R_STATUS,
+    R_QUEUE_AVAIL_HIGH, R_QUEUE_AVAIL_LOW, R_QUEUE_DESC_HIGH, R_QUEUE_DESC_LOW, R_QUEUE_NUM,
+    R_QUEUE_PFN, R_QUEUE_READY, R_QUEUE_SEL, R_QUEUE_USED_HIGH, R_QUEUE_USED_LOW, R_STATUS,
     R_VERSION, VIRTIO_S_ACK, VIRTIO_S_DRIVER, VIRTIO_S_DRIVER_OK, VIRTIO_S_FEATURES_OK, VIRTQ_SIZE,
     VQ_DESC_F_WRITE, VqAvail, VqDesc, VqUsed, reg_r, reg_w,
 };
@@ -41,15 +41,15 @@ pub fn is_present() -> bool {
     unsafe { G_N > 0 }
 }
 
-pub unsafe fn probe(base: usize) -> bool {
+pub unsafe fn probe(base: usize) -> bool { unsafe {
     let magic = reg_r(base, R_MAGIC_VALUE);
     if magic != 0x7472_6976 {
         return false;
     }
     reg_r(base, R_DEVICE_ID) == VIRTIO_ID_RNG
-}
+}}
 
-pub unsafe fn init(base: usize) -> KResult<()> {
+pub unsafe fn init(base: usize) -> KResult<()> { unsafe {
     let pn = &raw const G_N;
     if *pn >= MAX_RNG_DEVS {
         return Err(Errno::NoMem);
@@ -65,7 +65,7 @@ pub unsafe fn init(base: usize) -> KResult<()> {
         used: ptr::null_mut(),
         last_used: 0,
     };
-    (*(&raw mut G_DEVS_RNG))[idx] = dev;
+    G_DEVS_RNG[idx] = dev;
     reg_w(base, R_STATUS, 0);
     reg_w(base, R_STATUS, VIRTIO_S_ACK | VIRTIO_S_DRIVER);
     let hf = reg_r(base, R_HOST_FEATURES);
@@ -86,11 +86,11 @@ pub unsafe fn init(base: usize) -> KResult<()> {
         R_STATUS,
         VIRTIO_S_ACK | VIRTIO_S_DRIVER | VIRTIO_S_DRIVER_OK,
     );
-    *(&raw mut G_N) += 1;
+    G_N += 1;
     Ok(())
-}
+}}
 
-unsafe fn setup_queue(idx: usize) -> KResult<()> {
+unsafe fn setup_queue(idx: usize) -> KResult<()> { unsafe {
     let p = &raw mut G_DEVS_RNG;
     let dev = &mut (*p)[idx];
     reg_w(dev.base, R_QUEUE_SEL, 0);
@@ -122,7 +122,7 @@ unsafe fn setup_queue(idx: usize) -> KResult<()> {
         reg_w(dev.base, R_QUEUE_PFN, (pa / 4096) as u32);
     }
     Ok(())
-}
+}}
 
 /// Synchronously read `buf.len()` bytes of entropy. `buf` must be 4K-aligned
 /// and at most one page; the caller should chunk larger requests.

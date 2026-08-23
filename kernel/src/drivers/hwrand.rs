@@ -12,8 +12,19 @@ use crate::drivers::{rtc, virtio_rng};
 
 static mut G_FALLBACK_SEED: u64 = 0x9E37_79B9_7F4A_7C15;
 
-/// Try the RISC-V Zkr `seed` CSR. Returns Some(u32) on success, None on
-/// unsupported CPUs. Four reads are needed for 128 bits of entropy.
+/// Try the RISC-V Zkr `seed` CSR (0x005). Returns Some(u32) on success,
+/// None on unsupported CPUs. Four reads are needed for 128 bits of entropy.
+///
+/// Deliberately NOT implemented: reading an unimplemented CSR raises an
+/// illegal-instruction exception, and this kernel's trap handler has no
+/// recovery path for kernel-mode faults — `srv/trap.rs` exits the current
+/// process (or panics in kernel mode), it never retries/skips the faulting
+/// instruction. There is also no safe probe: `arch/csr.rs` exposes only
+/// known-good CSRs, and even when the hart implements Zkr, S-mode access
+/// additionally requires M-mode firmware to enable `mseccfg.sseed` (off by
+/// default under QEMU). A speculative `csrr seed, 0x005` here would hard-
+/// kill the kernel on any hart without Zkr+seed enabled, so we stay with
+/// virtio-rng / LCG until a firmware-provided capability flag exists.
 unsafe fn try_seed_csr() -> Option<u32> {
     None
 }

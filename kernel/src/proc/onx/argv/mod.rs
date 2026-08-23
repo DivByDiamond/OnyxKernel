@@ -1,4 +1,3 @@
-use crate::arch::regs::*;
 
 const MAX_ARGV: usize = 64;
 const MAX_ARGV_BYTES: usize = 8192;
@@ -41,18 +40,22 @@ mod layout;
 
 pub(crate) use layout::copy_argv_envp_to_stack;
 
-unsafe fn argv_ptr_ok(p: u64) -> bool {
-    p >= USER_BASE && p < USER_TOP
+/// Bounds-check a user pointer of `len` bytes using the same range check as
+/// the syscall layer (`user_ptr_ok`): [USER_BASE, USER_TOP) with overflow
+/// guard, so both the char** array base and each string pointer are validated
+/// before any dereference.
+unsafe fn argv_ptr_ok(p: u64, len: u64) -> bool {
+    crate::syscall::handler::user_ptr_ok(p, len)
 }
 
-unsafe fn write_val(root_pa: u64, va: u64, val: u64) {
+unsafe fn write_val(root_pa: u64, va: u64, val: u64) { unsafe {
     let pa = crate::mm::vmm::translate(root_pa, va);
     if pa != 0 {
         *(pa as *mut u64) = val;
     }
-}
+}}
 
-unsafe fn copy_user_str(p: u64, buf: &mut [u8], off: &mut usize, max_len: usize) -> Option<usize> {
+unsafe fn copy_user_str(p: u64, buf: &mut [u8], off: &mut usize, max_len: usize) -> Option<usize> { unsafe {
     let mut slen = 0usize;
     while slen < max_len && *((p + slen as u64) as *const u8) != 0 {
         slen += 1;
@@ -65,7 +68,7 @@ unsafe fn copy_user_str(p: u64, buf: &mut [u8], off: &mut usize, max_len: usize)
     buf[*off] = 0;
     *off += 1;
     Some(slen)
-}
+}}
 
 unsafe fn collect_strings(
     ptrs: *const u64,
@@ -74,14 +77,14 @@ unsafe fn collect_strings(
     buf: &mut [u8],
     offsets: &mut [u64; 64],
     off: &mut usize,
-) -> usize {
+) -> usize { unsafe {
     let mut count = 0usize;
     for i in 0..max_count {
         let p = *ptrs.add(i);
         if p == 0 {
             break;
         }
-        if !argv_ptr_ok(p) {
+        if !argv_ptr_ok(p, max_str_len as u64 + 1) {
             break;
         }
         let start = *off;
@@ -94,12 +97,12 @@ unsafe fn collect_strings(
         count += 1;
     }
     count
-}
+}}
 
 pub(crate) unsafe fn copy_argv_to_stack(
     root_pa: u64,
     ustack_top: u64,
     argv_user: u64,
-) -> (usize, u64) {
+) -> (usize, u64) { unsafe {
     copy_argv_envp_to_stack(root_pa, ustack_top, argv_user, 0, 0, 0)
-}
+}}

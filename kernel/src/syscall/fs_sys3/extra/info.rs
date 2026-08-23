@@ -2,11 +2,10 @@ use core::ptr;
 use onyx_core::errno::Errno;
 
 use crate::fs::vfs;
-use crate::mm::vmm;
 use crate::proc;
 use crate::syscall::handler::user_ptr_ok;
 
-pub unsafe fn sys_getdents64(fd: u64, buf: u64, count: u64) -> i64 {
+pub unsafe fn sys_getdents64(fd: u64, buf: u64, count: u64) -> i64 { unsafe {
     if !user_ptr_ok(buf, count) || count < 19 {
         return Errno::Inval.as_i64();
     }
@@ -44,7 +43,7 @@ pub unsafe fn sys_getdents64(fd: u64, buf: u64, count: u64) -> i64 {
                 core::ptr::copy_nonoverlapping(entry_buf.as_ptr(), p.add(19), name_len);
                 if reclen_aligned > reclen {
                     core::ptr::write_bytes(
-                        p.add(19 + name_len as usize),
+                        p.add(19 + name_len),
                         0,
                         (reclen_aligned - reclen) as usize,
                     );
@@ -59,13 +58,13 @@ pub unsafe fn sys_getdents64(fd: u64, buf: u64, count: u64) -> i64 {
 
     vfs::fd_update_pos(idx, cursor);
     written as i64
-}
+}}
 
-pub unsafe fn sys_getdents(fd: u64, buf: u64, count: u64) -> i64 {
+pub unsafe fn sys_getdents(fd: u64, buf: u64, count: u64) -> i64 { unsafe {
     sys_getdents64(fd, buf, count)
-}
+}}
 
-pub unsafe fn sys_getentropy(buf: u64, len: u64) -> i64 {
+pub unsafe fn sys_getentropy(buf: u64, len: u64) -> i64 { unsafe {
     if len > 256 || !user_ptr_ok(buf, len) {
         return Errno::Inval.as_i64();
     }
@@ -74,14 +73,19 @@ pub unsafe fn sys_getentropy(buf: u64, len: u64) -> i64 {
         return Errno::Inval.as_i64();
     }
     let dst = pa as *mut u8;
-    let mut seed = crate::srv::timer::uptime_us()
-        .wrapping_mul(0x9E37_79B9_7F4A_7C15)
-        .wrapping_add(proc::current_pid() as u64);
-    for i in 0..len {
-        seed ^= seed << 13;
-        seed ^= seed >> 7;
-        seed ^= seed << 17;
-        *dst.add(i as usize) = seed as u8;
+    // Fill in small chunks from the hardware RNG and copy each chunk
+    // straight into the translated user page, so we never hold more than
+    // one staging buffer of entropy on the stack.
+    let mut chunk = [0u8; 64];
+    let mut done = 0usize;
+    while done < len as usize {
+        let n = core::cmp::min(chunk.len(), len as usize - done);
+        crate::drivers::hwrand::fill(&mut chunk[..n]);
+        // SAFETY: `dst` is the translated physical address of a mapped,
+        // user-accessible buffer (checked by translate + user_ptr_ok) and
+        // [done, done+n) stays within `len <= 256`.
+        ptr::copy_nonoverlapping(chunk.as_ptr(), dst.add(done), n);
+        done += n;
     }
     0
-}
+}}

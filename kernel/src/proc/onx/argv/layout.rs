@@ -1,7 +1,6 @@
 use super::{
     MAX_ARGV, MAX_ARGV_BYTES, MAX_ENVP, MAX_ENVP_BYTES, argv_ptr_ok, collect_strings, write_val,
 };
-use crate::arch::regs::*;
 
 const AUXV_COUNT: usize = 9;
 const AT_RANDOM_BYTES: usize = 16;
@@ -13,13 +12,13 @@ pub(crate) unsafe fn copy_argv_envp_to_stack(
     envp_user: u64,
     entry_vaddr: u64,
     uid: u64,
-) -> (usize, u64) {
+) -> (usize, u64) { unsafe {
     use crate::mm::vmm;
 
     let mut argv_buf = [0u8; MAX_ARGV_BYTES];
     let mut argv_offs = [0u64; 64];
     let mut argv_off = 0usize;
-    let argc = if argv_user != 0 && argv_ptr_ok(argv_user) {
+    let argc = if argv_user != 0 && argv_ptr_ok(argv_user, MAX_ARGV as u64 * 8) {
         collect_strings(
             argv_user as *const u64,
             MAX_ARGV,
@@ -44,7 +43,7 @@ pub(crate) unsafe fn copy_argv_envp_to_stack(
     let mut envp_buf = [0u8; MAX_ENVP_BYTES];
     let mut envp_offs = [0u64; 32];
     let mut envp_off = 0usize;
-    let envc = if envp_user != 0 && argv_ptr_ok(envp_user) {
+    let envc = if envp_user != 0 && argv_ptr_ok(envp_user, MAX_ENVP as u64 * 8) {
         let mut wide = [0u64; 64];
         let n = collect_strings(
             envp_user as *const u64,
@@ -54,9 +53,8 @@ pub(crate) unsafe fn copy_argv_envp_to_stack(
             &mut wide,
             &mut envp_off,
         );
-        for i in 0..n.min(envp_offs.len()) {
-            envp_offs[i] = wide[i];
-        }
+        let m = n.min(envp_offs.len());
+        envp_offs[..m].copy_from_slice(&wide[..m]);
         n
     } else {
         0
@@ -64,9 +62,9 @@ pub(crate) unsafe fn copy_argv_envp_to_stack(
     let envp_str_size = envp_off;
 
     let mut random_buf = [0u8; AT_RANDOM_BYTES];
-    let tick = crate::srv::timer::uptime_us() as u64;
-    for i in 0..AT_RANDOM_BYTES {
-        random_buf[i] = (tick
+    let tick = crate::srv::timer::uptime_us();
+    for (i, byte) in random_buf.iter_mut().enumerate() {
+        *byte = (tick
             .wrapping_mul(0x9E37_79B9_7F4A_7C15)
             .wrapping_add(i as u64)) as u8;
     }
@@ -92,7 +90,11 @@ pub(crate) unsafe fn copy_argv_envp_to_stack(
     let argv_str_base = sp + 8 + argv_ptr_size as u64 + envp_ptr_size as u64 + auxv_size as u64;
     let mut di = 0usize;
     for i in 0..argc_eff {
-        let str_off = if i < argc { argv_offs[i] } else { 0 };
+        let str_off = if i < argc {
+            argv_offs.get(i).copied().unwrap_or(0)
+        } else {
+            0
+        };
         write_val(root_pa, va, argv_str_base + str_off);
         va += 8;
         while di < argv_str_size && argv_buf[di] != 0 {
@@ -159,4 +161,4 @@ pub(crate) unsafe fn copy_argv_envp_to_stack(
     }
 
     (argc_eff, sp)
-}
+}}

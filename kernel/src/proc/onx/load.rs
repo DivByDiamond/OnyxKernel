@@ -3,7 +3,7 @@ use crate::mm::{pmm, vmm};
 use core::ptr;
 use onyx_core::errno::{Errno, KResult};
 use onyx_core::fmt::Arg;
-use onyx_core::formats::{ONX_FLAGS_COMPRESSED, ONX_FLAGS_RING1};
+use onyx_core::formats::{ONX_FLAGS_COMPRESSED, ONX_FLAGS_RING1, OnxHeader};
 
 use super::segments::map_segment_data;
 
@@ -15,15 +15,60 @@ pub struct OnxLoadResult {
     pub ring: u8,
 }
 
-pub unsafe fn load(image: *const u8, image_size: usize) -> KResult<OnxLoadResult> {
+pub unsafe fn load(image: *const u8, image_size: usize) -> KResult<OnxLoadResult> { unsafe {
     if image_size < 24 {
         return Err(Errno::Inval);
     }
     let image_slice = core::slice::from_raw_parts(image, image_size);
-    let hdr = onyx_core::formats::OnxHeader::from_bytes(image_slice).ok_or(Errno::Inval)?;
+    let hdr = OnxHeader::from_bytes(image_slice).ok_or(Errno::Inval)?;
     let compressed = hdr.flags & ONX_FLAGS_COMPRESSED != 0;
 
     let root_pa = vmm::new_root()?;
+    match load_into(root_pa, &hdr, image, image_size, compressed) {
+        Ok(r) => Ok(r),
+        Err(e) => {
+            // Tear down the half-built address space so its user pages
+            // (and their proc::limits budget slots) are reclaimed.
+            vmm::destroy_root(root_pa);
+            Err(e)
+        }
+    }
+}}
+
+/// Allocate + map one zeroed user page (stack / initial heap), accounting
+/// it against the system-wide user-memory budget.
+unsafe fn map_user_page(root_pa: u64, va: u64) -> KResult<()> { unsafe {
+    crate::proc::limits::user_page_take()?;
+    let page_pa = match pmm::alloc_zero() {
+        Ok(pa) => pa,
+        Err(e) => {
+            crate::proc::limits::user_pages_release(1);
+            return Err(e);
+        }
+    };
+    if let Err(e) = vmm::map_one_pub(
+        root_pa,
+        va,
+        page_pa,
+        PTE_V | PTE_R | PTE_W | PTE_U | PTE_A | PTE_D,
+        0,
+    ) {
+        // Page never entered the table — release it here so both the
+        // physical page and its budget slot are reclaimed.
+        pmm::free(page_pa);
+        crate::proc::limits::user_pages_release(1);
+        return Err(e);
+    }
+    Ok(())
+}}
+
+unsafe fn load_into(
+    root_pa: u64,
+    hdr: &OnxHeader,
+    image: *const u8,
+    image_size: usize,
+    compressed: bool,
+) -> KResult<OnxLoadResult> { unsafe {
     let root = root_pa as *mut u64;
     let leaf = PTE_V | PTE_R | PTE_W | PTE_X | PTE_A | PTE_D;
     for i in 0..3u64 {
@@ -40,7 +85,7 @@ pub unsafe fn load(image: *const u8, image_size: usize) -> KResult<OnxLoadResult
             Arg::from(s.vaddr),
             Arg::from(s.memsz),
             Arg::from(s.filesz),
-            Arg::from(s.flags as u32)
+            Arg::from(s.flags)
         );
         if s.vaddr < USER_BASE || s.vaddr >= USER_TOP {
             return Err(Errno::Range);
@@ -63,14 +108,7 @@ pub unsafe fn load(image: *const u8, image_size: usize) -> KResult<OnxLoadResult
     let ustack_bottom = ustack_top - (USER_STACK_PAGES as u64) * 4096;
     let mut va = ustack_bottom;
     while va < ustack_top {
-        let page_pa = pmm::alloc_zero()?;
-        vmm::map_one_pub(
-            root_pa,
-            va,
-            page_pa,
-            PTE_V | PTE_R | PTE_W | PTE_U | PTE_A | PTE_D,
-            0,
-        )?;
+        map_user_page(root_pa, va)?;
         va += 4096;
     }
 
@@ -78,14 +116,7 @@ pub unsafe fn load(image: *const u8, image_size: usize) -> KResult<OnxLoadResult
     let heap_top = heap_bottom + (USER_HEAP_PAGES as u64) * 4096;
     let mut va = heap_bottom;
     while va < heap_top {
-        let page_pa = pmm::alloc_zero()?;
-        vmm::map_one_pub(
-            root_pa,
-            va,
-            page_pa,
-            PTE_V | PTE_R | PTE_W | PTE_U | PTE_A | PTE_D,
-            0,
-        )?;
+        map_user_page(root_pa, va)?;
         va += 4096;
     }
 
@@ -101,4 +132,4 @@ pub unsafe fn load(image: *const u8, image_size: usize) -> KResult<OnxLoadResult
         heap_brk: heap_bottom,
         ring,
     })
-}
+}}

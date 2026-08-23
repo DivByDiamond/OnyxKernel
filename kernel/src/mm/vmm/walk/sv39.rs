@@ -3,7 +3,7 @@ use crate::mm::pmm;
 use core::ptr;
 use onyx_core::errno::{Errno, KResult};
 
-pub unsafe fn walk(root_pa: u64, vaddr: u64, leaf_level: u32, create: bool) -> KResult<*mut u64> {
+pub unsafe fn walk(root_pa: u64, vaddr: u64, leaf_level: u32, create: bool) -> KResult<*mut u64> { unsafe {
     let mut table_pa = root_pa;
     for level in (leaf_level + 1..=2).rev() {
         let idx = match level {
@@ -38,9 +38,9 @@ pub unsafe fn walk(root_pa: u64, vaddr: u64, leaf_level: u32, create: bool) -> K
         _ => return Err(Errno::Inval),
     };
     Ok((table_pa as usize + idx * 8) as *mut u64)
-}
+}}
 
-unsafe fn split_leaf(parent_pte_ptr: *mut u64, parent_pte: u64, parent_level: u32) -> KResult<()> {
+unsafe fn split_leaf(parent_pte_ptr: *mut u64, parent_pte: u64, parent_level: u32) -> KResult<()> { unsafe {
     let new_pa = pmm::alloc_zero()?;
     let new_table = new_pa as *mut u64;
     let orig_ppn = (parent_pte & PTE_PPN_MASK) >> PTE_PPN_SHIFT;
@@ -60,4 +60,4 @@ unsafe fn split_leaf(parent_pte_ptr: *mut u64, parent_pte: u64, parent_level: u3
     ptr::write_volatile(parent_pte_ptr, PTE_V | ((new_pa >> 12) << PTE_PPN_SHIFT));
     crate::arch::csr::sfence_vma_all();
     Ok(())
-}
+}}

@@ -4,6 +4,7 @@
 //! `scheduler`, and `signals` submodules so callers can use
 //! `crate::proc::current_pid()` etc. without picking a submodule.
 pub mod lifecycle;
+pub mod limits;
 pub mod onx;
 pub mod process;
 pub mod scheduler;
