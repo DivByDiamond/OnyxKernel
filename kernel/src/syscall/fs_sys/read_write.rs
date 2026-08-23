@@ -2,12 +2,12 @@ use crate::arch::trap_frame::TrapFrame;
 use crate::drivers::uart;
 use crate::fs::vfs;
 use crate::proc;
-use crate::syscall::tty::ECHO_ENABLED;
+use crate::syscall::tty::{ECHO_ENABLED, filter_input};
 use onyx_core::errno::Errno;
 
 use super::super::handler::user_ptr_ok;
 
-pub(in super::super) unsafe fn sys_write(tf: &mut TrapFrame, fd: u64, buf: u64, len: u64) -> i64 {
+pub(in super::super) unsafe fn sys_write(tf: &mut TrapFrame, fd: u64, buf: u64, len: u64) -> i64 { unsafe {
     if !user_ptr_ok(buf, len) {
         return Errno::Inval.as_i64();
     }
@@ -32,9 +32,9 @@ pub(in super::super) unsafe fn sys_write(tf: &mut TrapFrame, fd: u64, buf: u64, 
             Err(e) => e.as_i64(),
         }
     }
-}
+}}
 
-pub(in super::super) unsafe fn sys_read(tf: &mut TrapFrame, _fd: u64, buf: u64, len: u64) -> i64 {
+pub(in super::super) unsafe fn sys_read(tf: &mut TrapFrame, _fd: u64, buf: u64, len: u64) -> i64 { unsafe {
     if !user_ptr_ok(buf, len) {
         return Errno::Inval.as_i64();
     }
@@ -53,7 +53,7 @@ pub(in super::super) unsafe fn sys_read(tf: &mut TrapFrame, _fd: u64, buf: u64, 
         if p.raw_stdin {
             // Block for the first byte.
             let first = loop {
-                match uart::getc() {
+                match uart::getc().and_then(filter_input) {
                     Some(b) => break b,
                     None => proc::sched_yield(tf),
                 }
@@ -65,7 +65,7 @@ pub(in super::super) unsafe fn sys_read(tf: &mut TrapFrame, _fd: u64, buf: u64, 
             // (ESC [ A for Up arrow) — if we blocked after ESC, the
             // shell would never see the rest of the sequence.
             while n < len as usize {
-                match uart::getc() {
+                match uart::getc().and_then(filter_input) {
                     Some(b) => {
                         *dst.add(n) = b;
                         n += 1;
@@ -80,7 +80,7 @@ pub(in super::super) unsafe fn sys_read(tf: &mut TrapFrame, _fd: u64, buf: u64, 
         let mut n: usize = 0;
         let max = (len - 1) as usize;
         while n < max {
-            match uart::getc() {
+            match uart::getc().and_then(filter_input) {
                 None => {
                     proc::sched_yield(tf);
                     continue;
@@ -123,4 +123,4 @@ pub(in super::super) unsafe fn sys_read(tf: &mut TrapFrame, _fd: u64, buf: u64, 
             Err(e) => e.as_i64(),
         }
     }
-}
+}}

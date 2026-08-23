@@ -2,12 +2,10 @@ use onyx_core::errno::Errno;
 
 use crate::arch::trap_frame::TrapFrame;
 use crate::fs::vfs;
-use crate::mm::heap;
 use crate::proc;
-use crate::proc::onx;
 use crate::syscall::handler::parse_user_path;
 
-pub unsafe fn sys_execve(tf: &mut TrapFrame, path: u64, argv: u64, envp: u64) -> i64 {
+pub unsafe fn sys_execve(tf: &mut TrapFrame, path: u64, argv: u64, envp: u64) -> i64 { unsafe {
     let mut path_buf = [0u8; 256];
     let path_len = match parse_user_path(path, &mut path_buf) {
         Some(l) => l,
@@ -41,6 +39,10 @@ pub unsafe fn sys_execve(tf: &mut TrapFrame, path: u64, argv: u64, envp: u64) ->
     let uid = proc::current().uid as u64;
     let (argc, argv_sp) =
         proc::onx::copy_argv_envp_to_stack(r.root_pa, r.ustack, argv, envp, r.entry, uid);
+    // RISC-V exec ABI stack layout built above:
+    //   [argc][argv...][NULL][envp...][NULL][auxv][strings]
+    // so envp starts right after argv's NULL terminator.
+    let envp_sp = argv_sp + 8 + (argc as u64 + 1) * 8;
     let p = proc::current();
 
     for i in 0..p.fds.len() {
@@ -87,17 +89,18 @@ pub unsafe fn sys_execve(tf: &mut TrapFrame, path: u64, argv: u64, envp: u64) ->
     tf.sp = argv_sp;
     tf.a0 = argc as u64;
     tf.a1 = argv_sp + 8;
+    tf.a2 = envp_sp;
     tf.sstatus = crate::arch::regs::SSTATUS_SPIE;
     if cfg!(target_pointer_width = "64") {
         tf.satp = crate::arch::regs::SATP_MODE_SV39 | (r.root_pa >> 12);
     } else {
-        tf.satp = (crate::arch::bits::SATP_MODE_SV32 as u32 | ((r.root_pa >> 12) & 0x3FFFFF) as u32)
+        tf.satp = (crate::arch::bits::SATP_MODE_SV32 | ((r.root_pa >> 12) & 0x3FFFFF) as u32)
             as crate::arch::trap_frame::Reg;
     }
     argc as i64
-}
+}}
 
-pub unsafe fn sys_fork(tf: &mut TrapFrame) -> i64 {
+pub unsafe fn sys_fork(tf: &mut TrapFrame) -> i64 { unsafe {
     let parent = proc::current();
     let parent_pid = parent.pid;
     let new_pid = proc::alloc_pid();
@@ -140,13 +143,13 @@ pub unsafe fn sys_fork(tf: &mut TrapFrame) -> i64 {
                 Some(p) => p,
                 None => return new_pid as i64,
             };
-            (*child).fds = parent.fds;
-            (*child).signal_handlers = parent.signal_handlers;
-            (*child).signal_mask = parent.signal_mask;
-            (*child).cwd = parent.cwd;
-            (*child).cwd_len = parent.cwd_len;
-            (*child).mmap_brk = parent.mmap_brk;
-            (*child).tf = child_tf;
+            child.fds = parent.fds;
+            child.signal_handlers = parent.signal_handlers;
+            child.signal_mask = parent.signal_mask;
+            child.cwd = parent.cwd;
+            child.cwd_len = parent.cwd_len;
+            child.mmap_brk = parent.mmap_brk;
+            child.tf = child_tf;
             new_pid as i64
         }
         Err(e) => {
@@ -154,4 +157,4 @@ pub unsafe fn sys_fork(tf: &mut TrapFrame) -> i64 {
             e.as_i64()
         }
     }
-}
+}}

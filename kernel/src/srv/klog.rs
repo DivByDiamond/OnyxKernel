@@ -1,7 +1,8 @@
 //! klog — formatted logging via UART.
 use crate::drivers::uart;
 use core::panic::PanicInfo;
-use onyx_core::fmt::{vformat, Arg, Write};
+use core::sync::atomic::{AtomicU8, Ordering};
+use onyx_core::fmt::{Arg, Write, vformat};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Level {
@@ -21,7 +22,18 @@ impl Level {
     }
 }
 
-pub const KLOG_LEVEL: u8 = 3; // Dbg (print all)
+/// Maximum level still printed. Defaults to `Info` (the historical
+/// behaviour: info, warnings and errors go out, debug chatter does not).
+static MAX_LEVEL: AtomicU8 = AtomicU8::new(Level::Inf as u8);
+
+pub fn set_max_level(level: Level) {
+    MAX_LEVEL.store(level as u8, Ordering::Relaxed);
+}
+
+#[inline]
+pub fn enabled(level: Level) -> bool {
+    (level as u8) <= MAX_LEVEL.load(Ordering::Relaxed)
+}
 
 struct UartWriter;
 impl Write for UartWriter {
@@ -63,7 +75,7 @@ pub fn putc(c: u8) {
 }
 
 pub fn emit(level: Level, tag: &str, fmt: &str, args: &[Arg]) {
-    if (level as u8) > KLOG_LEVEL {
+    if !enabled(level) {
         return;
     }
     let mut w = UartWriter;
@@ -77,14 +89,17 @@ pub fn emit(level: Level, tag: &str, fmt: &str, args: &[Arg]) {
     w.write_char(b'\n');
 }
 
+// The enabled() guard sits in the macro (not inside emit) so a filtered-out
+// call also skips building the Arg slice and the vformat work in emit.
 #[macro_export]
-macro_rules! kdbg { ($tag:expr, $fmt:expr $(, $arg:expr)* $(,)?) => { $crate::srv::klog::emit($crate::srv::klog::Level::Dbg, $tag, $fmt, &[$($arg),*]) }; }
+macro_rules! kdbg { ($tag:expr, $fmt:expr $(, $arg:expr)* $(,)?) => { if $crate::srv::klog::enabled($crate::srv::klog::Level::Dbg) { $crate::srv::klog::emit($crate::srv::klog::Level::Dbg, $tag, $fmt, &[$($arg),*]) } }; }
 #[macro_export]
-macro_rules! kinf { ($tag:expr, $fmt:expr $(, $arg:expr)* $(,)?) => { $crate::srv::klog::emit($crate::srv::klog::Level::Inf, $tag, $fmt, &[$($arg),*]) }; }
+macro_rules! kinf { ($tag:expr, $fmt:expr $(, $arg:expr)* $(,)?) => { if $crate::srv::klog::enabled($crate::srv::klog::Level::Inf) { $crate::srv::klog::emit($crate::srv::klog::Level::Inf, $tag, $fmt, &[$($arg),*]) } }; }
 #[macro_export]
-macro_rules! kwrn { ($tag:expr, $fmt:expr $(, $arg:expr)* $(,)?) => { $crate::srv::klog::emit($crate::srv::klog::Level::Wrn, $tag, $fmt, &[$($arg),*]) }; }
+macro_rules! kwrn { ($tag:expr, $fmt:expr $(, $arg:expr)* $(,)?) => { if $crate::srv::klog::enabled($crate::srv::klog::Level::Wrn) { $crate::srv::klog::emit($crate::srv::klog::Level::Wrn, $tag, $fmt, &[$($arg),*]) } }; }
 #[macro_export]
-macro_rules! kerr { ($tag:expr, $fmt:expr $(, $arg:expr)* $(,)?) => { $crate::srv::klog::emit($crate::srv::klog::Level::Err, $tag, $fmt, &[$($arg),*]) }; }
+macro_rules! kerr { ($tag:expr, $fmt:expr $(, $arg:expr)* $(,)?) => { if $crate::srv::klog::enabled($crate::srv::klog::Level::Err) { $crate::srv::klog::emit($crate::srv::klog::Level::Err, $tag, $fmt, &[$($arg),*]) } }; }
+// Panic output is intentionally unconditional.
 #[macro_export]
 macro_rules! kpanic { ($tag:expr, $fmt:expr $(, $arg:expr)* $(,)?) => { { $crate::srv::klog::emit($crate::srv::klog::Level::Err, $tag, $fmt, &[$($arg),*]); $crate::srv::klog::halt() } }; }
 

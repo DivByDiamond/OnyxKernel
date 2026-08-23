@@ -1,11 +1,12 @@
-use crate::arch::trap_frame::TrapFrame;
+use core::sync::atomic::{AtomicU32, Ordering};
 use onyx_core::errno::{Errno, KResult};
 
 use super::process::{
-    G_NEED_RESCHED, MAX_HARTS, Proc, ProcState, by_pid, current_for_hart, hart_id,
+    G_NEED_RESCHED, Proc, ProcState, by_pid, current_for_hart, hart_id,
 };
 use crate::proc::scheduler::{enqueue, rq_lock, rq_unlock};
 
+pub const SIGINT: u32 = 2;
 pub const SIG_KILL: u32 = 9;
 pub const SIG_STOP: u32 = 19;
 
@@ -13,12 +14,22 @@ mod handler;
 
 pub use handler::*;
 
+/// Foreground process: the most recently created non-init process (via
+/// `spawn()` or `fork()`), i.e. the process a shell would be waiting on.
+/// 0 = none yet. Console Ctrl+C delivers SIGINT to this pid; if the pid is
+/// no longer a live process, the byte is dropped (quiet no-op).
+static G_FG_PID: AtomicU32 = AtomicU32::new(0);
+
+pub fn set_foreground(pid: u32) {
+    G_FG_PID.store(pid, Ordering::Release);
+}
+
 #[inline]
 fn protected_mask() -> u32 {
     (1u32 << SIG_KILL) | (1u32 << SIG_STOP)
 }
 
-pub unsafe fn signal_send(pid: u32, signal: u32) -> KResult<()> {
+pub unsafe fn signal_send(pid: u32, signal: u32) -> KResult<()> { unsafe {
     if signal == 0 || signal >= 32 {
         return Err(Errno::Inval);
     }
@@ -32,9 +43,28 @@ pub unsafe fn signal_send(pid: u32, signal: u32) -> KResult<()> {
         rq_unlock(caller_hart);
     }
     Ok(())
-}
+}}
 
-pub unsafe fn sigaction(signum: u32, act_ptr: u64, oldact_ptr: u64) -> KResult<()> {
+/// Deliver `signal` to the foreground process (see G_FG_PID). A stale pid
+/// (exited/reaped) is a quiet no-op: Ctrl+C at an idle shell prompt must not
+/// kill anything. SIGINT is catchable/blockable like POSIX (only SIG_KILL and
+/// SIG_STOP are protected); with no user handler installed, signal_check's
+/// default path terminates the target with code 128+SIGINT.
+pub unsafe fn signal_foreground(signal: u32) -> KResult<()> { unsafe {
+    if signal == 0 || signal >= 32 {
+        return Err(Errno::Inval);
+    }
+    let pid = G_FG_PID.load(Ordering::Acquire);
+    if pid == 0 {
+        return Ok(());
+    }
+    match by_pid(pid) {
+        Some(p) if !matches!(p.state, ProcState::Exited) => signal_send(pid, signal),
+        _ => Ok(()),
+    }
+}}
+
+pub unsafe fn sigaction(signum: u32, act_ptr: u64, oldact_ptr: u64) -> KResult<()> { unsafe {
     if signum == 0 || signum >= 32 {
         return Err(Errno::Inval);
     }
@@ -67,9 +97,9 @@ pub unsafe fn sigaction(signum: u32, act_ptr: u64, oldact_ptr: u64) -> KResult<(
         p.signal_handler_masks[signum as usize] = extra_mask & !protected_mask();
     }
     Ok(())
-}
+}}
 
-pub unsafe fn sigprocmask(how: u32, set_ptr: u64, oldset_ptr: u64) -> KResult<()> {
+pub unsafe fn sigprocmask(how: u32, set_ptr: u64, oldset_ptr: u64) -> KResult<()> { unsafe {
     let p = crate::proc::current();
     let user_root = p.root_pa;
 
@@ -95,4 +125,4 @@ pub unsafe fn sigprocmask(how: u32, set_ptr: u64, oldset_ptr: u64) -> KResult<()
         }
     }
     Ok(())
-}
+}}
