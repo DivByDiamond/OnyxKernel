@@ -7,19 +7,26 @@ mod vfs;
 
 const BANNER: &str = "\n\x1b[32m░█▀█░█▀█░█░█░█░█\n░█░█░█░█░░█░░▄▀▄\n░▀▀▀░▀░▀░░▀░░▀░▀\x1b[0m\n  OnyxKernel v0.3 (Rust) — RISC-V 64 GC\n\n";
 
-pub unsafe fn kmain(hartid: usize, fdt_addr: usize) -> ! {
+pub unsafe fn kmain(hartid: usize, fdt_addr: usize) -> ! { unsafe {
     crate::srv::klog::debug_mark(b'K');
     // Configure the console from the device tree before printing anything:
     // on OC2R/sedna the UART is not necessarily at the QEMU-virt default
     // 0x10000000, and a wrong console address makes the kernel appear dead.
     if crate::libfdt::fdt::init(fdt_addr) {
         crate::srv::klog::debug_mark(b'i');
+        // Parse the kernel command line as early as possible — right after
+        // the FDT pointer is known — so `loglevel=` filters every subsequent
+        // message. Only raw debug_marks precede this point, and they are not
+        // level-filtered, so no early log is lost.
+        crate::srv::bootargs::init();
+        crate::srv::bootargs::apply_log_level();
         if let Some(u) = crate::libfdt::fdt::find_uart() {
             crate::drivers::uart::init(u.base as usize, u.reg_shift);
         } else {
             crate::drivers::uart::init_default();
         }
     } else {
+        // No FDT: no bootargs either, klog keeps its default (Info) filter.
         crate::drivers::uart::init_default();
     }
     crate::srv::klog::debug_mark(b'b');
@@ -52,7 +59,10 @@ pub unsafe fn kmain(hartid: usize, fdt_addr: usize) -> ! {
         gw = [10, 0, 2, 2];
         mask = [255, 255, 255, 0];
         dns = [10, 0, 2, 3];
-        crate::kwrn!("net", "no net device or DHCP failed, using QEMU user-net defaults");
+        crate::kwrn!(
+            "net",
+            "no net device or DHCP failed, using QEMU user-net defaults"
+        );
     }
     crate::net::init(ip, gw, mask);
     crate::net::G_DNS = dns;
@@ -85,4 +95,4 @@ pub unsafe fn kmain(hartid: usize, fdt_addr: usize) -> ! {
     vfs::load_font();
     crate::srv::klog::debug_mark(b'3');
     init::launch()
-}
+}}

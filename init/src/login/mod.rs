@@ -13,6 +13,56 @@ mod seed;
 const TIOCSRAW: u64 = 0x5421;
 const TIOCRRAW: u64 = 0x5422;
 
+/// Write NUL-terminated concatenation of `parts` into `buf`, returning the
+/// length including the terminator. Strings must be NUL-terminated to match
+/// the kernel-side char** copy logic (proc::onx::argv).
+fn put_env(buf: &mut [u8], parts: &[&[u8]]) -> usize {
+    let mut i = 0usize;
+    for part in parts {
+        for &b in *part {
+            if i + 1 >= buf.len() {
+                break;
+            }
+            buf[i] = b;
+            i += 1;
+        }
+    }
+    buf[i] = 0;
+    i + 1
+}
+
+/// Build argv/envp for the shell and exec it via SYS_execve.
+///
+/// Layout passed as raw user pointers (kernel copies them onto the new
+/// image's stack):
+///   argv = [ptr "osh", NULL]
+///   envp = ["HOME=/users/<name>", "USER=<name>", "SHELL=<shell>", "PATH=/bin", NULL]
+fn exec_shell(username: &[u8], shell_path: &[u8]) -> i64 {
+    let mut arg0 = [0u8; 8];
+    let name = b"osh";
+    arg0[..name.len()].copy_from_slice(name);
+
+    let mut env_home = [0u8; 80];
+    put_env(&mut env_home, &[b"HOME=/users/", username]);
+    let mut env_user = [0u8; 48];
+    put_env(&mut env_user, &[b"USER=", username]);
+    let mut env_shell = [0u8; 48];
+    put_env(&mut env_shell, &[b"SHELL=", shell_path]);
+
+    // Image layout only ships /bin (no /sbin), so PATH=/bin for all users.
+    let env_path = b"PATH=/bin\0";
+
+    let argv = [arg0.as_ptr() as u64, 0u64];
+    let envp = [
+        env_home.as_ptr() as u64,
+        env_user.as_ptr() as u64,
+        env_shell.as_ptr() as u64,
+        env_path.as_ptr() as u64,
+        0u64,
+    ];
+    unsafe { syscalls::execve(shell_path.as_ptr(), argv.as_ptr(), envp.as_ptr()) }
+}
+
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn _start() -> ! {
     syscalls::write(1, b"\nOnyxOS Login\n".as_ptr(), 14);
@@ -40,7 +90,7 @@ pub unsafe extern "C" fn _start() -> ! {
             b"[login] launching /bin/osh (root, ring 1)\n".as_ptr(),
             41,
         );
-        syscalls::exec(shell.as_ptr(), core::ptr::null());
+        exec_shell(b"root", shell);
         syscalls::write(1, b"login: exec failed\n".as_ptr(), 19);
         syscalls::exit(1);
     }
@@ -146,7 +196,14 @@ pub unsafe extern "C" fn _start() -> ! {
         if shell_len < shell_path.len() {
             shell_path[shell_len] = 0;
         }
-        syscalls::exec(shell_path.as_ptr(), core::ptr::null());
+        let mut name_len = 0usize;
+        while name_len < users[user_idx].name.len() && users[user_idx].name[name_len] != 0 {
+            name_len += 1;
+        }
+        exec_shell(
+            &users[user_idx].name[..name_len],
+            &shell_path[..shell_len + 1],
+        );
         syscalls::write(1, b"login: exec failed\n".as_ptr(), 19);
     }
 }

@@ -1,3 +1,4 @@
+pub mod bootargs;
 pub mod kdump;
 pub mod klog;
 pub mod main;

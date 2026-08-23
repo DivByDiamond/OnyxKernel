@@ -1,5 +1,5 @@
 //! NS16550A UART driver.
-use crate::arch::mmio::{Mmio, MmioBlock};
+use crate::arch::mmio::MmioBlock;
 pub const R_DATA: u32 = 0;
 pub const R_IER: u32 = 1;
 pub const R_IIR_FCR: u32 = 2;
@@ -8,6 +8,13 @@ pub const R_MCR: u32 = 4;
 pub const R_LSR: u32 = 5;
 pub const LSR_THRE: u8 = 0x20;
 pub const LSR_DR: u8 = 0x01;
+// FCR (shared with IIR at offset 2): FIFO control.
+pub const FCR_FIFO_ENA: u8 = 0x01;
+pub const FCR_RX_FIFO_RESET: u8 = 0x02;
+pub const FCR_TX_FIFO_RESET: u8 = 0x04;
+// Bits 6-7 = RX trigger level. 0b11 = 14 bytes: with the 16-byte FIFO this
+// buffers a burst of input between polls without an interrupt-driven RX path.
+pub const FCR_TRIGGER_14: u8 = 0xC0;
 static mut G_UART: Uart = Uart::new();
 
 #[derive(Clone, Copy)]
@@ -15,6 +22,12 @@ pub struct Uart {
     base: usize,
     shift: u32,
 }
+impl Default for Uart {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Uart {
     pub const fn new() -> Self {
         Self {
@@ -37,7 +50,8 @@ impl Uart {
             r.reg_u8(R_DATA).write(0x01);
             r.reg_u8(R_IER).write(0x00);
             r.reg_u8(R_LCR).write(0x03);
-            r.reg_u8(R_IIR_FCR).write(0xC7);
+            r.reg_u8(R_IIR_FCR)
+                .write(FCR_FIFO_ENA | FCR_RX_FIFO_RESET | FCR_TX_FIFO_RESET | FCR_TRIGGER_14);
             r.reg_u8(R_MCR).write(0x0B);
         }
         unsafe {
@@ -103,6 +117,12 @@ mod tests {
     fn test_lsr_flags() {
         assert_eq!(LSR_THRE, 0x20);
         assert_eq!(LSR_DR, 0x01);
+    }
+
+    #[test]
+    fn test_fcr_fifo_trigger14() {
+        let fcr = FCR_FIFO_ENA | FCR_RX_FIFO_RESET | FCR_TX_FIFO_RESET | FCR_TRIGGER_14;
+        assert_eq!(fcr, 0xC7);
     }
 
     #[test]

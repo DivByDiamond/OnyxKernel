@@ -4,11 +4,10 @@ use core::sync::atomic::Ordering;
 use super::SIG_KILL;
 use super::SIG_STOP;
 use super::protected_mask;
-use super::{G_NEED_RESCHED, MAX_HARTS, Proc, ProcState, by_pid, current_for_hart, hart_id};
+use super::{G_NEED_RESCHED, ProcState, current_for_hart, hart_id};
 use crate::proc::lifecycle::exit;
-use crate::proc::scheduler::{enqueue, rq_lock, rq_unlock};
 
-pub unsafe fn sigreturn(tf: &mut TrapFrame) {
+pub unsafe fn sigreturn(tf: &mut TrapFrame) { unsafe {
     let p = crate::proc::current();
     if !p.in_signal_handler {
         return;
@@ -16,9 +15,9 @@ pub unsafe fn sigreturn(tf: &mut TrapFrame) {
     p.in_signal_handler = false;
     p.signal_mask = p.saved_mask;
     *tf = p.saved_tf;
-}
+}}
 
-pub unsafe fn signal_check(tf: &mut TrapFrame) {
+pub unsafe fn signal_check(tf: &mut TrapFrame) { unsafe {
     let hartid = hart_id();
     let cur = current_for_hart(hartid);
     if cur.is_null() {
@@ -81,4 +80,4 @@ pub unsafe fn signal_check(tf: &mut TrapFrame) {
     tf.a0 = signum as u64;
     let new_sp = tf.sp.wrapping_sub(256) & !15u64;
     tf.sp = new_sp;
-}
+}}

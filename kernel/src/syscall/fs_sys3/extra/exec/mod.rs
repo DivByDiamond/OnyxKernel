@@ -5,13 +5,12 @@ pub use fork::*;
 use onyx_core::errno::Errno;
 
 use crate::arch::trap_frame::TrapFrame;
-use crate::mm::vmm;
 use crate::proc;
 use crate::proc::process::{ProcState, proc_list_lock, proc_list_unlock};
 use crate::syscall::abi::WNOHANG;
 use crate::syscall::handler::user_ptr_ok;
 
-pub unsafe fn sys_waitpid(tf: &mut TrapFrame, pid: u64, status_out: u64, options: u32) -> i64 {
+pub unsafe fn sys_waitpid(tf: &mut TrapFrame, pid: u64, status_out: u64, options: u32) -> i64 { unsafe {
     let my_pid = proc::current_pid();
 
     if status_out != 0 && !user_ptr_ok(status_out, 4) {
@@ -23,13 +22,9 @@ pub unsafe fn sys_waitpid(tf: &mut TrapFrame, pid: u64, status_out: u64, options
     let mut cur = proc::G_ALL_PROCS;
     while !cur.is_null() {
         if (*cur).parent_pid == my_pid && matches!((*cur).state, ProcState::Exited) {
-            let matches_pid = if pid == u32::MAX as u64 || pid == 0 {
-                true
-            } else if (pid as i64) < 0 {
-                true
-            } else {
-                (*cur).pid == pid as u32
-            };
+            // Any special pid selector (all / any / negative) matches every child.
+            let matches_pid =
+                pid == u32::MAX as u64 || pid == 0 || (pid as i64) < 0 || (*cur).pid == pid as u32;
             if matches_pid {
                 let exited_pid = (*cur).pid;
                 let code = (*cur).exit_code;
@@ -62,13 +57,9 @@ pub unsafe fn sys_waitpid(tf: &mut TrapFrame, pid: u64, status_out: u64, options
     cur = proc::G_ALL_PROCS;
     while !cur.is_null() {
         if (*cur).parent_pid == my_pid && !matches!((*cur).state, ProcState::Free) {
-            let matches_pid = if pid == u32::MAX as u64 || pid == 0 {
-                true
-            } else if (pid as i64) < 0 {
-                true
-            } else {
-                (*cur).pid == pid as u32
-            };
+            // Any special pid selector (all / any / negative) matches every child.
+            let matches_pid =
+                pid == u32::MAX as u64 || pid == 0 || (pid as i64) < 0 || (*cur).pid == pid as u32;
             if matches_pid {
                 has_child = true;
                 break;
@@ -92,4 +83,4 @@ pub unsafe fn sys_waitpid(tf: &mut TrapFrame, pid: u64, status_out: u64, options
     }
     crate::proc::scheduler::sched_yield(tf);
     Errno::NoEnt.as_i64()
-}
+}}
