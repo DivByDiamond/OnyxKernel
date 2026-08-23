@@ -1,9 +1,9 @@
 use onyx_core::errno::{Errno, KResult};
 
 use super::super::{
-    G_ASYNCLIST_ENABLED, MAX_QTD, OP_USBCMD, OP_USBSTS, QH_DEV_ADDR_SHIFT, QH_DTC, QH_EPS_HIGH,
+    G_ASYNCLIST_ENABLED, MAX_QTD, OP_USBSTS, QH_DEV_ADDR_SHIFT, QH_DTC, QH_EPS_HIGH,
     QH_MPL_SHIFT, QH_TERMINATE, QTD_ACTIVE, QTD_BUF_SIZE, QTD_CERR_3, QTD_ERROR, QTD_PID_IN,
-    QTD_PID_OUT, QTD_TOTAL_LEN_SHIFT, STS_HCHALTED, alloc_qh, alloc_qtd, op_rd, op_wr, qh_phys,
+    QTD_PID_OUT, QTD_TOTAL_LEN_SHIFT, STS_HCHALTED, alloc_qh, alloc_qtd, op_rd,
     qh_ptr, qtd_phys, qtd_ptr,
 };
 
@@ -12,7 +12,7 @@ pub unsafe fn ehci_bulk_transfer(
     mut data: Option<&mut [u8]>,
     data_in: bool,
     max_pkt: u32,
-) -> KResult<u32> {
+) -> KResult<u32> { unsafe {
     if !G_ASYNCLIST_ENABLED {
         super::super::queue::init_async_list()?;
     }
@@ -20,7 +20,7 @@ pub unsafe fn ehci_bulk_transfer(
     if data_len == 0 {
         return Ok(0);
     }
-    let data_qtds = (data_len + QTD_BUF_SIZE - 1) / QTD_BUF_SIZE;
+    let data_qtds = data_len.div_ceil(QTD_BUF_SIZE);
     if data_qtds > MAX_QTD as u32 {
         return Err(Errno::NoMem);
     }
@@ -28,8 +28,8 @@ pub unsafe fn ehci_bulk_transfer(
     let qh = qh_ptr(qh_idx);
     let data_pid = if data_in { QTD_PID_IN } else { QTD_PID_OUT };
     let mut qtd_indices = [0usize; 64];
-    for i in 0..data_qtds as usize {
-        qtd_indices[i] = alloc_qtd()?;
+    for idx in qtd_indices.iter_mut().take(data_qtds as usize) {
+        *idx = alloc_qtd()?;
     }
     let mut buf_pos = 0u32;
     for i in 0..data_qtds as usize {
@@ -72,6 +72,8 @@ pub unsafe fn ehci_bulk_transfer(
             return Err(Errno::Io);
         }
         let mut all_done = true;
+        // Lookahead at qtd_indices[i + 1] does not fit iterator chaining here.
+        #[allow(clippy::needless_range_loop)]
         for i in 0..data_qtds as usize {
             let dt = qtd_ptr(qtd_indices[i]);
             if ((*dt).token & QTD_ACTIVE) != 0 {
@@ -100,4 +102,4 @@ pub unsafe fn ehci_bulk_transfer(
         }
         timeout -= 1;
     }
-}
+}}

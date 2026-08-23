@@ -23,14 +23,14 @@ pub struct IpcfsStat {
     pub mode: u32,
 }
 
-pub unsafe fn lookup(name: &[u8]) -> KResult<u32> {
+pub unsafe fn lookup(name: &[u8]) -> KResult<u32> { unsafe {
     if name.is_empty() || name == b"" || name == b"." {
         return Ok(IPCFS_ROOT_INO);
     }
     let pid = proc::current_pid();
     let id = ipc::open_by_name(name, pid)?;
     Ok(id + 2)
-}
+}}
 
 pub unsafe fn stat(ino: u32) -> KResult<IpcfsStat> {
     if ino == IPCFS_ROOT_INO {
@@ -43,7 +43,7 @@ pub unsafe fn stat(ino: u32) -> KResult<IpcfsStat> {
     if ino < 2 {
         return Err(Errno::NoEnt);
     }
-    let chan_id = (ino - 2) as u32;
+    let chan_id = ino - 2;
     if chan_id >= 32 {
         return Err(Errno::NoEnt);
     }
@@ -55,24 +55,24 @@ pub unsafe fn stat(ino: u32) -> KResult<IpcfsStat> {
 }
 
 /// Read from a channel (non-blocking). `ino` is the channel ID + 2.
-pub unsafe fn read(ino: u32, buf: *mut u8, _offset: u32, len: u32) -> KResult<u32> {
+pub unsafe fn read(ino: u32, buf: *mut u8, _offset: u32, len: u32) -> KResult<u32> { unsafe {
     if ino < 2 {
         return Err(Errno::Inval);
     }
-    let chan_id = (ino - 2) as u32;
+    let chan_id = ino - 2;
     ipc::recv(chan_id, buf, len, None)
-}
+}}
 
 /// Write to a channel (non-blocking). `ino` is the channel ID + 2.
-pub unsafe fn write(ino: u32, buf: *const u8, _offset: u32, len: u32) -> KResult<u32> {
+pub unsafe fn write(ino: u32, buf: *const u8, _offset: u32, len: u32) -> KResult<u32> { unsafe {
     if ino < 2 {
         return Err(Errno::Inval);
     }
-    let chan_id = (ino - 2) as u32;
+    let chan_id = ino - 2;
     ipc::send(chan_id, buf, len, None)
-}
+}}
 
-pub unsafe fn readdir_entry(idx: u32, name_out: *mut u8, name_len: usize) -> Option<u32> {
+pub unsafe fn readdir_entry(idx: u32, name_out: *mut u8, name_len: usize) -> Option<u32> { unsafe {
     match idx {
         0 => {
             let name = b".";
@@ -94,10 +94,10 @@ pub unsafe fn readdir_entry(idx: u32, name_out: *mut u8, name_len: usize) -> Opt
             }
         }
     }
-}
+}}
 
-unsafe fn copy_name(name: &[u8], out: *mut u8, max_len: usize) {
+unsafe fn copy_name(name: &[u8], out: *mut u8, max_len: usize) { unsafe {
     let n = name.len().min(max_len.saturating_sub(1));
     core::ptr::copy_nonoverlapping(name.as_ptr(), out, n);
     *out.add(n) = 0;
-}
+}}

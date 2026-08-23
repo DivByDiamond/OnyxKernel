@@ -29,7 +29,7 @@ unsafe fn compat_matches(data: &[u8], candidates: &[&[u8]]) -> bool {
 /// Walk the tree and return the first MMIO node whose `compatible`
 /// matches any of `candidates`. `default_irq` is used when the node
 /// has no `interrupts` property.
-unsafe fn find_mmio(candidates: &[&[u8]], default_irq: u32) -> Option<FdtMmio> {
+unsafe fn find_mmio(candidates: &[&[u8]], default_irq: u32) -> Option<FdtMmio> { unsafe {
     let mut result: Option<FdtMmio> = None;
     walk(&mut |_name, props: &[(u32, &[u8])]| {
         let mut base = 0u64;
@@ -57,7 +57,7 @@ unsafe fn find_mmio(candidates: &[&[u8]], default_irq: u32) -> Option<FdtMmio> {
         false
     });
     result
-}
+}}
 
 #[inline]
 unsafe fn be64_pair(data: &[u8]) -> u64 {
@@ -65,7 +65,7 @@ unsafe fn be64_pair(data: &[u8]) -> u64 {
 }
 
 /// Find the first RTC node.
-pub unsafe fn find_rtc() -> Option<FdtMmio> {
+pub unsafe fn find_rtc() -> Option<FdtMmio> { unsafe {
     find_mmio(
         &[
             b"google,goldfish-rtc",
@@ -75,10 +75,10 @@ pub unsafe fn find_rtc() -> Option<FdtMmio> {
         ],
         11,
     )
-}
+}}
 
 /// Find the first GPIO controller.
-pub unsafe fn find_gpio() -> Option<FdtMmio> {
+pub unsafe fn find_gpio() -> Option<FdtMmio> { unsafe {
     find_mmio(
         &[
             b"sifive,fu540-c000-gpio",
@@ -88,10 +88,10 @@ pub unsafe fn find_gpio() -> Option<FdtMmio> {
         ],
         7,
     )
-}
+}}
 
 /// Find the first I2C controller.
-pub unsafe fn find_i2c() -> Option<FdtMmio> {
+pub unsafe fn find_i2c() -> Option<FdtMmio> { unsafe {
     find_mmio(
         &[
             b"sifive,fu540-c000-i2c",
@@ -101,10 +101,10 @@ pub unsafe fn find_i2c() -> Option<FdtMmio> {
         ],
         10,
     )
-}
+}}
 
 /// Find the first SPI controller.
-pub unsafe fn find_spi() -> Option<FdtMmio> {
+pub unsafe fn find_spi() -> Option<FdtMmio> { unsafe {
     find_mmio(
         &[
             b"sifive,fu540-c000-spi",
@@ -114,12 +114,12 @@ pub unsafe fn find_spi() -> Option<FdtMmio> {
         ],
         9,
     )
-}
+}}
 
 /// Find the first watchdog.
-pub unsafe fn find_watchdog() -> Option<FdtMmio> {
+pub unsafe fn find_watchdog() -> Option<FdtMmio> { unsafe {
     find_mmio(
         &[b"sifive,fu540-c000-wdt", b"sifive,wdt", b"snps,dw-wdt"],
         6,
     )
-}
+}}

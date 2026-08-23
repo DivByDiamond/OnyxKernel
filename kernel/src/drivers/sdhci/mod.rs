@@ -24,7 +24,7 @@ pub(crate) static mut G_SDHCI: SdhciDev = SdhciDev {
     irq: PLIC_PRIO_SDHCI,
 };
 
-pub unsafe fn probe(base: usize) -> bool {
+pub unsafe fn probe(base: usize) -> bool { unsafe {
     let version = reg_r16(base, 0xFE);
     if version == 0 {
         return false;
@@ -36,9 +36,9 @@ pub unsafe fn probe(base: usize) -> bool {
     reset(base, SW_RESET_ALL);
     let ps = reg_r(base, PRESENT_STATE);
     ps & PS_CARD_INSERTED != 0
-}
+}}
 
-pub unsafe fn init(base: usize, irq: u32) -> bool {
+pub unsafe fn init(base: usize, irq: u32) -> bool { unsafe {
     reset(base, SW_RESET_ALL);
     reg_w(base, NORMAL_INT_STATUS_ENABLE, 0xFFFF);
     reg_w(base, ERROR_INT_STATUS_ENABLE, 0xFFFF);
@@ -64,9 +64,9 @@ pub unsafe fn init(base: usize, irq: u32) -> bool {
     plic::enable(irq, 0);
 
     true
-}
+}}
 
-pub unsafe fn irq_handler() {
+pub unsafe fn irq_handler() { unsafe {
     let p = &raw const G_SDHCI;
     if !(*p).initialized {
         return;
@@ -78,17 +78,17 @@ pub unsafe fn irq_handler() {
     if err != 0 {
         reg_w(base, ERROR_INT_STATUS, err);
     }
-}
+}}
 
 pub fn is_initialized() -> bool {
-    unsafe { (*(&raw const G_SDHCI)).initialized }
+    unsafe { (G_SDHCI).initialized }
 }
 
 pub fn base_addr() -> usize {
-    unsafe { (*(&raw const G_SDHCI)).base }
+    unsafe { (G_SDHCI).base }
 }
 
-pub(super) unsafe fn wait_idle(base: usize) {
+pub(super) unsafe fn wait_idle(base: usize) { unsafe {
     let mut timeout = SDHCI_TIMEOUT;
     while timeout > 0 {
         let ps = reg_r(base, PRESENT_STATE);
@@ -97,9 +97,9 @@ pub(super) unsafe fn wait_idle(base: usize) {
         }
         timeout -= 1;
     }
-}
+}}
 
-pub(super) unsafe fn wait_state(base: usize, flag: u32) -> bool {
+pub(super) unsafe fn wait_state(base: usize, flag: u32) -> bool { unsafe {
     let mut timeout = SDHCI_TIMEOUT;
     while timeout > 0 {
         if reg_r(base, PRESENT_STATE) & flag != 0 {
@@ -108,9 +108,9 @@ pub(super) unsafe fn wait_state(base: usize, flag: u32) -> bool {
         timeout -= 1;
     }
     false
-}
+}}
 
-pub(super) unsafe fn reset(base: usize, bits: u32) {
+pub(super) unsafe fn reset(base: usize, bits: u32) { unsafe {
     reg_w(base, SOFTWARE_RESET, bits);
     let mut timeout = SDHCI_TIMEOUT;
     while timeout > 0 {
@@ -119,18 +119,18 @@ pub(super) unsafe fn reset(base: usize, bits: u32) {
         }
         timeout -= 1;
     }
-}
+}}
 
-pub(super) unsafe fn clear_interrupts(base: usize) {
+pub(super) unsafe fn clear_interrupts(base: usize) { unsafe {
     let norm = reg_r(base, NORMAL_INT_STATUS);
     reg_w(base, NORMAL_INT_STATUS, norm);
     let err = reg_r(base, ERROR_INT_STATUS);
     reg_w(base, ERROR_INT_STATUS, err);
-}
+}}
 
-pub(super) unsafe fn init_clock(base: usize) {
+pub(super) unsafe fn init_clock(base: usize) { unsafe {
     let caps0 = reg_r(base, 0x40);
-    let base_clk_mhz = ((caps0 >> 8) & 0xFF) as u32;
+    let base_clk_mhz = (caps0 >> 8) & 0xFF ;
     let target_mhz: u32 = 50;
 
     let div: u32 = if base_clk_mhz > 0 && base_clk_mhz > target_mhz {
@@ -154,22 +154,22 @@ pub(super) unsafe fn init_clock(base: usize) {
     }
 
     reg_w(base, CLOCK_CONTROL, clk_val | CLK_SD_CLOCK_ENABLE);
-}
+}}
 
-pub(super) unsafe fn set_power(base: usize) {
+pub(super) unsafe fn set_power(base: usize) { unsafe {
     reg_w(base, POWER_CONTROL, PWR_3_3V);
     let mut delay = 1000u32;
     while delay > 0 {
         delay -= 1;
     }
     reg_w(base, POWER_CONTROL, PWR_3_3V | PWR_BUS_POWER);
-}
+}}
 
-pub(super) unsafe fn set_sdma_addr(base: usize, addr: u64) {
+pub(super) unsafe fn set_sdma_addr(base: usize, addr: u64) { unsafe {
     reg_w(base, SDMAS_SYS_ADDR, addr as u32);
-}
+}}
 
-pub(super) unsafe fn wait_transfer_complete(base: usize) -> bool {
+pub(super) unsafe fn wait_transfer_complete(base: usize) -> bool { unsafe {
     let mut timeout = SDHCI_TIMEOUT;
     while timeout > 0 {
         let istat = reg_r(base, NORMAL_INT_STATUS);
@@ -186,4 +186,4 @@ pub(super) unsafe fn wait_transfer_complete(base: usize) -> bool {
     }
     reset(base, SW_RESET_DAT);
     false
-}
+}}

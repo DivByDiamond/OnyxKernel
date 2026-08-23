@@ -1,4 +1,3 @@
-use onyx_core::parser::be32;
 
 pub struct FdtMemory {
     pub base: u64,

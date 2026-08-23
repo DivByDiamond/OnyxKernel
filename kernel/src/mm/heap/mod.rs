@@ -1,6 +1,4 @@
-use crate::mm::pmm;
 use core::sync::atomic::{AtomicBool, Ordering};
-use onyx_core::errno::{Errno, KResult};
 pub const HEAP_SIZE: usize = 4 * 1024 * 1024;
 pub const MIN_BLOCK: usize = 16;
 
@@ -48,7 +46,7 @@ mod realloc;
 pub use alloc::*;
 pub use realloc::*;
 
-pub unsafe fn init() {
+pub unsafe fn init() { unsafe {
     let kernel_end_pa = &crate::arch::__kernel_end as *const u8 as usize;
     let block = kernel_end_pa as *mut Block;
     (*block).size = HEAP_SIZE - Block::hdr_size();
@@ -62,8 +60,8 @@ pub unsafe fn init() {
         used: 0,
         free_list: block,
     };
-}
+}}
 
 pub fn used() -> usize {
-    unsafe { (*&raw const G_HEAP).used }
+    unsafe { G_HEAP.used }
 }

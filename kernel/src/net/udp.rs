@@ -1,6 +1,5 @@
 use crate::net::G_IP;
 use crate::net::ip;
-use crate::net::poll;
 use onyx_core::errno::{Errno, KResult};
 
 pub const UDP_HLEN: usize = 8;
@@ -23,14 +22,7 @@ static mut UDP_SOCKS: [Option<UdpSocket>; MAX_UDP_SOCKS] = [const { None }; MAX_
 static mut NEXT_UDP_PORT: u16 = 50000;
 
 fn alloc_udp_sock() -> Option<usize> {
-    for i in 0..MAX_UDP_SOCKS {
-        unsafe {
-            if UDP_SOCKS[i].is_none() {
-                return Some(i);
-            }
-        }
-    }
-    None
+    unsafe { UDP_SOCKS.iter().position(Option::is_none) }
 }
 
 fn next_udp_port() -> u16 {
@@ -52,7 +44,7 @@ fn udp_checksum(src_ip: &[u8; 4], dst_ip: &[u8; 4], segment: &[u8]) -> u16 {
     sum = sum.wrapping_add(0x0011u32);
     sum = sum.wrapping_add(segment.len() as u32);
     let mut i = 0;
-    let pad = if segment.len() % 2 != 0 { 1 } else { 0 };
+    let pad = if !segment.len().is_multiple_of(2) { 1 } else { 0 };
     while i + 1 < segment.len() + pad {
         let b0 = if i < segment.len() { segment[i] } else { 0 };
         let b1 = if i + 1 < segment.len() {
@@ -69,7 +61,7 @@ fn udp_checksum(src_ip: &[u8; 4], dst_ip: &[u8; 4], segment: &[u8]) -> u16 {
     !(sum as u16)
 }
 
-pub unsafe fn udp_send(socket: &mut UdpSocket, data: &[u8]) -> KResult<()> {
+pub unsafe fn udp_send(socket: &mut UdpSocket, data: &[u8]) -> KResult<()> { unsafe {
     if !socket.connected {
         return Err(Errno::Inval);
     }
@@ -85,9 +77,9 @@ pub unsafe fn udp_send(socket: &mut UdpSocket, data: &[u8]) -> KResult<()> {
     let cksum = udp_checksum(&G_IP, &socket.remote_ip, &seg);
     seg[6..8].copy_from_slice(&cksum.to_be_bytes());
     ip::send_packet(socket.remote_ip, ip::IP_PROTO_UDP, &seg)
-}
+}}
 
-pub unsafe fn handle_udp(frame: &[u8], ip_start: usize) {
+pub unsafe fn handle_udp(frame: &[u8], ip_start: usize) { unsafe {
     let ip_ihl = (frame[ip_start] & 0x0F) as usize * 4;
     let udp_start = ip_start + ip_ihl;
     if udp_start + UDP_HLEN > frame.len() {
@@ -100,9 +92,8 @@ pub unsafe fn handle_udp(frame: &[u8], ip_start: usize) {
     let payload_len = udp_len
         .saturating_sub(UDP_HLEN)
         .min(frame.len().saturating_sub(payload_start));
-    for i in 0..MAX_UDP_SOCKS {
-        if let Some(ref mut sock) = UDP_SOCKS[i] {
-            if sock.bound && sock.local_port == dst_port {
+    for sock in UDP_SOCKS.iter_mut().flatten() {
+        if sock.bound && sock.local_port == dst_port {
                 let n = payload_len.min(UDP_BUF_SIZE - sock.recv_len);
                 let start = (sock.recv_head + sock.recv_len) % UDP_BUF_SIZE;
                 for j in 0..n {
@@ -120,11 +111,10 @@ pub unsafe fn handle_udp(frame: &[u8], ip_start: usize) {
                 }
                 return;
             }
-        }
     }
-}
+}}
 
-pub unsafe fn udp_bind(port: u16) -> KResult<usize> {
+pub unsafe fn udp_bind(port: u16) -> KResult<usize> { unsafe {
     let idx = alloc_udp_sock().ok_or(Errno::Busy)?;
     UDP_SOCKS[idx] = Some(UdpSocket {
         local_port: port,
@@ -137,9 +127,9 @@ pub unsafe fn udp_bind(port: u16) -> KResult<usize> {
         recv_head: 0,
     });
     Ok(idx)
-}
+}}
 
-pub unsafe fn udp_sendto(dst_ip: [u8; 4], dst_port: u16, data: &[u8]) -> KResult<()> {
+pub unsafe fn udp_sendto(dst_ip: [u8; 4], dst_port: u16, data: &[u8]) -> KResult<()> { unsafe {
     let idx = alloc_udp_sock().ok_or(Errno::Busy)?;
     let port = next_udp_port();
     UDP_SOCKS[idx] = Some(UdpSocket {
@@ -168,22 +158,22 @@ pub unsafe fn udp_sendto(dst_ip: [u8; 4], dst_port: u16, data: &[u8]) -> KResult
     };
     UDP_SOCKS[idx] = None;
     result
-}
+}}
 
-pub unsafe fn udp_recv(sock_idx: usize, buf: &mut [u8]) -> KResult<usize> {
+pub unsafe fn udp_recv(sock_idx: usize, buf: &mut [u8]) -> KResult<usize> { unsafe {
     let sock = UDP_SOCKS[sock_idx].as_mut().ok_or(Errno::Inval)?;
     if sock.recv_len == 0 {
         return Err(Errno::NoEnt);
     }
     let n = buf.len().min(sock.recv_len);
-    for i in 0..n {
-        buf[i] = sock.recv_buf[(sock.recv_head + i) % UDP_BUF_SIZE];
+    for (i, dst) in buf[..n].iter_mut().enumerate() {
+        *dst = sock.recv_buf[(sock.recv_head + i) % UDP_BUF_SIZE];
     }
     sock.recv_head = (sock.recv_head + n) % UDP_BUF_SIZE;
     sock.recv_len -= n;
     Ok(n)
-}
+}}
 
-pub unsafe fn udp_close(sock_idx: usize) {
+pub unsafe fn udp_close(sock_idx: usize) { unsafe {
     UDP_SOCKS[sock_idx] = None;
-}
+}}

@@ -31,18 +31,18 @@ pub(crate) static mut G_PINS: [PinSlot; N_PINS] = [PinSlot { handler: None }; N_
 pub(crate) static mut G_BASE: usize = GPIO_BASE;
 
 #[inline]
-pub(crate) unsafe fn rd(off: u32) -> u32 {
+pub(crate) unsafe fn rd(off: u32) -> u32 { unsafe {
     Mmio::<u32>::at(G_BASE + off as usize).read()
-}
+}}
 
 #[inline]
-pub(crate) unsafe fn wr(off: u32, v: u32) {
+pub(crate) unsafe fn wr(off: u32, v: u32) { unsafe {
     Mmio::<u32>::at(G_BASE + off as usize).write(v);
-}
+}}
 
 /// Initialise the controller at the given base address. Disables and
 /// clears all edge interrupts so drivers can register cleanly.
-pub unsafe fn init(base: usize) {
+pub unsafe fn init(base: usize) { unsafe {
     G_BASE = base;
     wr(R_RISE_IE, 0);
     wr(R_FALL_IE, 0);
@@ -52,6 +52,6 @@ pub unsafe fn init(base: usize) {
     wr(R_FALL_IP, !0);
     wr(_R_HIGH_IP, !0);
     wr(_R_LOW_IP, !0);
-}
+}}
 
 pub mod ops;

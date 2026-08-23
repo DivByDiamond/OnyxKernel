@@ -14,7 +14,7 @@ pub unsafe fn sys_mmap(
     flags: u64,
     fd: u64,
     _offset: u64,
-) -> i64 {
+) -> i64 { unsafe {
     if length == 0 {
         return Errno::Inval.as_i64();
     }
@@ -121,4 +121,4 @@ pub unsafe fn sys_mmap(
             Err(e) => e.as_i64(),
         }
     }
-}
+}}

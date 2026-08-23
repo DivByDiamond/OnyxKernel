@@ -13,25 +13,25 @@
 use core::ptr;
 use onyx_core::errno::{Errno, KResult};
 
+use super::helpers::fat32_name_8_3;
 use super::{
-    ATTR_DIRECTORY, ATTR_LFN, DIR_ENTRY_SIZE, ENTRIES_PER_SECTOR, FAT32_EOC, G_DATA_LBA, G_DEV,
+    ATTR_DIRECTORY, ATTR_LFN, DIR_ENTRY_SIZE, ENTRIES_PER_SECTOR, FAT32_EOC, G_DEV,
     G_FAT_SZ, G_RESVD, G_ROOT_CLUSTER, G_SPC, cluster_to_lba, fat_entry, is_eoc, is_valid_cluster,
     read_cluster_sector, read_sec,
 };
-use super::helpers::fat32_name_8_3;
 
 /// Total number of clusters in the FAT (data region capacity).
 /// Calculated from G_FAT_SZ, G_SPC, and 512-byte sectors.
-unsafe fn total_clusters() -> u32 {
+unsafe fn total_clusters() -> u32 { unsafe {
     // FAT32: each FAT entry is 4 bytes. A FAT sector holds 128 entries.
     // total entries = G_FAT_SZ * 128. This is an upper bound; the real
     // data region may have fewer usable clusters.
     G_FAT_SZ * 128
-}
+}}
 
 /// Write the 4-byte FAT entry for `cluster` with the given `value`.
 /// Reads the containing sector, patches the entry, writes the sector back.
-unsafe fn write_fat_entry(cluster: u32, value: u32) -> KResult<()> {
+unsafe fn write_fat_entry(cluster: u32, value: u32) -> KResult<()> { unsafe {
     let fat_off = cluster as u64 * 4;
     let fat_lba = G_RESVD as u64 + fat_off / 512;
     let mut buf = [0u8; 512];
@@ -46,28 +46,32 @@ unsafe fn write_fat_entry(cluster: u32, value: u32) -> KResult<()> {
     buf[off + 2] = bytes[2];
     buf[off + 3] = bytes[3];
     write_sec(fat_lba, &buf)
-}
+}}
 
 /// Write a 512-byte sector to the disk.
-unsafe fn write_sec(lba: u64, buf: &[u8; 512]) -> KResult<()> {
+unsafe fn write_sec(lba: u64, buf: &[u8; 512]) -> KResult<()> { unsafe {
     crate::drivers::virtio_req::write(G_DEV, lba, buf.as_ptr())
-}
+}}
 
 /// Write a full cluster (G_SPC sectors) from a 512-byte sector buffer
 /// repeated, OR more commonly, write `data` (≤ cluster size) starting
 /// at the given sector offset within the cluster.
-unsafe fn write_cluster_sector(cluster: u32, sector_in_cluster: u32, buf: &[u8; 512]) -> KResult<()> {
+unsafe fn write_cluster_sector(
+    cluster: u32,
+    sector_in_cluster: u32,
+    buf: &[u8; 512],
+) -> KResult<()> { unsafe {
     let lba = cluster_to_lba(cluster) + sector_in_cluster as u64;
     write_sec(lba, buf)
-}
+}}
 
 /// Find a free cluster by scanning the FAT starting from cluster 2.
 /// Returns the cluster number, or Err(ENOSPC) if the FAT is full.
-unsafe fn alloc_cluster() -> KResult<u32> {
+unsafe fn alloc_cluster() -> KResult<u32> { unsafe {
     let total = total_clusters();
     let mut buf = [0u8; 512];
     let entries_per_sec: u32 = 128;
-    let sectors = (total + entries_per_sec - 1) / entries_per_sec;
+    let sectors = total.div_ceil(entries_per_sec);
     for s in 0..sectors {
         let lba = G_RESVD as u64 + s as u64;
         if read_sec(lba, &mut buf).is_err() {
@@ -102,17 +106,17 @@ unsafe fn alloc_cluster() -> KResult<u32> {
         }
     }
     Err(Errno::NoSpace)
-}
+}}
 
 /// Free a cluster (mark FAT entry as 0).
-unsafe fn free_cluster(cluster: u32) -> KResult<()> {
+unsafe fn free_cluster(cluster: u32) -> KResult<()> { unsafe {
     write_fat_entry(cluster, 0)
-}
+}}
 
 /// Extend the chain starting at `start_cluster` by allocating one new
 /// cluster and linking it from the current end-of-chain. Returns the new
 /// cluster number.
-unsafe fn extend_chain(start_cluster: u32) -> KResult<u32> {
+unsafe fn extend_chain(start_cluster: u32) -> KResult<u32> { unsafe {
     let new_cluster = alloc_cluster()?;
     // Walk to the EOC of the existing chain.
     let mut buf = [0u8; 512];
@@ -138,7 +142,7 @@ unsafe fn extend_chain(start_cluster: u32) -> KResult<u32> {
         }
         cur = next;
     }
-}
+}}
 
 /// Find a free 32-byte directory entry slot in the directory rooted at
 /// `dir_cluster`. Returns (cluster_of_slot, sector_in_cluster, entry_index).
@@ -149,7 +153,7 @@ unsafe fn find_free_dirent_slot(
     out_cluster: &mut u32,
     out_sec: &mut u32,
     out_idx: &mut usize,
-) -> KResult<()> {
+) -> KResult<()> { unsafe {
     let mut buf = [0u8; 512];
     let mut cluster = dir_cluster;
     let mut hop = 0u32;
@@ -195,7 +199,7 @@ unsafe fn find_free_dirent_slot(
         }
         cluster = next;
     }
-}
+}}
 
 /// Write a 32-byte directory entry into the slot identified by
 /// (cluster, sector_in_cluster, entry_index).
@@ -204,17 +208,17 @@ unsafe fn write_dirent(
     sector_in_cluster: u32,
     entry_index: usize,
     entry: &[u8; 32],
-) -> KResult<()> {
+) -> KResult<()> { unsafe {
     let mut buf = [0u8; 512];
     read_cluster_sector(cluster, sector_in_cluster, &mut buf)?;
     let off = entry_index * DIR_ENTRY_SIZE;
     buf[off..off + 32].copy_from_slice(entry);
     write_cluster_sector(cluster, sector_in_cluster, &buf)
-}
+}}
 
 /// Create a new file in `dir_cluster` with the given 8.3 name.
 /// Returns the new file's first cluster (or 0 for an empty file).
-pub unsafe fn create(dir_cluster: u32, name: &[u8], is_dir: bool) -> KResult<u32> {
+pub unsafe fn create(dir_cluster: u32, name: &[u8], is_dir: bool) -> KResult<u32> { unsafe {
     if name.is_empty() || name.len() > 12 {
         return Err(Errno::Inval);
     }
@@ -231,7 +235,8 @@ pub unsafe fn create(dir_cluster: u32, name: &[u8], is_dir: bool) -> KResult<u32
         &mut existing_size,
         &mut existing_is_dir,
         &mut buf,
-    ).is_ok();
+    )
+    .is_ok();
     if already_exists {
         return Err(Errno::Exist);
     }
@@ -253,7 +258,11 @@ pub unsafe fn create(dir_cluster: u32, name: &[u8], is_dir: bool) -> KResult<u32
         let mut dotdot = [0u8; 32];
         dotdot[..11].copy_from_slice(b"..         ");
         dotdot[11] = ATTR_DIRECTORY;
-        let parent_cluster = if dir_cluster == G_ROOT_CLUSTER { 0 } else { dir_cluster };
+        let parent_cluster = if dir_cluster == G_ROOT_CLUSTER {
+            0
+        } else {
+            dir_cluster
+        };
         dotdot[20..22].copy_from_slice(&((parent_cluster >> 16) as u16).to_le_bytes());
         dotdot[26..28].copy_from_slice(&(parent_cluster as u16).to_le_bytes());
         dotdot[28..32].copy_from_slice(&0u32.to_le_bytes());
@@ -277,11 +286,11 @@ pub unsafe fn create(dir_cluster: u32, name: &[u8], is_dir: bool) -> KResult<u32
     entry[28..32].copy_from_slice(&0u32.to_le_bytes());
     write_dirent(slot_cluster, slot_sec, slot_idx, &entry)?;
     Ok(first_cluster)
-}
+}}
 
 /// Mark a directory entry as deleted (0xE5) and free its clusters.
 /// Returns Ok(()) if found and deleted, Err(NoEnt) if not found.
-pub unsafe fn unlink(dir_cluster: u32, name: &[u8]) -> KResult<()> {
+pub unsafe fn unlink(dir_cluster: u32, name: &[u8]) -> KResult<()> { unsafe {
     if name.is_empty() {
         return Err(Errno::Inval);
     }
@@ -311,7 +320,7 @@ pub unsafe fn unlink(dir_cluster: u32, name: &[u8]) -> KResult<()> {
                 }
                 let mut entry_name = [0u8; 11];
                 entry_name.copy_from_slice(&buf[off..off + 11]);
-                if &entry_name == &needle {
+                if entry_name == needle {
                     // Found. Get the file's first cluster.
                     let cluster_lo = u16::from_le_bytes([buf[off + 26], buf[off + 27]]) as u32;
                     let cluster_hi = u16::from_le_bytes([buf[off + 20], buf[off + 21]]) as u32;
@@ -333,10 +342,10 @@ pub unsafe fn unlink(dir_cluster: u32, name: &[u8]) -> KResult<()> {
         }
         cluster = next;
     }
-}
+}}
 
 /// Free every cluster in the chain starting at `start_cluster`.
-unsafe fn free_chain(start_cluster: u32) -> KResult<()> {
+unsafe fn free_chain(start_cluster: u32) -> KResult<()> { unsafe {
     let mut cur = start_cluster;
     let mut buf = [0u8; 512];
     let mut hop = 0u32;
@@ -356,13 +365,13 @@ unsafe fn free_chain(start_cluster: u32) -> KResult<()> {
         }
         cur = next;
     }
-}
+}}
 
 /// Write `len` bytes from `buf` into the file starting at offset `off`.
 /// The file's first cluster is `first_cluster` (must already exist —
 /// if 0, a new chain is allocated). Extends the chain as needed.
 /// Returns the number of bytes written.
-pub unsafe fn write(first_cluster: u32, buf: *const u8, off: u32, len: u32) -> KResult<u32> {
+pub unsafe fn write(first_cluster: u32, buf: *const u8, off: u32, len: u32) -> KResult<u32> { unsafe {
     if len == 0 {
         return Ok(0);
     }
@@ -435,17 +444,17 @@ pub unsafe fn write(first_cluster: u32, buf: *const u8, off: u32, len: u32) -> K
             cluster = next;
         }
     }
-}
+}}
 
 /// Truncate a file's cluster chain to release clusters past `keep_bytes`.
 /// The dirent's size field is NOT updated here — caller's responsibility
 /// (VFS layer does this via stat / setattr).
-pub unsafe fn truncate_chain(first_cluster: u32, keep_bytes: u64) -> KResult<()> {
+pub unsafe fn truncate_chain(first_cluster: u32, keep_bytes: u64) -> KResult<()> { unsafe {
     if first_cluster == 0 || !is_valid_cluster(first_cluster) {
         return Ok(());
     }
     let cluster_bytes = (G_SPC * 512) as u64;
-    let keep_clusters = (keep_bytes + cluster_bytes - 1) / cluster_bytes;
+    let keep_clusters = keep_bytes.div_ceil(cluster_bytes);
     if keep_clusters == 0 {
         // Free everything.
         return free_chain(first_cluster);
@@ -470,12 +479,12 @@ pub unsafe fn truncate_chain(first_cluster: u32, keep_bytes: u64) -> KResult<()>
     // Mark `cur` as EOC.
     write_fat_entry(cur, FAT32_EOC)?;
     Ok(())
-}
+}}
 
 /// Update the size field in a directory entry. Looks up `name` in
 /// `dir_cluster` and writes the new size (4 bytes, little-endian) into
 /// the dirent at offset 28.
-pub unsafe fn update_size(dir_cluster: u32, name: &[u8], new_size: u32) -> KResult<()> {
+pub unsafe fn update_size(dir_cluster: u32, name: &[u8], new_size: u32) -> KResult<()> { unsafe {
     if name.is_empty() {
         return Err(Errno::Inval);
     }
@@ -505,7 +514,7 @@ pub unsafe fn update_size(dir_cluster: u32, name: &[u8], new_size: u32) -> KResu
                 }
                 let mut entry = [0u8; 11];
                 entry.copy_from_slice(&buf[off..off + 11]);
-                if &entry == &needle {
+                if entry == needle {
                     let size_bytes = new_size.to_le_bytes();
                     buf[off + 28] = size_bytes[0];
                     buf[off + 29] = size_bytes[1];
@@ -521,4 +530,4 @@ pub unsafe fn update_size(dir_cluster: u32, name: &[u8], new_size: u32) -> KResu
         }
         cluster = next;
     }
-}
+}}

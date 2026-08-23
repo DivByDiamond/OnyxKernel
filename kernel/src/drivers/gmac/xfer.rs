@@ -4,7 +4,7 @@ use super::{G_GMAC, GMAC_BUF_SIZE, TX_RING_SIZE};
 use core::ptr;
 use onyx_core::errno::{Errno, KResult};
 
-pub unsafe fn send(data: &[u8]) -> KResult<()> {
+pub unsafe fn send(data: &[u8]) -> KResult<()> { unsafe {
     if data.is_empty() || data.len() > GMAC_BUF_SIZE {
         return Err(Errno::Inval);
     }
@@ -40,9 +40,9 @@ pub unsafe fn send(data: &[u8]) -> KResult<()> {
     }
     G_GMAC.tx_cur = (idx + 1) % TX_RING_SIZE;
     Ok(())
-}
+}}
 
-pub unsafe fn recv_into(buf: &mut [u8]) -> KResult<usize> {
+pub unsafe fn recv_into(buf: &mut [u8]) -> KResult<usize> { unsafe {
     let idx = G_GMAC.rx_cur;
     let desc = rx_desc_vaddr(idx);
     let f = ptr::read_volatile(ptr::addr_of!((*desc).flags));
@@ -64,9 +64,9 @@ pub unsafe fn recv_into(buf: &mut [u8]) -> KResult<usize> {
     core::sync::atomic::fence(core::sync::atomic::Ordering::SeqCst);
     G_GMAC.rx_cur = (idx + 1) % 16;
     Ok(len)
-}
+}}
 
-pub unsafe fn get_mac(base: usize) -> [u8; 6] {
+pub unsafe fn get_mac(base: usize) -> [u8; 6] { unsafe {
     let hi = regs::reg_r(base, regs::MAC_ADDR0_HI);
     let lo = regs::reg_r(base, regs::MAC_ADDR0_LO);
     [
@@ -77,4 +77,4 @@ pub unsafe fn get_mac(base: usize) -> [u8; 6] {
         (lo >> 8) as u8,
         lo as u8,
     ]
-}
+}}

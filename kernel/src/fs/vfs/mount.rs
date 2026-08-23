@@ -36,28 +36,28 @@ pub(crate) static mut G_MOUNTS: [MountEntry; MAX_MOUNTS] = [
     },
 ];
 
-pub unsafe fn mount_procfs() {
+pub unsafe fn mount_procfs() { unsafe {
     G_MOUNTS[0] = MountEntry {
         path: b"proc",
         fs: Fs::Proc,
     };
-}
+}}
 
-pub unsafe fn mount_ipcfs() {
+pub unsafe fn mount_ipcfs() { unsafe {
     G_MOUNTS[1] = MountEntry {
         path: b"ipc",
         fs: Fs::Ipc,
     };
-}
+}}
 
-pub unsafe fn mount_devfs() {
+pub unsafe fn mount_devfs() { unsafe {
     G_MOUNTS[2] = MountEntry {
         path: b"dev",
         fs: Fs::Devfs,
     };
-}
+}}
 
-pub(crate) unsafe fn resolve_mount(path: &[u8]) -> (Fs, &[u8]) {
+pub(crate) unsafe fn resolve_mount(path: &[u8]) -> (Fs, &[u8]) { unsafe {
     for m in G_MOUNTS.iter() {
         if m.fs == Fs::None {
             continue;
@@ -71,22 +71,22 @@ pub(crate) unsafe fn resolve_mount(path: &[u8]) -> (Fs, &[u8]) {
         }
     }
     (root_fs(), path)
-}
+}}
 
 pub(crate) static mut G_ROOT_FS: Fs = Fs::None;
 
-pub unsafe fn mount_root(dev: usize, onyxfs_lba: u32) -> KResult<()> {
+pub unsafe fn mount_root(dev: usize, onyxfs_lba: u32) -> KResult<()> { unsafe {
     if onyxfs::mount(dev, onyxfs_lba).is_ok() {
-        *(&raw mut G_ROOT_FS) = Fs::Onyx;
+        G_ROOT_FS = Fs::Onyx;
         return Ok(());
     }
     if fat32::mount(dev).is_ok() {
-        *(&raw mut G_ROOT_FS) = Fs::Fat32;
+        G_ROOT_FS = Fs::Fat32;
         return Ok(());
     }
     Err(Errno::Io)
-}
+}}
 
 pub fn root_fs() -> Fs {
-    unsafe { *(&raw const G_ROOT_FS) }
+    unsafe { G_ROOT_FS }
 }

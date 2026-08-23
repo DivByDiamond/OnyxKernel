@@ -42,12 +42,12 @@ pub(crate) static mut G_GMAC: GmacDev = GmacDev {
     rx_cur: 0,
 };
 
-pub unsafe fn probe(base: usize) -> bool {
+pub unsafe fn probe(base: usize) -> bool { unsafe {
     let ver = Mmio::<u32>::at(base + regs::VERSION as usize).read();
     ver != 0 && ver != 0xFFFFFFFF
-}
+}}
 
-pub unsafe fn init(base: usize, mdio_base: usize, mac: [u8; 6]) -> KResult<()> {
+pub unsafe fn init(base: usize, mdio_base: usize, mac: [u8; 6]) -> KResult<()> { unsafe {
     if G_GMAC.base != 0 {
         return Err(Errno::Busy);
     }
@@ -130,9 +130,9 @@ pub unsafe fn init(base: usize, mdio_base: usize, mac: [u8; 6]) -> KResult<()> {
         crate::kwrn!("gmac", "link down");
     }
     Ok(())
-}
+}}
 
-unsafe fn mdio_read_raw(base: usize, phy: u8, reg: u8) -> KResult<u16> {
+unsafe fn mdio_read_raw(base: usize, phy: u8, reg: u8) -> KResult<u16> { unsafe {
     let v = ((phy as u32 & 0x1F) << 11) | ((reg as u32 & 0x1F) << 6) | regs::MII_CR_42;
     Mmio::<u32>::at(base + regs::MII_ADDR as usize).write(v);
     Mmio::<u32>::at(base + regs::MII_ADDR as usize).write(v | regs::MII_B);
@@ -144,13 +144,13 @@ unsafe fn mdio_read_raw(base: usize, phy: u8, reg: u8) -> KResult<u16> {
         return Err(Errno::Io);
     }
     Ok(Mmio::<u32>::at(base + regs::MII_DATA as usize).read() as u16)
-}
+}}
 
-pub unsafe fn mdio_read(phy: u8, reg: u8) -> KResult<u16> {
+pub unsafe fn mdio_read(phy: u8, reg: u8) -> KResult<u16> { unsafe {
     mdio_read_raw(G_GMAC.base, phy, reg)
-}
+}}
 
-pub unsafe fn mdio_write(phy: u8, reg: u8, data: u16) -> KResult<()> {
+pub unsafe fn mdio_write(phy: u8, reg: u8, data: u16) -> KResult<()> { unsafe {
     let base = G_GMAC.base;
     let v = ((phy as u32 & 0x1F) << 11) | ((reg as u32 & 0x1F) << 6) | regs::MII_CR_42;
     Mmio::<u32>::at(base + regs::MII_ADDR as usize).write(v);
@@ -164,15 +164,15 @@ pub unsafe fn mdio_write(phy: u8, reg: u8, data: u16) -> KResult<()> {
         return Err(Errno::Io);
     }
     Ok(())
-}
+}}
 
-pub unsafe fn poll_link() -> bool {
+pub unsafe fn poll_link() -> bool { unsafe {
     let bmsr = mdio_read(G_GMAC.phy_addr, phy::BMSR).unwrap_or(0);
     G_GMAC.link_up = bmsr & phy::BMSR_LINK_STATUS != 0;
     G_GMAC.link_up
-}
+}}
 
-pub unsafe fn reset_phy(phy_addr: u8) -> KResult<()> {
+pub unsafe fn reset_phy(phy_addr: u8) -> KResult<()> { unsafe {
     mdio_write(phy_addr, phy::BMCR, phy::BMCR_RESET)?;
     let mut t = 100_000u32;
     while t > 0 {
@@ -183,7 +183,7 @@ pub unsafe fn reset_phy(phy_addr: u8) -> KResult<()> {
         t -= 1;
     }
     Err(Errno::Io)
-}
+}}
 
 pub fn mac() -> [u8; 6] {
     unsafe { G_GMAC.mac }

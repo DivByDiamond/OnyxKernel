@@ -4,11 +4,11 @@
 //! probe / init sequence. Frame I/O lives in `xfer.rs`.
 use crate::arch::mmio::Mmio;
 use crate::drivers::virtio::{
-    reg_r, reg_w, VqAvail, VqDesc, VqUsed, R_DEVICE_ID, R_GUEST_FEATURES, R_GUEST_FEATURES_SEL,
-    R_HOST_FEATURES, R_HOST_FEATURES_SEL, R_MAGIC_VALUE, R_QUEUE_AVAIL_HIGH, R_QUEUE_AVAIL_LOW,
-    R_QUEUE_DESC_HIGH, R_QUEUE_DESC_LOW, R_QUEUE_NUM, R_QUEUE_READY, R_QUEUE_SEL,
-    R_QUEUE_USED_HIGH, R_QUEUE_USED_LOW, R_STATUS, R_VERSION, VIRTIO_F_VERSION_1, VIRTIO_S_ACK,
-    VIRTIO_S_DRIVER, VIRTIO_S_DRIVER_OK, VIRTIO_S_FEATURES_OK, VIRTQ_SIZE, VQ_DESC_F_WRITE,
+    R_DEVICE_ID, R_GUEST_FEATURES, R_GUEST_FEATURES_SEL, R_HOST_FEATURES, R_HOST_FEATURES_SEL,
+    R_MAGIC_VALUE, R_QUEUE_AVAIL_HIGH, R_QUEUE_AVAIL_LOW, R_QUEUE_DESC_HIGH, R_QUEUE_DESC_LOW,
+    R_QUEUE_NUM, R_QUEUE_READY, R_QUEUE_SEL, R_QUEUE_USED_HIGH, R_QUEUE_USED_LOW, R_STATUS,
+    R_VERSION, VIRTIO_F_VERSION_1, VIRTIO_S_ACK, VIRTIO_S_DRIVER, VIRTIO_S_DRIVER_OK,
+    VIRTIO_S_FEATURES_OK, VIRTQ_SIZE, VQ_DESC_F_WRITE, VqAvail, VqDesc, VqUsed, reg_r, reg_w,
 };
 use crate::mm::pmm;
 use core::ptr;
@@ -47,14 +47,14 @@ pub fn present() -> bool {
     unsafe { G_NET.base != 0 && !G_NET.desc.is_null() }
 }
 
-pub unsafe fn probe(base: usize) -> bool {
+pub unsafe fn probe(base: usize) -> bool { unsafe {
     if reg_r(base, R_MAGIC_VALUE) != 0x7472_6976 {
         return false;
     }
     reg_r(base, R_DEVICE_ID) == VIRTIO_ID_NET
-}
+}}
 
-pub unsafe fn init(base: usize) -> KResult<()> {
+pub unsafe fn init(base: usize) -> KResult<()> { unsafe {
     if G_NET.base != 0 {
         return Err(Errno::Busy);
     }
@@ -104,9 +104,9 @@ pub unsafe fn init(base: usize) -> KResult<()> {
         VIRTIO_S_ACK | VIRTIO_S_DRIVER | VIRTIO_S_DRIVER_OK,
     );
     Ok(())
-}
+}}
 
-unsafe fn setup_rx_queue(base: usize) -> KResult<()> {
+unsafe fn setup_rx_queue(base: usize) -> KResult<()> { unsafe {
     reg_w(base, R_QUEUE_SEL, 0);
     reg_w(base, R_QUEUE_NUM, VIRTQ_SIZE as u32);
     let desc_pa = pmm::alloc_zero()? as usize;
@@ -134,9 +134,9 @@ unsafe fn setup_rx_queue(base: usize) -> KResult<()> {
         push_avail(i);
     }
     Ok(())
-}
+}}
 
-pub(crate) unsafe fn push_avail(idx: usize) {
+pub(crate) unsafe fn push_avail(idx: usize) { unsafe {
     if G_NET.avail.is_null() {
         return;
     }
@@ -147,7 +147,7 @@ pub(crate) unsafe fn push_avail(idx: usize) {
     );
     core::sync::atomic::fence(core::sync::atomic::Ordering::SeqCst);
     ptr::write_volatile(ptr::addr_of_mut!((*G_NET.avail).idx), i.wrapping_add(1));
-}
+}}
 
 pub fn mac() -> [u8; 6] {
     unsafe { G_NET.mac }

@@ -4,7 +4,7 @@
 //! helpers live in `xfer.rs`.
 use crate::drivers::virtio::{
     R_DEVICE_ID, R_GUEST_FEATURES, R_HOST_FEATURES, R_MAGIC_VALUE, R_QUEUE_AVAIL_HIGH,
-    R_QUEUE_AVAIL_LOW, R_QUEUE_DESC_HIGH, R_QUEUE_DESC_LOW, R_QUEUE_READY, R_QUEUE_NUM,
+    R_QUEUE_AVAIL_LOW, R_QUEUE_DESC_HIGH, R_QUEUE_DESC_LOW, R_QUEUE_NUM, R_QUEUE_READY,
     R_QUEUE_SEL, R_QUEUE_USED_HIGH, R_QUEUE_USED_LOW, R_STATUS, R_VERSION, VIRTIO_S_ACK,
     VIRTIO_S_DRIVER, VIRTIO_S_DRIVER_OK, VIRTIO_S_FEATURES_OK, VIRTQ_SIZE, VQ_DESC_F_WRITE,
     VqAvail, VqDesc, VqUsed, reg_r, reg_w,
@@ -45,14 +45,14 @@ pub(crate) static mut G_CON: ConDev = ConDev {
     rx_buf: ptr::null_mut(),
 };
 
-pub unsafe fn probe(base: usize) -> bool {
+pub unsafe fn probe(base: usize) -> bool { unsafe {
     if reg_r(base, R_MAGIC_VALUE) != 0x7472_6976 {
         return false;
     }
     reg_r(base, R_DEVICE_ID) == VIRTIO_ID_CONSOLE
-}
+}}
 
-pub unsafe fn init(base: usize) -> KResult<()> {
+pub unsafe fn init(base: usize) -> KResult<()> { unsafe {
     if G_CON.base != 0 {
         return Err(Errno::Busy);
     }
@@ -82,9 +82,9 @@ pub unsafe fn init(base: usize) -> KResult<()> {
         VIRTIO_S_ACK | VIRTIO_S_DRIVER | VIRTIO_S_DRIVER_OK,
     );
     Ok(())
-}
+}}
 
-unsafe fn setup_queue(qidx: u32, is_rx: bool) -> KResult<()> {
+unsafe fn setup_queue(qidx: u32, is_rx: bool) -> KResult<()> { unsafe {
     let base = G_CON.base;
     reg_w(base, R_QUEUE_SEL, qidx);
     reg_w(base, R_QUEUE_NUM, VIRTQ_SIZE as u32);
@@ -121,9 +121,9 @@ unsafe fn setup_queue(qidx: u32, is_rx: bool) -> KResult<()> {
         G_CON.tx_used = used;
     }
     Ok(())
-}
+}}
 
-pub(crate) unsafe fn push(idx: usize, is_rx: bool) {
+pub(crate) unsafe fn push(idx: usize, is_rx: bool) { unsafe {
     let avail = if is_rx {
         G_CON.rx_avail
     } else {
@@ -136,7 +136,7 @@ pub(crate) unsafe fn push(idx: usize, is_rx: bool) {
     );
     core::sync::atomic::fence(core::sync::atomic::Ordering::SeqCst);
     ptr::write_volatile(ptr::addr_of_mut!((*avail).idx), i.wrapping_add(1));
-}
+}}
 
 pub mod xfer;
 pub use xfer::{getc, putc, puts};

@@ -68,70 +68,70 @@ pub const RTS_ERDP: u32 = 0x18;
 pub const IMAN_IP: u32 = 1 << 0;
 pub const IMAN_IE: u32 = 1 << 1;
 
-unsafe fn cap_r8(base: usize, off: u32) -> u8 {
+unsafe fn cap_r8(base: usize, off: u32) -> u8 { unsafe {
     Mmio::<u8>::at(base + off as usize).read()
-}
+}}
 
-unsafe fn cap_r16(base: usize, off: u32) -> u16 {
+unsafe fn cap_r16(base: usize, off: u32) -> u16 { unsafe {
     Mmio::<u16>::at(base + off as usize).read()
-}
+}}
 
-unsafe fn cap_r32(base: usize, off: u32) -> u32 {
+unsafe fn cap_r32(base: usize, off: u32) -> u32 { unsafe {
     Mmio::<u32>::at(base + off as usize).read()
-}
+}}
 
-pub unsafe fn read_caplength(base: usize) -> u8 {
+pub unsafe fn read_caplength(base: usize) -> u8 { unsafe {
     cap_r8(base, CAPLENGTH)
-}
+}}
 
-pub unsafe fn read_hciversion(base: usize) -> u16 {
+pub unsafe fn read_hciversion(base: usize) -> u16 { unsafe {
     cap_r16(base, HCIVERSION)
-}
+}}
 
-pub unsafe fn read_hcsparams1(base: usize) -> u32 {
+pub unsafe fn read_hcsparams1(base: usize) -> u32 { unsafe {
     cap_r32(base, HCSPARAMS1)
-}
+}}
 
-pub unsafe fn read_hcsparams2(base: usize) -> u32 {
+pub unsafe fn read_hcsparams2(base: usize) -> u32 { unsafe {
     cap_r32(base, HCSPARAMS2)
-}
+}}
 
-pub unsafe fn read_hccparams1(base: usize) -> u32 {
+pub unsafe fn read_hccparams1(base: usize) -> u32 { unsafe {
     cap_r32(base, HCCPARAMS1)
-}
+}}
 
-pub unsafe fn read_dboff(base: usize) -> u32 {
+pub unsafe fn read_dboff(base: usize) -> u32 { unsafe {
     cap_r32(base, DBOFF)
-}
+}}
 
-pub unsafe fn read_rtsoff(base: usize) -> u32 {
+pub unsafe fn read_rtsoff(base: usize) -> u32 { unsafe {
     cap_r32(base, RTSOFF)
-}
+}}
 
-pub unsafe fn op_r32(obase: usize, off: u32) -> u32 {
+pub unsafe fn op_r32(obase: usize, off: u32) -> u32 { unsafe {
     Mmio::<u32>::at(obase + off as usize).read()
-}
+}}
 
-pub unsafe fn op_w32(obase: usize, off: u32, v: u32) {
+pub unsafe fn op_w32(obase: usize, off: u32, v: u32) { unsafe {
     Mmio::<u32>::at(obase + off as usize).write(v);
-}
+}}
 
-pub unsafe fn op_w64(obase: usize, off: u32, v: u64) {
+pub unsafe fn op_w64(obase: usize, off: u32, v: u64) { unsafe {
     Mmio::<u64>::at(obase + off as usize).write(v);
-}
+}}
 
-pub unsafe fn doorbell_w32(dboff: usize, slot: u8, target: u8) {
+pub unsafe fn doorbell_w32(dboff: usize, slot: u8, target: u8) { unsafe {
     Mmio::<u32>::at(dboff + (slot as usize) * 4).write(target as u32);
-}
+}}
 
-pub unsafe fn rt_r32(rtoff: usize, intr: u32, off: u32) -> u32 {
+pub unsafe fn rt_r32(rtoff: usize, intr: u32, off: u32) -> u32 { unsafe {
     Mmio::<u32>::at(rtoff + (intr as usize) * 0x20 + off as usize).read()
-}
+}}
 
-pub unsafe fn rt_w32(rtoff: usize, intr: u32, off: u32, v: u32) {
+pub unsafe fn rt_w32(rtoff: usize, intr: u32, off: u32, v: u32) { unsafe {
     Mmio::<u32>::at(rtoff + (intr as usize) * 0x20 + off as usize).write(v);
-}
+}}
 
-pub unsafe fn rt_w64(rtoff: usize, intr: u32, off: u32, v: u64) {
+pub unsafe fn rt_w64(rtoff: usize, intr: u32, off: u32, v: u64) { unsafe {
     Mmio::<u64>::at(rtoff + (intr as usize) * 0x20 + off as usize).write(v);
-}
+}}

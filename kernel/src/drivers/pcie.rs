@@ -35,26 +35,26 @@ static mut G_DEVS: [PciDev; MAX_RESULTS] = [PciDev {
 static mut G_N: usize = 0;
 
 #[inline]
-unsafe fn cfg_rd(bus: u8, dev: u8, func: u8, off: u32) -> u32 {
+unsafe fn cfg_rd(bus: u8, dev: u8, func: u8, off: u32) -> u32 { unsafe {
     let addr = ECAM_BASE
         + ((bus as usize) << 20)
         + ((dev as usize) << 15)
         + ((func as usize) << 12)
         + (off as usize);
     Mmio::<u32>::at(addr).read()
-}
+}}
 
 #[inline]
-unsafe fn cfg_wr(bus: u8, dev: u8, func: u8, off: u32, v: u32) {
+unsafe fn cfg_wr(bus: u8, dev: u8, func: u8, off: u32, v: u32) { unsafe {
     let addr = ECAM_BASE
         + ((bus as usize) << 20)
         + ((dev as usize) << 15)
         + ((func as usize) << 12)
         + (off as usize);
     Mmio::<u32>::at(addr).write(v);
-}
+}}
 
-unsafe fn read_bar(bus: u8, dev: u8, func: u8, bar_idx: u32) -> u64 {
+unsafe fn read_bar(bus: u8, dev: u8, func: u8, bar_idx: u32) -> u64 { unsafe {
     let off = 0x10 + bar_idx * 4;
     let lo = cfg_rd(bus, dev, func, off);
     if lo == 0 || lo == 0xFFFF_FFFF {
@@ -70,11 +70,11 @@ unsafe fn read_bar(bus: u8, dev: u8, func: u8, bar_idx: u32) -> u64 {
         // I/O BAR — caller can decide what to do.
         (lo & 0xFFFC) as u64
     }
-}
+}}
 
 /// Scan buses 0..MAX_BUSES and collect up to MAX_RESULTS devices.
 /// Returns the number found. Each device's BAR0 is also read.
-pub unsafe fn scan() -> usize {
+pub unsafe fn scan() -> usize { unsafe {
     G_N = 0;
     for bus in 0..MAX_BUSES {
         for dev in 0..MAX_DEVS {
@@ -112,7 +112,7 @@ pub unsafe fn scan() -> usize {
         }
     }
     G_N
-}
+}}
 
 /// Number of devices found in the last `scan()`.
 pub fn count() -> usize {
@@ -130,11 +130,11 @@ pub fn get(idx: usize) -> KResult<PciDev> {
 }
 
 /// Write a 32-bit value to a config register. Used by IRQ routing.
-pub unsafe fn cfg_write(bus: u8, dev: u8, func: u8, off: u32, v: u32) {
+pub unsafe fn cfg_write(bus: u8, dev: u8, func: u8, off: u32, v: u32) { unsafe {
     cfg_wr(bus, dev, func, off, v);
-}
+}}
 
 /// Read a 32-bit value from a config register.
-pub unsafe fn cfg_read(bus: u8, dev: u8, func: u8, off: u32) -> u32 {
+pub unsafe fn cfg_read(bus: u8, dev: u8, func: u8, off: u32) -> u32 { unsafe {
     cfg_rd(bus, dev, func, off)
-}
+}}

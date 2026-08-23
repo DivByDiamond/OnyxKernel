@@ -5,7 +5,7 @@ use onyx_core::errno::Errno;
 
 use super::brk::{page_align_up, user_range_ok};
 
-pub unsafe fn sys_munmap(addr: u64, length: u64) -> i64 {
+pub unsafe fn sys_munmap(addr: u64, length: u64) -> i64 { unsafe {
     if addr & 0xFFF != 0 || length == 0 {
         return Errno::Inval.as_i64();
     }
@@ -18,14 +18,14 @@ pub unsafe fn sys_munmap(addr: u64, length: u64) -> i64 {
         Ok(()) => 0,
         Err(e) => e.as_i64(),
     }
-}
+}}
 
-pub unsafe fn sys_mprotect(addr: u64, length: u64, prot: u64) -> i64 {
+pub unsafe fn sys_mprotect(addr: u64, length: u64, prot: u64) -> i64 { unsafe {
     if addr & 0xFFF != 0 || length == 0 {
         return Errno::Inval.as_i64();
     }
     let p = proc::current();
-    let size = page_align_up(length) as u64;
+    let size = page_align_up(length);
     let prot_r = prot & 1;
     let prot_w = (prot >> 1) & 1;
     let prot_x = (prot >> 2) & 1;
@@ -59,4 +59,4 @@ pub unsafe fn sys_mprotect(addr: u64, length: u64, prot: u64) -> i64 {
         va += 4096;
     }
     0
-}
+}}

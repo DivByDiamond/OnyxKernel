@@ -27,15 +27,15 @@ unsafe fn slab_class_for(size: usize) -> Option<usize> {
     None
 }
 
-pub unsafe fn slab_alloc(size: usize) -> Option<*mut u8> {
+pub unsafe fn slab_alloc(size: usize) -> Option<*mut u8> { unsafe {
     super::pmm_lock();
     let r = slab_alloc_unlocked(size);
     super::pmm_unlock();
     r
-}
+}}
 
 /// Internal slab_alloc without locking. Caller MUST hold `pmm_lock()`.
-unsafe fn slab_alloc_unlocked(size: usize) -> Option<*mut u8> {
+unsafe fn slab_alloc_unlocked(size: usize) -> Option<*mut u8> { unsafe {
     let class = slab_class_for(size)?;
     let obj_size = SLAB_SIZES[class];
     let hdr_size = size_of_slab_header();
@@ -79,21 +79,21 @@ unsafe fn slab_alloc_unlocked(size: usize) -> Option<*mut u8> {
     hdr.free_count = capacity;
     let pm = &raw const G_PMM;
     hdr.next = (*pm).slab_heads[class];
-    (*(&raw mut G_PMM)).slab_heads[class] = new_page;
+    G_PMM.slab_heads[class] = new_page;
     hdr.free_bits &= !1;
     hdr.free_count -= 1;
     Some((new_page as usize + hdr_size) as *mut u8)
-}
+}}
 
-pub unsafe fn slab_free(ptr: *mut u8) -> bool {
+pub unsafe fn slab_free(ptr: *mut u8) -> bool { unsafe {
     super::pmm_lock();
     let r = slab_free_unlocked(ptr);
     super::pmm_unlock();
     r
-}
+}}
 
 /// Internal slab_free without locking. Caller MUST hold `pmm_lock()`.
-unsafe fn slab_free_unlocked(ptr: *mut u8) -> bool {
+unsafe fn slab_free_unlocked(ptr: *mut u8) -> bool { unsafe {
     let page_addr = (ptr as usize) & !(PAGE_SIZE - 1);
     let page = page_addr as *mut SlabHeader;
     if page.is_null() {
@@ -149,12 +149,12 @@ unsafe fn slab_free_unlocked(ptr: *mut u8) -> bool {
     let slot_ptr = (page_addr + hdr_size + slot as usize * obj_size) as *mut u8;
     ptr::write_bytes(slot_ptr, 0, obj_size);
     if hdr.free_count == hdr.capacity {
-        let mut cur = (*(&raw const G_PMM)).slab_heads[class];
+        let mut cur = (G_PMM).slab_heads[class];
         let mut prev: *mut SlabHeader = ptr::null_mut();
         while !cur.is_null() {
             if cur == page {
                 if prev.is_null() {
-                    (*(&raw mut G_PMM)).slab_heads[class] = (*cur).next;
+                    G_PMM.slab_heads[class] = (*cur).next;
                 } else {
                     (*prev).next = (*cur).next;
                 }
@@ -167,4 +167,4 @@ unsafe fn slab_free_unlocked(ptr: *mut u8) -> bool {
         super::bitmap::free_unlocked(page_addr as u64);
     }
     true
-}
+}}

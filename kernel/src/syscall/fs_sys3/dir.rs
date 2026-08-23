@@ -4,7 +4,7 @@ use crate::proc;
 use super::super::handler::{parse_user_path, user_ptr_ok};
 
 #[inline(never)]
-pub unsafe fn sys_chdir(path: u64) -> i64 {
+pub unsafe fn sys_chdir(path: u64) -> i64 { unsafe {
     let mut path_buf = [0u8; 256];
     let path_len = match parse_user_path(path, &mut path_buf) {
         Some(l) => l,
@@ -18,10 +18,10 @@ pub unsafe fn sys_chdir(path: u64) -> i64 {
         }
         Err(e) => e.as_i64(),
     }
-}
+}}
 
 #[inline(never)]
-pub unsafe fn sys_getcwd(buf: u64, len: u64) -> i64 {
+pub unsafe fn sys_getcwd(buf: u64, len: u64) -> i64 { unsafe {
     if !user_ptr_ok(buf, len) {
         return onyx_core::errno::Errno::Inval.as_i64();
     }
@@ -30,4 +30,4 @@ pub unsafe fn sys_getcwd(buf: u64, len: u64) -> i64 {
     core::ptr::copy_nonoverlapping(cwd.as_ptr(), buf as *mut u8, n);
     *(buf as *mut u8).add(n) = 0;
     n as i64
-}
+}}

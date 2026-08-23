@@ -84,7 +84,7 @@ pub fn on_edge(pin: usize, rising: bool, h: PinHandler) -> KResult<()> {
 }
 
 /// Dispatch pending GPIO interrupts. Called from the PLIC handler.
-pub unsafe fn dispatch(rising: bool) {
+pub unsafe fn dispatch(rising: bool) { unsafe {
     let pending = if rising { rd(R_RISE_IP) } else { rd(R_FALL_IP) };
     if pending == 0 {
         return;
@@ -103,4 +103,4 @@ pub unsafe fn dispatch(rising: bool) {
             h(pin);
         }
     }
-}
+}}

@@ -2,7 +2,7 @@ use crate::drivers::fb;
 use crate::mm::pmm;
 use onyx_core::fmt::Arg;
 
-pub(crate) unsafe fn init_and_draw() {
+pub(crate) unsafe fn init_and_draw() { unsafe {
     // Prefer the device-tree simple-framebuffer (OC2R/sedna monitor): it is an
     // MMIO region the host actually samples, whereas private RAM is invisible
     // outside the VM. Fallback: pmm RAM (QEMU without virtio-gpu). The ECAM PCI
@@ -22,7 +22,7 @@ pub(crate) unsafe fn init_and_draw() {
         }
     }
     if !fb::enabled() {
-        let fb_pages = (fb::size_bytes() + 4095) / 4096;
+        let fb_pages = fb::size_bytes().div_ceil(4096);
         let fb_pa = pmm::alloc_n(fb_pages).ok().map(|pa| {
             crate::kinf!("fb", "allocated at %p", Arg::from(pa));
             pa as usize
@@ -36,7 +36,7 @@ pub(crate) unsafe fn init_and_draw() {
         }
     }
     draw_banner();
-}
+}}
 
 fn draw_banner() {
     if fb::enabled() {

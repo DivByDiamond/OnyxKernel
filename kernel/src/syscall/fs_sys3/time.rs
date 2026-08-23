@@ -4,7 +4,7 @@ use onyx_core::errno::Errno;
 use super::super::handler::{parse_user_path, user_ptr_ok};
 use crate::syscall::abi::{CLOCK_MONOTONIC, CLOCK_REALTIME};
 
-pub unsafe fn sys_gettimeofday(tv: u64) -> i64 {
+pub unsafe fn sys_gettimeofday(tv: u64) -> i64 { unsafe {
     if !user_ptr_ok(tv, 16) {
         return Errno::Inval.as_i64();
     }
@@ -15,9 +15,9 @@ pub unsafe fn sys_gettimeofday(tv: u64) -> i64 {
     *out = secs;
     *out.add(1) = usecs;
     0
-}
+}}
 
-pub unsafe fn sys_utimens(path: u64, times: u64) -> i64 {
+pub unsafe fn sys_utimens(path: u64, times: u64) -> i64 { unsafe {
     let mut path_buf = [0u8; 256];
     let path_len = match parse_user_path(path, &mut path_buf) {
         Some(l) => l,
@@ -25,7 +25,7 @@ pub unsafe fn sys_utimens(path: u64, times: u64) -> i64 {
     };
     let path_bytes = &path_buf[..path_len];
     if times == 0 {
-        let now = *(&raw const crate::srv::timer::G_JIFFIES);
+        let now = crate::srv::timer::G_JIFFIES;
         return match vfs::utimens(path_bytes, now, now) {
             Ok(()) => 0,
             Err(e) => e.as_i64(),
@@ -41,13 +41,13 @@ pub unsafe fn sys_utimens(path: u64, times: u64) -> i64 {
         Ok(()) => 0,
         Err(e) => e.as_i64(),
     }
-}
+}}
 
 /// nanosleep — block (yielding the CPU) until at least `req.tv_sec*1e9 +
 /// req.tv_nsec` nanoseconds have elapsed. The old implementation busy-looped
 /// with `set_need_resched`, which burnt CPU; this version yields properly
 /// while still polling `G_JIFFIES` from the timer tick.
-pub unsafe fn sys_nanosleep(req: u64, _rem: u64) -> i64 {
+pub unsafe fn sys_nanosleep(req: u64, _rem: u64) -> i64 { unsafe {
     if !user_ptr_ok(req, 16) {
         return Errno::Inval.as_i64();
     }
@@ -56,9 +56,9 @@ pub unsafe fn sys_nanosleep(req: u64, _rem: u64) -> i64 {
     let nsecs = *t.add(1);
     let total_ns = secs.saturating_mul(1_000_000_000).saturating_add(nsecs);
     let ticks = total_ns / 10_000_000; // 10 ms per tick
-    let target = (*(&raw const crate::srv::timer::G_JIFFIES)).wrapping_add(ticks.max(1));
+    let target = (crate::srv::timer::G_JIFFIES).wrapping_add(ticks.max(1));
     loop {
-        let now = *(&raw const crate::srv::timer::G_JIFFIES);
+        let now = crate::srv::timer::G_JIFFIES;
         if now >= target {
             break;
         }
@@ -70,12 +70,12 @@ pub unsafe fn sys_nanosleep(req: u64, _rem: u64) -> i64 {
         core::hint::spin_loop();
     }
     0
-}
+}}
 
 /// clock_gettime(clk_id, *ts) — POSIX clock query. Fills `ts` with
 /// `{tv_sec, tv_nsec}`. CLOCK_REALTIME and CLOCK_MONOTONIC both return the
 /// kernel uptime for now (no RTC synchronization yet).
-pub unsafe fn sys_clock_gettime(clk_id: u64, ts: u64) -> i64 {
+pub unsafe fn sys_clock_gettime(clk_id: u64, ts: u64) -> i64 { unsafe {
     if !user_ptr_ok(ts, 16) {
         return Errno::Inval.as_i64();
     }
@@ -91,11 +91,11 @@ pub unsafe fn sys_clock_gettime(clk_id: u64, ts: u64) -> i64 {
         }
         _ => Errno::Inval.as_i64(),
     }
-}
+}}
 
 /// clock_getres(clk_id, *res) — resolution of the given clock. OnyxKernel's
 /// timer ticks at 100 Hz (10 ms), so we report 10 ms for both clocks.
-pub unsafe fn sys_clock_getres(clk_id: u64, res: u64) -> i64 {
+pub unsafe fn sys_clock_getres(clk_id: u64, res: u64) -> i64 { unsafe {
     if !user_ptr_ok(res, 16) {
         return Errno::Inval.as_i64();
     }
@@ -108,4 +108,4 @@ pub unsafe fn sys_clock_getres(clk_id: u64, res: u64) -> i64 {
         }
         _ => Errno::Inval.as_i64(),
     }
-}
+}}

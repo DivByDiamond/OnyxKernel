@@ -14,7 +14,7 @@ pub use shared::{
 
 use onyx_core::errno::{Errno, KResult};
 
-pub unsafe fn init(data: &[u8]) -> KResult<()> {
+pub unsafe fn init(data: &[u8]) -> KResult<()> { unsafe {
     if data.len() < 4 {
         return Err(Errno::Io);
     }
@@ -26,4 +26,4 @@ pub unsafe fn init(data: &[u8]) -> KResult<()> {
     } else {
         Err(Errno::NoEnt)
     }
-}
+}}

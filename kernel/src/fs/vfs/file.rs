@@ -1,11 +1,11 @@
 use super::{
-    FdToken, Fs, G_ROOT_FS, PERM_READ, PERM_SEEK, PERM_WRITE, VFS_MAX_FDS, alloc_fd, fd_check,
-    fd_clear, fd_get, fd_set, fd_token, fd_update_pos,
+    FdToken, Fs, G_ROOT_FS, PERM_READ, PERM_WRITE, alloc_fd, fd_check,
+    fd_clear, fd_get, fd_set, fd_token,
 };
 use crate::fs::{devfs, fat32, ipcfs, onyxfs, procfs};
 use onyx_core::errno::{Errno, KResult};
 
-pub unsafe fn open(path: &[u8], perms: u32) -> KResult<FdToken> {
+pub unsafe fn open(path: &[u8], perms: u32) -> KResult<FdToken> { unsafe {
     if path.is_empty() || path[0] != b'/' {
         return Err(Errno::Inval);
     }
@@ -25,7 +25,7 @@ pub unsafe fn open(path: &[u8], perms: u32) -> KResult<FdToken> {
             let ino = match procfs::lookup(subpath) {
                 Ok(i) => i,
                 Err(e) => {
-                    let _ = fd_clear(idx);
+                    fd_clear(idx);
                     return Err(e);
                 }
             };
@@ -36,7 +36,7 @@ pub unsafe fn open(path: &[u8], perms: u32) -> KResult<FdToken> {
             let ino = match ipcfs::lookup(subpath) {
                 Ok(i) => i,
                 Err(e) => {
-                    let _ = fd_clear(idx);
+                    fd_clear(idx);
                     return Err(e);
                 }
             };
@@ -47,7 +47,7 @@ pub unsafe fn open(path: &[u8], perms: u32) -> KResult<FdToken> {
             let ino = match devfs::lookup(subpath) {
                 Ok(i) => i,
                 Err(e) => {
-                    let _ = fd_clear(idx);
+                    fd_clear(idx);
                     return Err(e);
                 }
             };
@@ -56,10 +56,10 @@ pub unsafe fn open(path: &[u8], perms: u32) -> KResult<FdToken> {
         }
         _ => {
             let mut st = onyxfs::OnyfsStat::default();
-            match *(&raw const G_ROOT_FS) {
+            match G_ROOT_FS {
                 Fs::Onyx => {
                     if let Err(e) = onyxfs::lookup(name, &mut st) {
-                        let _ = fd_clear(idx);
+                        fd_clear(idx);
                         return Err(e);
                     }
                     if !super::is_kernel_boot() {
@@ -77,11 +77,11 @@ pub unsafe fn open(path: &[u8], perms: u32) -> KResult<FdToken> {
                                 st.mode & 0o007
                             };
                             if (perms & PERM_READ) != 0 && (perm_bits & 0o400) == 0 {
-                                let _ = fd_clear(idx);
+                                fd_clear(idx);
                                 return Err(Errno::Perm);
                             }
                             if (perms & PERM_WRITE) != 0 && (perm_bits & 0o200) == 0 {
-                                let _ = fd_clear(idx);
+                                fd_clear(idx);
                                 return Err(Errno::Perm);
                             }
                         }
@@ -92,13 +92,13 @@ pub unsafe fn open(path: &[u8], perms: u32) -> KResult<FdToken> {
                     let mut cluster = 0u32;
                     let mut sz = 0u32;
                     if let Err(e) = fat32::lookup(name, &mut cluster, &mut sz) {
-                        let _ = fd_clear(idx);
+                        fd_clear(idx);
                         return Err(e);
                     }
                     (cluster, sz)
                 }
                 _ => {
-                    let _ = fd_clear(idx);
+                    fd_clear(idx);
                     return Err(Errno::Inval);
                 }
             }
@@ -108,10 +108,10 @@ pub unsafe fn open(path: &[u8], perms: u32) -> KResult<FdToken> {
     fd_set(idx, ino, size, fs, 0);
     let fd = fd_get(idx);
     Ok(fd_token(idx, fd.epoch))
-}
+}}
 
-pub unsafe fn close(token: FdToken) -> KResult<()> {
+pub unsafe fn close(token: FdToken) -> KResult<()> { unsafe {
     let idx = fd_check(token)?;
     fd_clear(idx);
     Ok(())
-}
+}}

@@ -4,7 +4,7 @@ use super::{
     clear_interrupts, reset, set_sdma_addr, wait_idle, wait_state, wait_transfer_complete,
 };
 
-pub unsafe fn read(lba: u64, buf: &mut [u8; 512]) -> bool {
+pub unsafe fn read(lba: u64, buf: &mut [u8; 512]) -> bool { unsafe {
     let p = &raw const crate::drivers::sdhci::G_SDHCI;
     if !(*p).initialized {
         return false;
@@ -49,9 +49,9 @@ pub unsafe fn read(lba: u64, buf: &mut [u8; 512]) -> bool {
     }
 
     true
-}
+}}
 
-pub unsafe fn write(lba: u64, buf: &[u8; 512]) -> bool {
+pub unsafe fn write(lba: u64, buf: &[u8; 512]) -> bool { unsafe {
     let p = &raw const crate::drivers::sdhci::G_SDHCI;
     if !(*p).initialized {
         return false;
@@ -93,9 +93,9 @@ pub unsafe fn write(lba: u64, buf: &[u8; 512]) -> bool {
     }
 
     wait_transfer_complete(base)
-}
+}}
 
-pub unsafe fn read_multi(lba: u64, n_sectors: u32, buf: *mut u8) -> bool {
+pub unsafe fn read_multi(lba: u64, n_sectors: u32, buf: *mut u8) -> bool { unsafe {
     let mut sector_buf = [0u8; SDHCI_SECTOR_SIZE];
     for i in 0u32..n_sectors {
         if !read(lba + i as u64, &mut sector_buf) {
@@ -108,9 +108,9 @@ pub unsafe fn read_multi(lba: u64, n_sectors: u32, buf: *mut u8) -> bool {
         );
     }
     true
-}
+}}
 
-pub unsafe fn write_multi(lba: u64, n_sectors: u32, buf: *const u8) -> bool {
+pub unsafe fn write_multi(lba: u64, n_sectors: u32, buf: *const u8) -> bool { unsafe {
     let mut sector_buf = [0u8; SDHCI_SECTOR_SIZE];
     for i in 0u32..n_sectors {
         core::ptr::copy_nonoverlapping(
@@ -123,4 +123,4 @@ pub unsafe fn write_multi(lba: u64, n_sectors: u32, buf: *const u8) -> bool {
         }
     }
     true
-}
+}}

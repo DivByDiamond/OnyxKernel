@@ -7,7 +7,7 @@
 use crate::arch::mmio::Mmio;
 use onyx_core::errno::{Errno, KResult};
 
-pub const DMA_BASE: usize = 0x3000_000;
+pub const DMA_BASE: usize = 0x0300_0000;
 pub const N_CHANNELS: usize = 4;
 
 const R_NEXT_DEST: u32 = 0x00;
@@ -34,33 +34,31 @@ static mut G_BASE: usize = DMA_BASE;
 static mut G_CHANNELS: [Channel; N_CHANNELS] = [Channel { in_use: false }; N_CHANNELS];
 
 #[inline]
-unsafe fn reg(chan: usize, off: u32) -> usize {
+unsafe fn reg(chan: usize, off: u32) -> usize { unsafe {
     G_BASE + chan * 0x20 + off as usize
-}
+}}
 
 #[inline]
-unsafe fn rd(chan: usize, off: u32) -> u32 {
+unsafe fn rd(chan: usize, off: u32) -> u32 { unsafe {
     Mmio::<u32>::at(reg(chan, off)).read()
-}
+}}
 
 #[inline]
-unsafe fn wr(chan: usize, off: u32, v: u32) {
+unsafe fn wr(chan: usize, off: u32, v: u32) { unsafe {
     Mmio::<u32>::at(reg(chan, off)).write(v);
-}
+}}
 
-pub unsafe fn init(base: usize) {
+pub unsafe fn init(base: usize) { unsafe {
     G_BASE = base;
-    for c in 0..N_CHANNELS {
-        G_CHANNELS[c] = Channel { in_use: false };
-    }
-}
+    G_CHANNELS = [Channel { in_use: false }; N_CHANNELS];
+}}
 
 /// Allocate a free DMA channel. Returns the channel index.
 pub fn alloc() -> KResult<usize> {
     unsafe {
-        for c in 0..N_CHANNELS {
-            if !G_CHANNELS[c].in_use {
-                G_CHANNELS[c].in_use = true;
+        for (c, ch) in G_CHANNELS.iter_mut().enumerate() {
+            if !ch.in_use {
+                ch.in_use = true;
                 return Ok(c);
             }
         }
@@ -86,7 +84,7 @@ pub fn free(chan: usize) -> KResult<()> {
 /// Synchronous memory-to-memory copy. `dst` and `src` are physical
 /// addresses; `len` is the number of bytes (must be multiple of 4).
 pub fn copy(dst: usize, src: usize, len: usize) -> KResult<()> {
-    if len == 0 || len % 4 != 0 {
+    if len == 0 || !len.is_multiple_of(4) {
         return Err(Errno::Inval);
     }
     let chan = alloc()?;
@@ -112,7 +110,7 @@ pub fn copy(dst: usize, src: usize, len: usize) -> KResult<()> {
 /// Submit a low-level descriptor for a chained transfer. The caller
 /// is responsible for setting up the next-link field if chaining.
 pub fn submit(chan: usize, src: usize, dst: usize, len: usize) -> KResult<()> {
-    if chan >= N_CHANNELS || len == 0 || len % 4 != 0 {
+    if chan >= N_CHANNELS || len == 0 || !len.is_multiple_of(4) {
         return Err(Errno::Inval);
     }
     unsafe {

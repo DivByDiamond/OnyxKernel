@@ -2,7 +2,6 @@ use crate::mm::pmm;
 use core::ptr;
 use onyx_core::errno::{Errno, KResult};
 
-use crate::drivers::usb::xhci::XhciCtx;
 
 pub const TRB_NORMAL: u32 = 1;
 pub const TRB_SETUP: u32 = 2;
@@ -68,10 +67,10 @@ pub struct TrbRing {
     pub cycle: bool,
 }
 
-pub unsafe fn alloc_ring(nentries: u16) -> KResult<TrbRing> {
+pub unsafe fn alloc_ring(nentries: u16) -> KResult<TrbRing> { unsafe {
     let n = nentries as usize;
     let bytes = n * 16;
-    let pages = (bytes + 4095) / 4096;
+    let pages = bytes.div_ceil(4096);
     let pa = pmm::alloc_n(pages)? as usize;
     let ring = TrbRing {
         base: pa as *mut Trb,
@@ -86,12 +85,12 @@ pub unsafe fn alloc_ring(nentries: u16) -> KResult<TrbRing> {
     link.params[2] = 0;
     link.params[3] = TRB_C | trb_type_flags(TRB_LINK);
     Ok(ring)
-}
+}}
 
-pub unsafe fn enqueue_trb(ring: &mut TrbRing, trb: &Trb) {
+pub unsafe fn enqueue_trb(ring: &mut TrbRing, trb: &Trb) { unsafe {
     let idx = ring.enqueue as usize;
     let dst = &mut *ring.base.add(idx);
-    let mut t = trb.clone();
+    let mut t = *trb;
     t.set_cycle(ring.cycle);
     ptr::write(dst, t);
     ring.enqueue += 1;
@@ -99,7 +98,7 @@ pub unsafe fn enqueue_trb(ring: &mut TrbRing, trb: &Trb) {
         ring.enqueue = 0;
         ring.cycle = !ring.cycle;
     }
-}
+}}
 
 pub unsafe fn setup_trb(trb: &mut Trb, req: u8, req_type: u8, val: u16, idx: u16, len: u16) {
     trb.params[0] = (req_type as u32) | ((req as u32) << 8) | ((val as u32) << 16);
@@ -108,11 +107,11 @@ pub unsafe fn setup_trb(trb: &mut Trb, req: u8, req_type: u8, val: u16, idx: u16
     trb.params[3] = trb_type_flags(TRB_SETUP);
 }
 
-pub unsafe fn ring_doorbell(slot: u8, target: u8) {
+pub unsafe fn ring_doorbell(slot: u8, target: u8) { unsafe {
     let ctx = &raw const crate::drivers::usb::xhci::G_XHCI;
     let dboff = (*ctx).dboff;
     crate::drivers::usb::xhci::regs::doorbell_w32(dboff, slot, target);
-}
+}}
 
 pub struct EventRing {
     pub base: *mut Trb,
@@ -122,10 +121,10 @@ pub struct EventRing {
     pub cycle: bool,
 }
 
-pub unsafe fn alloc_event_ring(nentries: u16) -> KResult<EventRing> {
+pub unsafe fn alloc_event_ring(nentries: u16) -> KResult<EventRing> { unsafe {
     let n = nentries as usize;
     let bytes = n * 16;
-    let pages = (bytes + 4095) / 4096;
+    let pages = bytes.div_ceil(4096);
     let pa = pmm::alloc_n(pages)? as usize;
     Ok(EventRing {
         base: pa as *mut Trb,
@@ -134,9 +133,9 @@ pub unsafe fn alloc_event_ring(nentries: u16) -> KResult<EventRing> {
         dequeue: 0,
         cycle: false,
     })
-}
+}}
 
-pub unsafe fn poll_event(er: &mut EventRing) -> Option<Trb> {
+pub unsafe fn poll_event(er: &mut EventRing) -> Option<Trb> { unsafe {
     let idx = er.dequeue as usize;
     if idx >= er.size as usize {
         return None;
@@ -146,16 +145,16 @@ pub unsafe fn poll_event(er: &mut EventRing) -> Option<Trb> {
     if c != er.cycle {
         return None;
     }
-    let trb = ev.clone();
+    let trb = *ev;
     er.dequeue += 1;
     if er.dequeue >= er.size {
         er.dequeue = 0;
         er.cycle = !er.cycle;
     }
     Some(trb)
-}
+}}
 
-pub unsafe fn submit_command(trb: &Trb) -> KResult<Trb> {
+pub unsafe fn submit_command(trb: &Trb) -> KResult<Trb> { unsafe {
     let ctx = &raw mut crate::drivers::usb::xhci::G_XHCI;
     let cmd_ring = &mut (*ctx).cmd_ring;
     enqueue_trb(cmd_ring, trb);
@@ -172,4 +171,4 @@ pub unsafe fn submit_command(trb: &Trb) -> KResult<Trb> {
         timeout -= 1;
     }
     Err(Errno::Io)
-}
+}}

@@ -1,4 +1,3 @@
-use alloc::vec;
 
 pub(super) const DHCP_SERVER_PORT: u16 = 67;
 pub(super) const DHCP_CLIENT_PORT: u16 = 68;

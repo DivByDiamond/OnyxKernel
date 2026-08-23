@@ -25,7 +25,7 @@ pub fn idle() {
 /// # Safety
 /// Disables the timer tick; only safe to call from the idle hart when
 /// no other harts rely on the timer for preemption.
-pub unsafe fn sleep() {
+pub unsafe fn sleep() { unsafe {
     G_DEEP_SLEEP = true;
     csr::clear_sie(crate::arch::regs::SSTATUS_SIE);
     // Loop until an external interrupt fires.
@@ -35,14 +35,14 @@ pub unsafe fn sleep() {
             break;
         }
     }
-}
+}}
 
 /// Resume from deep sleep: re-enable SIE and the timer tick.
-pub unsafe fn wake() {
+pub unsafe fn wake() { unsafe {
     G_DEEP_SLEEP = false;
     csr::set_sie(crate::arch::regs::SSTATUS_SIE);
     crate::srv::timer::init_hart(0);
-}
+}}
 
 /// Returns true if the system is currently in deep sleep.
 pub fn is_sleeping() -> bool {

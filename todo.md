@@ -132,15 +132,17 @@
 - [ ] **Скорость отрисовки по MMIO**: `put_pixel` пишет по байтам/слову на каждый пиксель глифа;
       на 1920×1080 (GPU T4) баннер и консоль будут ползти. Нужны: блочные копии (word/bulk),
       кэш строки, dirty-строки вместо полного redraw
-- [ ] **`scroll()` побайтовый** — над MMIO это сотни тысяч одиночных store; сделать копирование
-      машинными словами с учётом выравнивания и хвоста
+- [x] **`scroll()` побайтовый** — переписан на volatile word-копии (vcopy/vzero с выравниванием
+      и хвостом, без memcpy — MMIO); clear() тоже word-zero; 32bpp put_pixel — один u32 store
 - [ ] **Tearing/двоение кадра**: хост сэмплирует MMIO асинхронно; рассмотреть двойную буферизацию
       в RAM + копирование одним проходом, или хотя бы vsync-подобный «рисуем в offscreen, свипаем»
 - [ ] **Цвета fb_term для 16bpp** — COL_GREEN/COL_BLACK проходят через put_pixel-конверсию,
       но палитру консоли (ANSI 16 цветов в fb_term) привести к единому виду с UART-терминалом
 - [ ] **Несколько simple-framebuffer нод** — монитор + проектор дают две ноды; сейчас берётся первая
       попавшаяся. Добавить выбор через `/chosen/bootargs` (`console=fb0`, `fb=addr`)
-- [ ] **`/chosen/bootargs` парсинг** — его вообще нет: loglevel, console=, fb=, root=
+- [x] **`/chosen/bootargs` парсинг** — srv/bootargs.rs: парс /chosen/bootargs при буте,
+      `loglevel=info|warn|err` применяется к klog (фильтр в макросах — отфильтрованные вызовы
+      не делают vformat), generic key[=value] accessor bootargs::get() под console=/fb=/root=
 - [ ] **Hot-swap разрешения** — игрок сменил GPU → мягкий рестарт VM → новое ядро получит новую
       геометрию из FDT; проверить, что ничего не кэширует старый размер (G_FB пересоздаётся — ок,
       проверить fb_term cursor clamp)
@@ -148,26 +150,33 @@
       из ядра; нужны uncached PTE на MMIO-регион и ioctl с экспозицией адреса
 
 ### Ввод (UART/клавиатура):
-- [ ] **Ctrl+C → SIGINT foreground-процессу** — терминал шлёт ETX (0x03); ядро должно доставлять
-      сигнал активной задаче, а osh — реагировать (сейчас SIGINT до процесса не доходит?)
+- [x] **Ctrl+C → SIGINT foreground-процессу** — SIGINT(2) в proc/signals (default: terminate),
+      foreground = последний созданный не-init процесс (G_FG_PID в create_user); 0x03 перехватывается
+      в tty::filter_input и доставляется как сигнал. Ограничения: пайплайны убивают только последнего,
+      Ctrl+C на пустом промпте no-op (нет process groups)
 - [ ] **Ctrl+D = EOF** в cooked-read (login/osh читают до \n; полудуплексные правила)
 - [ ] **Backspace/стрелки в raw-режиме** — пароль вводится вслепую, редактирование невозможно;
       для cooked-режима проверить erasure (\b → затирание в line discipline)
-- [ ] **Потеря ввода при burst** — UART 16550A: включить FIFO + IRQ-driven rx вместо polling,
-      иначе быстрый вставка (>16 байт) теряет символы
+- [~] **Потеря ввода при burst** — FIFO включён (FCR 0xC7: enable + trigger 14 байт) в обоих
+      режимах; IRQ-driven rx НЕ сделан (PLIC-регистрация для UART отсутствует) — burst >16 байт
+      между поллами всё ещё может терять символы
 - [ ] **DECCKM/escape-последовательности в osh** — история команд и автодополнение хотя бы по tab
 
 ### Блоки / ФС:
-- [ ] **Нумерация дисков sedna ≠ QEMU** (vda=bootfs, vdb=rootfs, vdc=HDD игрока):
-      `[init] /dev/blk0: MBR signature NOT found` — init ожидает MBR на blk0; просканировать все
-      блочные устройства и находить OnyxFS по сигнатуре, а не по индексу
-- [ ] **Мусорный указатель в логе** — `sys_open: called path=12670` / `path=3fffee28`: трейс печатает
-      сырой указатель до разыменования; оставить только `path_bytes=` строку (или печатать %s безопасно)
-- [ ] **OnyxFS journal recovery под реальным диском** — journal/recovery писались под образ mkimage;
-      прогнать циклы: запись → «выдернули питание» (останов VM) → перезагрузка → fsck/rollback
+- [x] **Нумерация дисков sedna ≠ QEMU** (vda=bootfs, vdb=rootfs, vdc=HDD игрока):
+      ядро уже сканировало все virtio-blk в vfs::setup; devfs теперь экспонирует /dev/blk0..blk7
+      по числу probe-нутых устройств (devfs/blk.rs, чтение/запись с dev_idx вместо хардкода 0);
+      init boottest сканирует все /dev/blkN и ищет ONY2 (LBA 0 или LBA 10240 за MBR)
+- [x] **Мусорный указатель в логе** — `sys_open: called path=12670`: первый kinf! с сырым
+      указателем удалён, остался только безопасный `path_bytes=%s` после parse_user_path
+- [~] **OnyxFS journal recovery под реальным диском** — логика scan/replay вынесена в чистые
+      функции onyx_core::formats (43 хост-теста: clean journal, commit, torn tail, чужой magic);
+      железный цикл «запись → kill VM → reboot» на OC2R всё ещё предстоит прогнать руками
 - [ ] **Snapshot/Flashback на несъёмном диске OC2R** — rollback при том, что диск общий с хостом
-- [ ] **Рост раздела**: образ onyxfs.img фиксированный (~2.4 MB); HDD игрока может быть 128 MB —
-      поддержать расширение ФС на свободное место при первом маунте
+- [x] **Рост раздела**: grow-on-mount в onyxfs/mount.rs — если диск больше superblock.total_blocks,
+      ФС расширяется до размера устройства при первом маунте (суперблок персистится сразу).
+      Капы: single-block data bitmap → 32768 блоков (~128 MiB данных) + ONYFS_MAX_TOTAL_BLOCKS 1 GiB;
+      биты bitmap за концом образа уже нули у mkimage, данные идут хвостом — совместимо со старыми образами
 
 ### Сеть:
 - [ ] **Убрать хардкод IP [10,0,2,15]** — DHCP-клиент (минимальный: DISCOVER/OFFER/REQUEST/ACK)
@@ -180,8 +189,13 @@
 ### Время / энтропия:
 - [ ] **RTC под sedna** — какой узел в FDT, реализован ли gettimeofday от реального времени
       (иначе timestamps OnyxFS бессмысленны между перезапусками мира)
-- [ ] **getentropy** — сейчас xorshift (предсказуем!); подключить virtio-rng, если мод даёт,
-      иначе seed от таймера+hartid+cycle как минимум; это критично для salt'ов паролей
+- [x] **getentropy** — sys_getentropy теперь через hwrand::fill (Zkr seed CSR → virtio-rng →
+      LCG от RTC^cycle); источник логируется при буте; Zkr оставлен заглушкой осознанно
+      (illegal-instruction без recovery в trap-хендлере, см. drivers/hwrand.rs)
+- [x] **umask/права OnyxFS** — не-root запретён любой open /etc/shadow на уровне sys_open
+      (uid==0 / ring<=1 обходят). ⚠️ ИЗВЕСТНЫЙ TRADEOFF: ring-2 `passwd` (self-service) тоже
+      читает shadow целиком и теперь получит EPERM — нужен setuid-хелпер или per-user shadow
+      файлы (/etc/shadow/<user>), пока самосмену пароля делаем root'ом
 - [ ] **nanosleep точность** — SBI set_timer vs CLINT на sedna; проверить drift
 
 ### Платформа / SMP:
@@ -199,15 +213,18 @@
       либо перейти на стандартный формат ($5$ rounds=…), чтобы образы были переносимы
 - [ ] **`passwd` с пустым текущим паролем** — после перевода root на пустой пароль проверить
       смену пароля (verify_old_password должен принимать пустой, если stored пустой)
-- [ ] **umask/права OnyxFS** — chmod заглушками; любой пользователь читает /etc/shadow?
-      Минимум: запретить read shadow не-root на уровне VFS ACL
-- [ ] **argv/envp в execve** — osh получает аргументы? login exec'ает без них; прокинуть HOME/USER/PATH
-- [ ] **Лимиты процессов/памяти** — fork-bomb в игре повесит VM-поток сервера; добавить cap на
-      число процессов и квоту памяти на пользователя
+- [x] **umask/права OnyxFS** — см. отмеченный пункт выше (deny /etc/shadow для не-root в sys_open);
+      chmod остаётся заглушкой
+- [x] **argv/envp в execve** — sys_execve копирует user char** (лимиты 32 записи/256 байт),
+      стек инициализируется по RISC-V ABI (argc/argv/envp); login передаёт argv=["osh"] и
+      envp HOME/USER/SHELL/PATH=/bin
+- [x] **Лимиты процессов/памяти** — proc/limits.rs: 128 procs глобально, 32/uid (root 256) → EAGAIN;
+      128 MiB системный бюджет user-pages → ENOMEM (учёт в brk/mmap/onx-load/unmap/exit);
+      попутно закрыты утечки страниц при ошибках spawn/load/map_anon
 
 ### Диагностика / QoL:
-- [ ] **klog через простой UART-буфер** — kinf-спам замедляет бут; уровни логирования +
-      фильтрация через bootargs
+- [x] **klog уровни + фильтрация через bootargs** — см. пункт `/chosen/bootargs` выше;
+      panic-вывод фильтруется всегда
 - [ ] **kdump на экран** — при панике дублировать stack trace в framebuffer (если он есть),
       чтобы игрок увидел краш без доступа к серверным логам
 - [ ] **Автосмок-тест OC2R** — headless-скрипт (expect по UART): бут → login root/Enter → osh →

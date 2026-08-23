@@ -37,18 +37,18 @@ static mut G_BASE: usize = I2S_BASE;
 static mut G_RATE: u32 = 44100;
 
 #[inline]
-unsafe fn rd(off: u32) -> u32 {
+unsafe fn rd(off: u32) -> u32 { unsafe {
     Mmio::<u32>::at(G_BASE + off as usize).read()
-}
+}}
 
 #[inline]
-unsafe fn wr(off: u32, v: u32) {
+unsafe fn wr(off: u32, v: u32) { unsafe {
     Mmio::<u32>::at(G_BASE + off as usize).write(v);
-}
+}}
 
 /// Initialise the I2S controller for 16-bit stereo PCM at `sample_rate`.
 /// `mclk_div` selects the master-clock divider (e.g. 0 = /1, 1 = /2, ...).
-pub unsafe fn init(base: usize, sample_rate: u32, mclk_div: u32) -> KResult<()> {
+pub unsafe fn init(base: usize, sample_rate: u32, mclk_div: u32) -> KResult<()> { unsafe {
     if base == 0 || sample_rate == 0 {
         return Err(Errno::Inval);
     }
@@ -62,12 +62,12 @@ pub unsafe fn init(base: usize, sample_rate: u32, mclk_div: u32) -> KResult<()> 
     wr(R_TXFFR, 0x3); // FIFO reset on TX
     wr(R_CER, CER_EN);
     Ok(())
-}
+}}
 
 /// Write a buffer of interleaved 16-bit stereo samples to the I2S FIFO.
 /// Blocks until the entire buffer has been drained.
 pub fn write_samples(samples: &[i16]) -> KResult<()> {
-    if samples.len() % 2 != 0 {
+    if !samples.len().is_multiple_of(2) {
         return Err(Errno::Inval);
     }
     unsafe {

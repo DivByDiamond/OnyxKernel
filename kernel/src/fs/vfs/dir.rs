@@ -5,7 +5,7 @@ use onyx_core::errno::{Errno, KResult};
 use super::Fs;
 use super::resolve_mount;
 
-pub unsafe fn readdir(dir_path: &[u8], name_out: *mut u8, name_len: usize) -> KResult<bool> {
+pub unsafe fn readdir(dir_path: &[u8], name_out: *mut u8, name_len: usize) -> KResult<bool> { unsafe {
     if dir_path.is_empty() || dir_path[0] != b'/' {
         return Err(Errno::Inval);
     }
@@ -124,7 +124,7 @@ pub unsafe fn readdir(dir_path: &[u8], name_out: *mut u8, name_len: usize) -> KR
             }
         }
     }
-}
+}}
 
 /// Read a single directory entry by inode and cursor index.
 /// Used by getdents64 for fd-based directory iteration.
@@ -134,7 +134,7 @@ pub unsafe fn readdir_entry_by_ino(
     idx: u32,
     name_out: *mut u8,
     name_len: usize,
-) -> KResult<Option<u32>> {
+) -> KResult<Option<u32>> { unsafe {
     match fs {
         Fs::Onyx => onyxfs::readdir_entry(ino, idx, name_out, name_len),
         Fs::Proc => match procfs::readdir_entry(idx, name_out, name_len) {
@@ -155,4 +155,4 @@ pub unsafe fn readdir_entry_by_ino(
         },
         _ => Err(Errno::NoSys),
     }
-}
+}}

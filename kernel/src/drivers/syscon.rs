@@ -7,7 +7,7 @@
 //! controller, so we keep the writes harmless when running on hardware.
 use crate::arch::mmio::Mmio;
 
-pub const FINISHER_BASE: usize = 0x1000_00;
+pub const FINISHER_BASE: usize = 0x0010_0000;
 
 const FINISHER_PASS: u32 = 0x5555;
 const FINISHER_FAIL: u32 = 0x3333;

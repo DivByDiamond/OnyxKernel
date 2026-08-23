@@ -7,7 +7,7 @@ use super::XhciCtx;
 use super::regs;
 use super::ring;
 
-pub unsafe fn init(base: usize) -> KResult<()> {
+pub unsafe fn init(base: usize) -> KResult<()> { unsafe {
     let cap_len = regs::read_caplength(base) as usize;
     let obase = base + cap_len;
     let hci_ver = regs::read_hciversion(base);
@@ -100,4 +100,4 @@ pub unsafe fn init(base: usize) -> KResult<()> {
     }
     G_XHCI.operational = true;
     Ok(())
-}
+}}

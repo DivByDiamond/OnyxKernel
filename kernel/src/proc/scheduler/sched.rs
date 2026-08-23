@@ -7,13 +7,13 @@ use crate::proc::process::{
 use core::ptr;
 use core::sync::atomic::Ordering;
 
-pub unsafe fn sched_tick() {
+pub unsafe fn sched_tick() { unsafe {
     let hartid = hart_id();
     let cur = current_for_hart(hartid);
     if !cur.is_null() && !matches!((*cur).state, ProcState::Free) {
         G_NEED_RESCHED[hartid].store(true, Ordering::Release);
     }
-}
+}}
 
 pub unsafe fn set_need_resched(hartid: usize, v: bool) {
     if hartid < MAX_HARTS {
@@ -21,7 +21,7 @@ pub unsafe fn set_need_resched(hartid: usize, v: bool) {
     }
 }
 
-pub unsafe fn steal(hartid: usize) -> *mut Proc {
+pub unsafe fn steal(hartid: usize) -> *mut Proc { unsafe {
     let n = MAX_HARTS;
     for i in 1..n {
         let victim = (hartid + i) % n;
@@ -63,9 +63,9 @@ pub unsafe fn steal(hartid: usize) -> *mut Proc {
             .store(false, Ordering::Release);
     }
     core::ptr::null_mut()
-}
+}}
 
-pub unsafe fn sched_yield(tf: &mut TrapFrame) {
+pub unsafe fn sched_yield(tf: &mut TrapFrame) { unsafe {
     let hartid = hart_id();
     let current = current_for_hart(hartid);
 
@@ -162,4 +162,4 @@ pub unsafe fn sched_yield(tf: &mut TrapFrame) {
     let dst = (next_kstack_top - core::mem::size_of::<TrapFrame>()) as *mut TrapFrame;
     ptr::write_volatile(dst, (*next).tf);
     crate::arch::asm::sched_switch(dst as usize);
-}
+}}

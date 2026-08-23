@@ -6,22 +6,22 @@ use onyx_core::errno::Errno;
 
 use super::handler::user_ptr_ok;
 
-pub(super) unsafe fn sys_exit(code: u64) -> i64 {
+pub(super) unsafe fn sys_exit(code: u64) -> i64 { unsafe {
     let pid = proc::current_pid();
     proc::exit(pid, code as i32);
     0
-}
+}}
 
-pub(super) unsafe fn sys_yield() -> i64 {
+pub(super) unsafe fn sys_yield() -> i64 { unsafe {
     proc::set_need_resched(proc::hart_id(), true);
     0
-}
+}}
 pub(super) unsafe fn sys_getpid() -> i64 {
     proc::current_pid() as i64
 }
 
 /// SYS_spawn: create new process from .onx file.
-pub(super) unsafe fn sys_spawn(_tf: &mut TrapFrame, path: u64, argv: u64, ring_hint: u8) -> i64 {
+pub(super) unsafe fn sys_spawn(_tf: &mut TrapFrame, path: u64, argv: u64, ring_hint: u8) -> i64 { unsafe {
     if !user_ptr_ok(path, 1) {
         return Errno::Inval.as_i64();
     }
@@ -36,10 +36,10 @@ pub(super) unsafe fn sys_spawn(_tf: &mut TrapFrame, path: u64, argv: u64, ring_h
         Ok(pid) => pid as i64,
         Err(e) => e.as_i64(),
     }
-}
+}}
 
 /// SYS_wait: wait for child exit. Blocks (yields) until a child exits.
-pub(super) unsafe fn sys_wait(tf: &mut TrapFrame, status_out: u64) -> i64 {
+pub(super) unsafe fn sys_wait(tf: &mut TrapFrame, status_out: u64) -> i64 { unsafe {
     let status_ptr = if status_out != 0 && user_ptr_ok(status_out, 4) {
         status_out as *mut i32
     } else {
@@ -49,23 +49,23 @@ pub(super) unsafe fn sys_wait(tf: &mut TrapFrame, status_out: u64) -> i64 {
         Ok(pid) => pid as i64,
         Err(e) => e.as_i64(),
     }
-}
+}}
 
 // ── Signal syscalls ───────────────────────────────────────────────────────
 
 /// SYS_kill(pid, signal): deliver `signal` to process `pid`.
 /// Root-only (ACL enforced in `syscall_allowed`).
-pub(super) unsafe fn sys_kill(pid: u32, signal: u32) -> i64 {
+pub(super) unsafe fn sys_kill(pid: u32, signal: u32) -> i64 { unsafe {
     match proc::signal_send(pid, signal) {
         Ok(()) => 0,
         Err(e) => e.as_i64(),
     }
-}
+}}
 
 /// SYS_sigmask(how, sig): block / unblock / set the signal mask for one
 /// signal. `how`: 0 = block, 1 = unblock, 2 = set mask to just `sig`.
 /// Signal 9 (KILL) cannot be blocked — `how == 0` on signal 9 is a no-op.
-pub(super) unsafe fn sys_sigmask(how: u32, sig: u32) -> i64 {
+pub(super) unsafe fn sys_sigmask(how: u32, sig: u32) -> i64 { unsafe {
     if sig >= 32 {
         return Errno::Inval.as_i64();
     }
@@ -95,9 +95,9 @@ pub(super) unsafe fn sys_sigmask(how: u32, sig: u32) -> i64 {
         _ => return Errno::Inval.as_i64(),
     }
     0
-}
+}}
 
-pub(super) unsafe fn sys_sched_setaffinity(pid: u64, cpu: i64) -> i64 {
+pub(super) unsafe fn sys_sched_setaffinity(pid: u64, cpu: i64) -> i64 { unsafe {
     // Bug (syscall MINOR #12): validate pid range. The previous code did
     // `by_pid(pid as u32)` which silently truncated a u64 pid > u32::MAX
     // to a small value, potentially matching an unrelated process. We
@@ -118,12 +118,12 @@ pub(super) unsafe fn sys_sched_setaffinity(pid: u64, cpu: i64) -> i64 {
     } else {
         Errno::NoEnt.as_i64()
     }
-}
+}}
 
-pub(super) unsafe fn sys_sched_getaffinity(pid: u64) -> i64 {
+pub(super) unsafe fn sys_sched_getaffinity(pid: u64) -> i64 { unsafe {
     if let Some(p) = crate::proc::by_pid(pid as u32) {
         p.affinity as i64
     } else {
         Errno::NoEnt.as_i64()
     }
-}
+}}

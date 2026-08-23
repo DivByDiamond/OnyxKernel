@@ -2,7 +2,7 @@ use super::{Fs, resolve_mount};
 use crate::fs::onyxfs;
 use onyx_core::errno::{Errno, KResult};
 
-pub unsafe fn utimens(path: &[u8], mtime: u64, atime: u64) -> KResult<()> {
+pub unsafe fn utimens(path: &[u8], mtime: u64, atime: u64) -> KResult<()> { unsafe {
     if path.is_empty() || path[0] != b'/' {
         return Err(Errno::Inval);
     }
@@ -14,4 +14,4 @@ pub unsafe fn utimens(path: &[u8], mtime: u64, atime: u64) -> KResult<()> {
     let mut st = onyxfs::OnyfsStat::default();
     let ino = onyxfs::lookup(name, &mut st)?;
     onyxfs::set_timestamps(ino, mtime, atime)
-}
+}}

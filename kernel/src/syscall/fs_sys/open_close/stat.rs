@@ -1,6 +1,5 @@
 use crate::fs::vfs;
 use crate::mm::vmm;
-use crate::proc;
 use crate::syscall::handler::user_ptr_ok;
 use onyx_core::errno::Errno;
 
@@ -59,7 +58,7 @@ unsafe fn fill_user_stat(
     mtime: u64,
     atime: u64,
     ctime: u64,
-) {
+) { unsafe {
     if !user_ptr_ok(out_va, core::mem::size_of::<UserStat>() as u64) {
         return;
     }
@@ -85,7 +84,7 @@ unsafe fn fill_user_stat(
         st_rdev: 0,
         st_size: size as i64,
         st_blksize: 512,
-        st_blocks: ((size + 511) / 512) as i64,
+        st_blocks: size.div_ceil(512) as i64,
         st_atime: atime as i64,
         st_atime_nsec: 0,
         st_mtime: mtime as i64,
@@ -95,10 +94,10 @@ unsafe fn fill_user_stat(
         __unused: [0; 3],
     };
     core::ptr::write_volatile(dst, stat);
-}
+}}
 
 #[inline(never)]
-pub unsafe fn sys_stat(path: u64, st_buf: u64) -> i64 {
+pub unsafe fn sys_stat(path: u64, st_buf: u64) -> i64 { unsafe {
     let mut path_buf = [0u8; 256];
     let path_len = match crate::syscall::handler::parse_user_path(path, &mut path_buf) {
         Some(l) => l,
@@ -143,9 +142,9 @@ pub unsafe fn sys_stat(path: u64, st_buf: u64) -> i64 {
         }
         Err(e) => e.as_i64(),
     }
-}
+}}
 
-pub unsafe fn sys_fstat(token: u64, st_buf: u64) -> i64 {
+pub unsafe fn sys_fstat(token: u64, st_buf: u64) -> i64 { unsafe {
     if !user_ptr_ok(st_buf, core::mem::size_of::<UserStat>() as u64) {
         return Errno::Inval.as_i64();
     }
@@ -158,4 +157,4 @@ pub unsafe fn sys_fstat(token: u64, st_buf: u64) -> i64 {
         }
         Err(e) => e.as_i64(),
     }
-}
+}}

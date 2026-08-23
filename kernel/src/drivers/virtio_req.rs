@@ -1,11 +1,11 @@
 //! virtio-blk request submission + polled I/O.
 use crate::drivers::virtio::*;
 use core::ptr;
-use core::sync::atomic::{fence, Ordering};
+use core::sync::atomic::{Ordering, fence};
 use onyx_core::errno::{Errno, KResult};
 use onyx_core::fmt::Arg;
 
-unsafe fn submit_and_wait(dev_idx: usize, req_type: u32, sector: u64) -> KResult<()> {
+unsafe fn submit_and_wait(dev_idx: usize, req_type: u32, sector: u64) -> KResult<()> { unsafe {
     let pd = &raw mut G_DEVS;
     let dev = &mut (*pd)[dev_idx];
     if dev.req_buf.is_null() || dev.base == 0 {
@@ -77,9 +77,9 @@ unsafe fn submit_and_wait(dev_idx: usize, req_type: u32, sector: u64) -> KResult
     } else {
         Err(Errno::Io)
     }
-}
+}}
 
-pub unsafe fn read(dev_idx: usize, lba: u64, buf: *mut u8) -> KResult<()> {
+pub unsafe fn read(dev_idx: usize, lba: u64, buf: *mut u8) -> KResult<()> { unsafe {
     let pd = &raw const G_DEVS;
     let dev = &(*pd)[dev_idx];
     if dev.req_buf.is_null() || dev.base == 0 {
@@ -88,9 +88,9 @@ pub unsafe fn read(dev_idx: usize, lba: u64, buf: *mut u8) -> KResult<()> {
     submit_and_wait(dev_idx, VIRTIO_BLK_T_IN, lba)?;
     ptr::copy_nonoverlapping((*dev.req_buf).data.as_ptr(), buf, VIRTIO_BLK_SECTOR);
     Ok(())
-}
+}}
 
-pub unsafe fn write(dev_idx: usize, lba: u64, buf: *const u8) -> KResult<()> {
+pub unsafe fn write(dev_idx: usize, lba: u64, buf: *const u8) -> KResult<()> { unsafe {
     let pd = &raw const G_DEVS;
     let dev = &(*pd)[dev_idx];
     if dev.req_buf.is_null() || dev.base == 0 {
@@ -98,7 +98,7 @@ pub unsafe fn write(dev_idx: usize, lba: u64, buf: *const u8) -> KResult<()> {
     }
     ptr::copy_nonoverlapping(buf, (*dev.req_buf).data.as_mut_ptr(), VIRTIO_BLK_SECTOR);
     submit_and_wait(dev_idx, VIRTIO_BLK_T_OUT, lba)
-}
+}}
 
 /// Read `n_sectors` consecutive 512-byte sectors starting at `lba` into `buf`.
 /// `buf` must point to at least `n_sectors * 512` bytes of writable memory.
@@ -106,7 +106,7 @@ pub unsafe fn write(dev_idx: usize, lba: u64, buf: *const u8) -> KResult<()> {
 /// MVP implementation: loops over `read()` for each sector. The
 /// infrastructure is here so a future scatter-gather optimization can replace
 /// the loop with a single batched virtio-blk request.
-pub unsafe fn read_multi(dev_idx: usize, lba: u64, n_sectors: u32, buf: *mut u8) -> KResult<()> {
+pub unsafe fn read_multi(dev_idx: usize, lba: u64, n_sectors: u32, buf: *mut u8) -> KResult<()> { unsafe {
     for i in 0u32..n_sectors {
         read(
             dev_idx,
@@ -115,7 +115,7 @@ pub unsafe fn read_multi(dev_idx: usize, lba: u64, n_sectors: u32, buf: *mut u8)
         )?;
     }
     Ok(())
-}
+}}
 
 /// Write `n_sectors` consecutive 512-byte sectors starting at `lba` from `buf`.
 /// `buf` must point to at least `n_sectors * 512` bytes of readable memory.
@@ -123,7 +123,7 @@ pub unsafe fn read_multi(dev_idx: usize, lba: u64, n_sectors: u32, buf: *mut u8)
 /// MVP implementation: loops over `write()` for each sector. Like
 /// `read_multi`, this is the seam where a future scatter-gather optimization
 /// would issue a single batched virtio-blk request.
-pub unsafe fn write_multi(dev_idx: usize, lba: u64, n_sectors: u32, buf: *const u8) -> KResult<()> {
+pub unsafe fn write_multi(dev_idx: usize, lba: u64, n_sectors: u32, buf: *const u8) -> KResult<()> { unsafe {
     for i in 0u32..n_sectors {
         write(
             dev_idx,
@@ -132,4 +132,4 @@ pub unsafe fn write_multi(dev_idx: usize, lba: u64, n_sectors: u32, buf: *const 
         )?;
     }
     Ok(())
-}
+}}

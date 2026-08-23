@@ -1,12 +1,12 @@
 use super::reader::rd32;
 use super::{FDT_BEGIN_NODE, FDT_END, FDT_END_NODE, FDT_NOP, FDT_PROP, G_STRUCT, G_STRUCT_SIZE};
 
-pub unsafe fn walk(cb: &mut dyn FnMut(&str, &[(u32, &[u8])]) -> bool) {
-    if *(&raw const G_STRUCT) == 0 {
+pub unsafe fn walk(cb: &mut dyn FnMut(&str, &[(u32, &[u8])]) -> bool) { unsafe {
+    if G_STRUCT == 0 {
         return;
     }
-    let mut p = *(&raw const G_STRUCT) as *const u8;
-    let end = (*(&raw const G_STRUCT) + *(&raw const G_STRUCT_SIZE)) as *const u8;
+    let mut p = G_STRUCT as *const u8;
+    let end = (G_STRUCT + G_STRUCT_SIZE) as *const u8;
     let mut props: [(u32, &[u8]); 32] = [(0, &[]); 32];
     let mut prop_count = 0usize;
     let mut node_name: &str = "";
@@ -49,4 +49,4 @@ pub unsafe fn walk(cb: &mut dyn FnMut(&str, &[(u32, &[u8])]) -> bool) {
             _ => return,
         }
     }
-}
+}}

@@ -27,23 +27,23 @@ pub fn init() {
     }
 }
 
-unsafe fn rq(hart: usize) -> &'static mut RunQueue {
+unsafe fn rq(hart: usize) -> &'static mut RunQueue { unsafe {
     &mut (*G_RQ.as_mut_ptr())[hart]
-}
+}}
 
-pub unsafe fn rq_lock(hart: usize) {
+pub unsafe fn rq_lock(hart: usize) { unsafe {
     while rq(hart).lock.swap(true, Ordering::Acquire) {
         while rq(hart).lock.load(Ordering::Relaxed) {
             spin_loop();
         }
     }
-}
+}}
 
-pub unsafe fn rq_unlock(hart: usize) {
+pub unsafe fn rq_unlock(hart: usize) { unsafe {
     rq(hart).lock.store(false, Ordering::Release);
-}
+}}
 
-pub unsafe fn enqueue(hart: usize, p: *mut Proc) {
+pub unsafe fn enqueue(hart: usize, p: *mut Proc) { unsafe {
     if (*p).on_rq {
         return;
     }
@@ -57,18 +57,18 @@ pub unsafe fn enqueue(hart: usize, p: *mut Proc) {
         rq(hart).tail = p;
     }
     rq(hart).nr_ready += 1;
-}
+}}
 
-pub unsafe fn enqueue_affine(hart: usize, p: *mut Proc) {
+pub unsafe fn enqueue_affine(hart: usize, p: *mut Proc) { unsafe {
     let target = if (*p).affinity >= 0 && (*p).affinity < MAX_HARTS as i32 {
         (*p).affinity as usize
     } else {
         hart
     };
     enqueue(target, p);
-}
+}}
 
-pub unsafe fn dequeue(hart: usize) -> *mut Proc {
+pub unsafe fn dequeue(hart: usize) -> *mut Proc { unsafe {
     let p = rq(hart).head;
     if !p.is_null() {
         rq(hart).head = (*p).next;
@@ -80,9 +80,9 @@ pub unsafe fn dequeue(hart: usize) -> *mut Proc {
         rq(hart).nr_ready -= 1;
     }
     p
-}
+}}
 
-pub unsafe fn remove(hart: usize, p: *mut Proc) -> bool {
+pub unsafe fn remove(hart: usize, p: *mut Proc) -> bool { unsafe {
     if !(*p).on_rq {
         return false;
     }
@@ -107,4 +107,4 @@ pub unsafe fn remove(hart: usize, p: *mut Proc) -> bool {
         cur = (*cur).next;
     }
     false
-}
+}}

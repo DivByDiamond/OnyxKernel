@@ -1,5 +1,4 @@
 use crate::drivers::virtio_net;
-use core::ptr;
 
 pub const ETH_HLEN: usize = 14;
 pub const ET_ARP: u16 = 0x0806;
@@ -17,16 +16,16 @@ static mut ARP_CACHE_IP: [[u8; 4]; ARP_CACHE_MAX] = [[0; 4]; ARP_CACHE_MAX];
 static mut ARP_CACHE_MAC: [[u8; 6]; ARP_CACHE_MAX] = [[0; 6]; ARP_CACHE_MAX];
 static mut ARP_CACHE_LEN: usize = 0;
 
-pub unsafe fn arp_lookup(ip: [u8; 4]) -> Option<[u8; 6]> {
+pub unsafe fn arp_lookup(ip: [u8; 4]) -> Option<[u8; 6]> { unsafe {
     for i in 0..ARP_CACHE_LEN {
         if ARP_CACHE_IP[i] == ip {
             return Some(ARP_CACHE_MAC[i]);
         }
     }
     None
-}
+}}
 
-pub unsafe fn arp_insert(ip: [u8; 4], mac: [u8; 6]) {
+pub unsafe fn arp_insert(ip: [u8; 4], mac: [u8; 6]) { unsafe {
     for i in 0..ARP_CACHE_LEN {
         if ARP_CACHE_IP[i] == ip {
             ARP_CACHE_MAC[i] = mac;
@@ -38,9 +37,9 @@ pub unsafe fn arp_insert(ip: [u8; 4], mac: [u8; 6]) {
         ARP_CACHE_MAC[ARP_CACHE_LEN] = mac;
         ARP_CACHE_LEN += 1;
     }
-}
+}}
 
-pub unsafe fn arp_request(target_ip: [u8; 4]) {
+pub unsafe fn arp_request(target_ip: [u8; 4]) { unsafe {
     let mac = virtio_net::mac();
     let broadcast = [0xFF; 6];
     let mut pkt = [0u8; 42];
@@ -57,9 +56,9 @@ pub unsafe fn arp_request(target_ip: [u8; 4]) {
     pkt[32..38].copy_from_slice(&[0; 6]);
     pkt[38..42].copy_from_slice(&target_ip);
     let _ = virtio_net::send(&pkt);
-}
+}}
 
-pub unsafe fn handle_arp(frame: &[u8]) {
+pub unsafe fn handle_arp(frame: &[u8]) { unsafe {
     if frame.len() < 42 {
         return;
     }
@@ -87,7 +86,7 @@ pub unsafe fn handle_arp(frame: &[u8]) {
         pkt[38..42].copy_from_slice(&spa);
         let _ = virtio_net::send(&pkt);
     }
-}
+}}
 
 pub unsafe fn send_frame(dst_mac: [u8; 6], ethertype: u16, payload: &[u8]) {
     let mac = virtio_net::mac();
@@ -100,7 +99,7 @@ pub unsafe fn send_frame(dst_mac: [u8; 6], ethertype: u16, payload: &[u8]) {
     let _ = virtio_net::send(&frame);
 }
 
-pub unsafe fn dispatch(frame: &[u8]) {
+pub unsafe fn dispatch(frame: &[u8]) { unsafe {
     if frame.len() < ETH_HLEN {
         return;
     }
@@ -110,4 +109,4 @@ pub unsafe fn dispatch(frame: &[u8]) {
         ET_IP => crate::net::ip::handle_ip(frame),
         _ => {}
     }
-}
+}}

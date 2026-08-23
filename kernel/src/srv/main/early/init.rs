@@ -7,7 +7,7 @@ use crate::module::{self, ModuleType};
 use crate::srv::{timer, trap};
 use onyx_core::fmt::Arg;
 
-pub(crate) unsafe fn early_init(fdt_addr: usize) {
+pub(crate) unsafe fn early_init(fdt_addr: usize) { unsafe {
     // Console address comes from the device tree. On QEMU-virt it is the
     // legacy 0x10000000, but on OC2R/sedna the UART may be allocated at a
     // different address (devices are placed sequentially from 0x10000000).
@@ -61,4 +61,4 @@ pub(crate) unsafe fn early_init(fdt_addr: usize) {
         csr::set_sie((1 << 1) | (1 << 9));
         crate::kinf!("plic", "base=%p", Arg::from(plic_base));
     }
-}
+}}

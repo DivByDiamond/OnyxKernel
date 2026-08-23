@@ -36,18 +36,18 @@ static mut G_DSI: usize = DSI_BASE;
 static mut G_DPHY: usize = DPHY_BASE;
 
 #[inline]
-unsafe fn rd(off: u32) -> u32 {
+unsafe fn rd(off: u32) -> u32 { unsafe {
     Mmio::<u32>::at(G_DSI + off as usize).read()
-}
+}}
 
 #[inline]
-unsafe fn wr(off: u32, v: u32) {
+unsafe fn wr(off: u32, v: u32) { unsafe {
     Mmio::<u32>::at(G_DSI + off as usize).write(v);
-}
+}}
 
 /// Initialise the DSI link for a 480x854 24bpp panel running at 60 Hz.
 /// `lane_mbps` selects the per-lane bit rate (typically 500..1000).
-pub unsafe fn init(base: usize, dphy: usize, lane_mbps: u32) -> KResult<()> {
+pub unsafe fn init(base: usize, dphy: usize, lane_mbps: u32) -> KResult<()> { unsafe {
     if base == 0 {
         return Err(Errno::Inval);
     }
@@ -77,7 +77,7 @@ pub unsafe fn init(base: usize, dphy: usize, lane_mbps: u32) -> KResult<()> {
     // Power up.
     wr(R_DSI_PWR_UP, 1);
     Ok(())
-}
+}}
 
 /// Send a DCS short command (1 byte payload).
 pub fn send_cmd(cmd: u8) -> KResult<()> {

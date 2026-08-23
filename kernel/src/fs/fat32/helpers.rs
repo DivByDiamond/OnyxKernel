@@ -5,17 +5,17 @@ use super::{
 use onyx_core::errno::{Errno, KResult};
 
 pub(crate) unsafe fn is_valid_cluster(cluster: u32) -> bool {
-    cluster >= 2 && cluster < FAT32_EOC
+    (2..FAT32_EOC).contains(&cluster)
 }
 
 pub(crate) unsafe fn read_cluster_sector(
     cluster: u32,
     sector_in_cluster: u32,
     buf: &mut [u8; 512],
-) -> KResult<()> {
+) -> KResult<()> { unsafe {
     let lba = cluster_to_lba(cluster) + sector_in_cluster as u64;
     read_sec(lba, buf)
-}
+}}
 
 pub(crate) fn fat32_name_8_3(name: &[u8]) -> [u8; 11] {
     let mut out = [0x20u8; 11];
@@ -29,11 +29,11 @@ pub(crate) fn fat32_name_8_3(name: &[u8]) -> [u8; 11] {
     };
     for i in 0..base.len().min(8) {
         let b = base[i];
-        out[i] = if b >= b'a' && b <= b'z' { b - 32 } else { b };
+        out[i] = if b.is_ascii_lowercase() { b - 32 } else { b };
     }
     for i in 0..ext.len().min(3) {
         let b = ext[i];
-        out[8 + i] = if b >= b'a' && b <= b'z' { b - 32 } else { b };
+        out[8 + i] = if b.is_ascii_lowercase() { b - 32 } else { b };
     }
     out
 }
@@ -45,7 +45,7 @@ pub(crate) unsafe fn scan_dir_entries(
     out_size: &mut u32,
     is_dir: &mut bool,
     buf: &mut [u8; 512],
-) -> KResult<()> {
+) -> KResult<()> { unsafe {
     let mut cluster = dir_cluster;
     if !is_valid_cluster(cluster) {
         return Err(Errno::NoEnt);
@@ -97,9 +97,9 @@ pub(crate) unsafe fn scan_dir_entries(
         }
         cluster = next;
     }
-}
+}}
 
-pub unsafe fn mount(dev: usize) -> KResult<()> {
+pub unsafe fn mount(dev: usize) -> KResult<()> { unsafe {
     G_DEV = dev;
     let mut bpb = [0u8; 512];
     read_sec(0, &mut bpb)?;
@@ -131,4 +131,4 @@ pub unsafe fn mount(dev: usize) -> KResult<()> {
     }
     G_DATA_LBA = G_RESVD + 2 * G_FAT_SZ;
     Ok(())
-}
+}}

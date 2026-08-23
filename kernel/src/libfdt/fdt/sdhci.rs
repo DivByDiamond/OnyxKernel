@@ -1,8 +1,8 @@
+use super::FdtMmio;
 use super::reader::{cstr_at, rd32, reg_base};
 use super::walk::walk;
-use super::FdtMmio;
 
-pub unsafe fn find_sdhci() -> Option<FdtMmio> {
+pub unsafe fn find_sdhci() -> Option<FdtMmio> { unsafe {
     let mut result: Option<FdtMmio> = None;
     walk(&mut |_name, props: &[(u32, &[u8])]| {
         let mut base = 0u64;
@@ -45,4 +45,4 @@ pub unsafe fn find_sdhci() -> Option<FdtMmio> {
         false
     });
     result
-}
+}}

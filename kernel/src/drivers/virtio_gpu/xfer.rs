@@ -1,7 +1,7 @@
 use super::{C_RESOURCE_CREATE_2D, C_SET_SCANOUT, Create2D, GpuCtrlHdr, SetScanout};
 use crate::drivers::virtio::{
-    R_QUEUE_AVAIL_HIGH, R_QUEUE_AVAIL_LOW, R_QUEUE_DESC_HIGH, R_QUEUE_DESC_LOW, R_QUEUE_READY,
-    R_QUEUE_NOTIFY, R_QUEUE_NUM, R_QUEUE_SEL, R_QUEUE_USED_HIGH, R_QUEUE_USED_LOW, VIRTQ_SIZE,
+    R_QUEUE_AVAIL_HIGH, R_QUEUE_AVAIL_LOW, R_QUEUE_DESC_HIGH, R_QUEUE_DESC_LOW, R_QUEUE_NOTIFY,
+    R_QUEUE_NUM, R_QUEUE_READY, R_QUEUE_SEL, R_QUEUE_USED_HIGH, R_QUEUE_USED_LOW, VIRTQ_SIZE,
     VQ_DESC_F_NEXT, VQ_DESC_F_WRITE, VqAvail, VqDesc, VqUsed, reg_w,
 };
 use crate::mm::pmm;
@@ -15,7 +15,7 @@ pub unsafe fn setup_queue(
     a: *mut *mut VqAvail,
     u: *mut *mut VqUsed,
     b: usize,
-) -> KResult<()> {
+) -> KResult<()> { unsafe {
     reg_w(b, R_QUEUE_SEL, 0);
     reg_w(b, R_QUEUE_NUM, VIRTQ_SIZE as u32);
     let dp = pmm::alloc_zero()? as usize;
@@ -32,7 +32,7 @@ pub unsafe fn setup_queue(
     reg_w(b, R_QUEUE_USED_HIGH, ((up as u64) >> 32) as u32);
     reg_w(b, R_QUEUE_READY, 1);
     Ok(())
-}
+}}
 
 unsafe fn kick(
     d: *mut VqDesc,
@@ -41,9 +41,9 @@ unsafe fn kick(
     lu: *mut u16,
     b: usize,
     rp: usize,
-) -> KResult<()> {
+) -> KResult<()> { unsafe {
     let i = (*a).idx as usize % VIRTQ_SIZE;
-    *&mut *d.add((i + 1) % VIRTQ_SIZE) = VqDesc {
+    *d.add((i + 1) % VIRTQ_SIZE) = VqDesc {
         addr: rp as u64,
         len: 16,
         flags: VQ_DESC_F_WRITE,
@@ -67,7 +67,7 @@ unsafe fn kick(
         t -= 1;
     }
     Err(Errno::Io)
-}
+}}
 
 pub unsafe fn send_cmd(
     d: *mut VqDesc,
@@ -77,17 +77,17 @@ pub unsafe fn send_cmd(
     b: usize,
     cmd: *mut u8,
     len: u32,
-) -> KResult<()> {
+) -> KResult<()> { unsafe {
     let rp = pmm::alloc_zero()? as usize;
     let i = (*a).idx as usize % VIRTQ_SIZE;
-    *&mut *d.add(i) = VqDesc {
+    *d.add(i) = VqDesc {
         addr: cmd as u64,
         len,
         flags: VQ_DESC_F_NEXT,
         next: ((i + 1) % VIRTQ_SIZE) as u16,
     };
     kick(d, a, u, lu, b, rp)
-}
+}}
 
 pub unsafe fn cmd_create2d(
     d: *mut VqDesc,
@@ -98,7 +98,7 @@ pub unsafe fn cmd_create2d(
     rid: u32,
     w: u32,
     h: u32,
-) -> KResult<()> {
+) -> KResult<()> { unsafe {
     let c = Create2D {
         hdr: GpuCtrlHdr {
             hdr_type: C_RESOURCE_CREATE_2D,
@@ -121,7 +121,7 @@ pub unsafe fn cmd_create2d(
         &c as *const _ as *mut u8,
         core::mem::size_of::<Create2D>() as u32,
     )
-}
+}}
 
 pub unsafe fn cmd_attach(
     d: *mut VqDesc,
@@ -132,7 +132,7 @@ pub unsafe fn cmd_attach(
     rid: u32,
     pa: u32,
     len: u32,
-) -> KResult<()> {
+) -> KResult<()> { unsafe {
     let buf = pmm::alloc_zero()? as usize;
     let bp = buf as *mut u8;
     let h = GpuCtrlHdr {
@@ -149,20 +149,20 @@ pub unsafe fn cmd_attach(
     *(bp.add(40) as *mut u32) = len;
     let rp = pmm::alloc_zero()? as usize;
     let i = (*a).idx as usize % VIRTQ_SIZE;
-    *&mut *d.add(i) = VqDesc {
+    *d.add(i) = VqDesc {
         addr: buf as u64,
         len: 44,
         flags: VQ_DESC_F_NEXT,
         next: ((i + 1) % VIRTQ_SIZE) as u16,
     };
-    *&mut *d.add((i + 1) % VIRTQ_SIZE) = VqDesc {
+    *d.add((i + 1) % VIRTQ_SIZE) = VqDesc {
         addr: rp as u64,
         len: 16,
         flags: VQ_DESC_F_WRITE,
         next: 0,
     };
     kick(d, a, u, lu, b, rp)
-}
+}}
 
 pub unsafe fn cmd_scanout(
     d: *mut VqDesc,
@@ -173,7 +173,7 @@ pub unsafe fn cmd_scanout(
     rid: u32,
     w: u32,
     h: u32,
-) -> KResult<()> {
+) -> KResult<()> { unsafe {
     let c = SetScanout {
         hdr: GpuCtrlHdr {
             hdr_type: C_SET_SCANOUT,
@@ -197,4 +197,4 @@ pub unsafe fn cmd_scanout(
         &c as *const _ as *mut u8,
         core::mem::size_of::<SetScanout>() as u32,
     )
-}
+}}

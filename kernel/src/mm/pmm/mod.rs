@@ -58,7 +58,7 @@ pub(super) unsafe fn pmm_unlock() {
     G_PMM_LOCK.store(false, Ordering::Release);
 }
 
-pub unsafe fn init(dram_base: u64, dram_size: u64) {
+pub unsafe fn init(dram_base: u64, dram_size: u64) { unsafe {
     let kernel_end_pa = &__kernel_end as *const u8 as usize;
     let heap_end_pa = kernel_end_pa + KERNEL_HEAP_RESERVE;
     let managed_base = core::cmp::max(heap_end_pa, dram_base as usize);
@@ -126,14 +126,14 @@ pub unsafe fn init(dram_base: u64, dram_size: u64) {
             onyx_core::fmt::Arg::from(data_pages),
         ],
     );
-}
+}}
 
 pub fn free_pages() -> usize {
-    unsafe { (*(&raw const G_PMM)).free_pages }
+    unsafe { (G_PMM).free_pages }
 }
 
 pub fn total_pages() -> usize {
-    unsafe { (*(&raw const G_PMM)).total_pages }
+    unsafe { (G_PMM).total_pages }
 }
 
 pub fn is_managed(paddr: u64) -> bool {

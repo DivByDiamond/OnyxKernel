@@ -3,7 +3,6 @@ use onyx_core::errno::Errno;
 
 use crate::fs::devfs;
 use crate::fs::vfs;
-use crate::mm::vmm;
 use crate::proc;
 use crate::syscall::abi::{TCGETS, TCSETS};
 use crate::syscall::handler::user_ptr_ok;
@@ -13,12 +12,6 @@ const ECHO: u32 = 0o0000010;
 const ICANON: u32 = 0o0000002;
 const B9600: u32 = 0o0000015;
 
-// TODO(dead-code): C_IFLAG — termios layout offset, not handled yet, keep for layout doc.
-#[allow(dead_code)]
-const C_IFLAG: usize = 0;
-// TODO(dead-code): C_OFLAG — termios layout offset, not handled yet, keep for layout doc.
-#[allow(dead_code)]
-const C_OFLAG: usize = 4;
 const C_CFLAG: usize = 8;
 const C_LFLAG: usize = 12;
 const C_CC: usize = 16;
@@ -26,7 +19,7 @@ const C_CC_VMIN: usize = 6;
 const C_CC_VTIME: usize = 5;
 const TERMIOS_SIZE: usize = 60;
 
-pub unsafe fn sys_ioctl(fd: u64, request: u64, arg: u64) -> i64 {
+pub unsafe fn sys_ioctl(fd: u64, request: u64, arg: u64) -> i64 { unsafe {
     let token = fd;
     if let Ok(idx) = vfs::fd_check(token) {
         let f = vfs::fd_get(idx);
@@ -139,7 +132,7 @@ pub unsafe fn sys_ioctl(fd: u64, request: u64, arg: u64) -> i64 {
         }
         _ => Errno::NoSys.as_i64(),
     }
-}
+}}
 
 pub unsafe fn sys_isatty(fd: u64) -> i64 {
     let _ = fd;

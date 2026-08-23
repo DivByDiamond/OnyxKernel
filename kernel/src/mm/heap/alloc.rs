@@ -2,7 +2,7 @@ use super::{Block, G_HEAP, HEAP_SIZE, MIN_BLOCK, lock_heap, unlock_heap};
 use crate::mm::pmm;
 use onyx_core::errno::{Errno, KResult};
 
-pub unsafe fn kmalloc(size: usize) -> KResult<*mut u8> {
+pub unsafe fn kmalloc(size: usize) -> KResult<*mut u8> { unsafe {
     if size == 0 {
         return Err(Errno::Inval);
     }
@@ -13,11 +13,11 @@ pub unsafe fn kmalloc(size: usize) -> KResult<*mut u8> {
     let res = kmalloc_locked(size);
     unlock_heap();
     res
-}
+}}
 
-unsafe fn kmalloc_locked(size: usize) -> KResult<*mut u8> {
+unsafe fn kmalloc_locked(size: usize) -> KResult<*mut u8> { unsafe {
     if let Some(p) = pmm::slab_alloc(size) {
-        (*&raw mut G_HEAP).used += size;
+        G_HEAP.used += size;
         return Ok(p);
     }
     let needed = (size + 15) & !15;
@@ -41,24 +41,24 @@ unsafe fn kmalloc_locked(size: usize) -> KResult<*mut u8> {
                 blk.size = needed;
             }
             blk.free = false;
-            (*&raw mut G_HEAP).used += needed;
+            G_HEAP.used += needed;
             return Ok((cur as usize + Block::hdr_size()) as *mut u8);
         }
         cur = blk.next;
     }
     Err(Errno::NoMem)
-}
+}}
 
-pub unsafe fn kfree(p: *mut u8) {
+pub unsafe fn kfree(p: *mut u8) { unsafe {
     if p.is_null() {
         return;
     }
     lock_heap();
     kfree_locked(p);
     unlock_heap();
-}
+}}
 
-unsafe fn kfree_locked(p: *mut u8) {
+unsafe fn kfree_locked(p: *mut u8) { unsafe {
     if pmm::slab_free(p) {
         return;
     }
@@ -70,7 +70,7 @@ unsafe fn kfree_locked(p: *mut u8) {
     if (*blk).size == 0 || (*blk).size > HEAP_SIZE {
         return;
     }
-    (*&raw mut G_HEAP).used -= (*blk).size;
+    G_HEAP.used -= (*blk).size;
     (*blk).free = true;
     if !(*blk).next.is_null() && (*(*blk).next).free {
         let next = (*blk).next;
@@ -88,4 +88,4 @@ unsafe fn kfree_locked(p: *mut u8) {
             (*(*prev).next).prev = prev;
         }
     }
-}
+}}

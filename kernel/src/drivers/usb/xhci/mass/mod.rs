@@ -1,8 +1,6 @@
-use crate::mm::pmm;
 use core::ptr;
 use onyx_core::errno::{Errno, KResult};
 
-use super::ring;
 
 pub(crate) const MAX_MASS: usize = 4;
 
@@ -48,7 +46,7 @@ pub(super) const CBW_SIG: u32 = 0x43425355;
 #[allow(dead_code)]
 pub(super) const CBW_SIZE: u32 = 31;
 
-pub unsafe fn probe(slot_id: u8, config_data: &[u8]) -> KResult<u8> {
+pub unsafe fn probe(slot_id: u8, config_data: &[u8]) -> KResult<u8> { unsafe {
     let mut i = 0;
     while i + 8 < config_data.len() {
         let len = config_data[i] as usize;
@@ -107,4 +105,4 @@ pub unsafe fn probe(slot_id: u8, config_data: &[u8]) -> KResult<u8> {
         i += len;
     }
     Err(Errno::NoEnt)
-}
+}}

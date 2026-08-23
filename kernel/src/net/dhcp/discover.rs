@@ -5,7 +5,7 @@ use onyx_core::errno::{Errno, KResult};
 
 use super::protocol::{self, DHCP_CLIENT_PORT, DHCP_SERVER_PORT};
 
-pub unsafe fn dhcp_discover() -> KResult<([u8; 4], [u8; 4], [u8; 4], [u8; 4])> {
+pub unsafe fn dhcp_discover() -> KResult<([u8; 4], [u8; 4], [u8; 4], [u8; 4])> { unsafe {
     let mac = virtio_net::mac();
     let xid = crate::srv::timer::uptime_us() as u32;
     let sock = udp::udp_bind(DHCP_CLIENT_PORT)?;
@@ -19,10 +19,9 @@ pub unsafe fn dhcp_discover() -> KResult<([u8; 4], [u8; 4], [u8; 4], [u8; 4])> {
     for _ in 0..50000 {
         poll();
         let mut buf = [0u8; 2048];
-        if let Ok(n) = udp::udp_recv(sock, &mut buf) {
-            if let Some((msg_type, yiaddr, sid, mask, dns)) = protocol::parse_dhcp_reply(&buf[..n])
-            {
-                if msg_type == 2 && !yiaddr.iter().all(|&b| b == 0) {
+        if let Ok(n) = udp::udp_recv(sock, &mut buf)
+            && let Some((msg_type, yiaddr, sid, mask, dns)) = protocol::parse_dhcp_reply(&buf[..n])
+                && msg_type == 2 && !yiaddr.iter().all(|&b| b == 0) {
                     offered_ip = yiaddr;
                     server_id = sid;
                     subnet_mask = mask;
@@ -30,8 +29,6 @@ pub unsafe fn dhcp_discover() -> KResult<([u8; 4], [u8; 4], [u8; 4], [u8; 4])> {
                     got_offer = true;
                     break;
                 }
-            }
-        }
     }
     if !got_offer {
         udp::udp_close(sock);
@@ -43,10 +40,9 @@ pub unsafe fn dhcp_discover() -> KResult<([u8; 4], [u8; 4], [u8; 4], [u8; 4])> {
     for _ in 0..50000 {
         poll();
         let mut buf = [0u8; 2048];
-        if let Ok(n) = udp::udp_recv(sock, &mut buf) {
-            if let Some((msg_type, yiaddr, _sid, mask, dns)) = protocol::parse_dhcp_reply(&buf[..n])
-            {
-                if msg_type == 5 {
+        if let Ok(n) = udp::udp_recv(sock, &mut buf)
+            && let Some((msg_type, yiaddr, _sid, mask, dns)) = protocol::parse_dhcp_reply(&buf[..n])
+                && msg_type == 5 {
                     if !yiaddr.iter().all(|&b| b == 0) {
                         offered_ip = yiaddr;
                     }
@@ -59,8 +55,6 @@ pub unsafe fn dhcp_discover() -> KResult<([u8; 4], [u8; 4], [u8; 4], [u8; 4])> {
                     got_ack = true;
                     break;
                 }
-            }
-        }
     }
     udp::udp_close(sock);
     if !got_ack {
@@ -82,4 +76,4 @@ pub unsafe fn dhcp_discover() -> KResult<([u8; 4], [u8; 4], [u8; 4], [u8; 4])> {
         subnet_mask
     };
     Ok((offered_ip, final_mask, gateway, dns_server))
-}
+}}

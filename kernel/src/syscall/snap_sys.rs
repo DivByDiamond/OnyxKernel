@@ -8,7 +8,7 @@ use super::handler::user_ptr_ok;
 
 /// SYS_snapshot_create(name): create a filesystem snapshot.
 /// `name` is a NUL-terminated user pointer to the snapshot name.
-pub(super) unsafe fn sys_snapshot_create(name: u64) -> i64 {
+pub(super) unsafe fn sys_snapshot_create(name: u64) -> i64 { unsafe {
     if !user_ptr_ok(name, 1) {
         return Errno::Inval.as_i64();
     }
@@ -22,19 +22,19 @@ pub(super) unsafe fn sys_snapshot_create(name: u64) -> i64 {
         Ok(id) => id as i64,
         Err(e) => e.as_i64(),
     }
-}
+}}
 
 /// SYS_snapshot_rollback(id): restore filesystem state from snapshot `id`.
-pub(super) unsafe fn sys_snapshot_rollback(id: u32) -> i64 {
+pub(super) unsafe fn sys_snapshot_rollback(id: u32) -> i64 { unsafe {
     match onyxfs::snapshot_rollback(id) {
         Ok(()) => 0,
         Err(e) => e.as_i64(),
     }
-}
+}}
 
 /// SYS_snapshot_list(buf, len): list snapshot names into `buf`.
 /// Returns the number of snapshots listed.
-pub(super) unsafe fn sys_snapshot_list(buf: u64, len: u64) -> i64 {
+pub(super) unsafe fn sys_snapshot_list(buf: u64, len: u64) -> i64 { unsafe {
     if len == 0 {
         return 0;
     }
@@ -45,4 +45,4 @@ pub(super) unsafe fn sys_snapshot_list(buf: u64, len: u64) -> i64 {
         Ok(count) => count as i64,
         Err(e) => e.as_i64(),
     }
-}
+}}

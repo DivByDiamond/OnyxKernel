@@ -9,7 +9,7 @@ use onyx_core::errno::Errno;
 use super::handler::{parse_user_path, user_ptr_ok};
 
 #[inline(never)]
-pub(super) unsafe fn sys_exec(tf: &mut TrapFrame, path: u64, argv: u64) -> i64 {
+pub(super) unsafe fn sys_exec(tf: &mut TrapFrame, path: u64, argv: u64) -> i64 { unsafe {
     let mut path_buf = [0u8; 256];
     let path_len = match parse_user_path(path, &mut path_buf) {
         Some(l) => l,
@@ -99,17 +99,24 @@ pub(super) unsafe fn sys_exec(tf: &mut TrapFrame, path: u64, argv: u64) -> i64 {
     tf.sp = if argc > 0 { argv_sp } else { r.ustack };
     tf.a0 = argc as u64;
     tf.a1 = if argc > 0 { argv_sp + 8 } else { 0 };
+    // envp (a2): copy_argv_to_stack builds [argc][argv..NULL][envp={NULL}][auxv],
+    // so the empty envp array sits right after argv's NULL terminator.
+    tf.a2 = if argc > 0 {
+        argv_sp + 8 + (argc as u64 + 1) * 8
+    } else {
+        0
+    };
     tf.sstatus = crate::arch::regs::SSTATUS_SPIE;
     if cfg!(target_pointer_width = "64") {
         tf.satp = crate::arch::regs::SATP_MODE_SV39 | (r.root_pa >> 12);
     } else {
-        tf.satp = (crate::arch::bits::SATP_MODE_SV32 as u32 | ((r.root_pa >> 12) & 0x3FFFFF) as u32)
+        tf.satp = (crate::arch::bits::SATP_MODE_SV32 | ((r.root_pa >> 12) & 0x3FFFFF) as u32)
             as crate::arch::trap_frame::Reg;
     }
     argc as i64
-}
+}}
 
-pub(super) unsafe fn sys_sbrk(incr: i64) -> i64 {
+pub(super) unsafe fn sys_sbrk(incr: i64) -> i64 { unsafe {
     let pid = proc::current_pid();
     // Audit fix (🔴 #8): replace `proc::by_pid(pid).unwrap()` with a
     // graceful error return. See fs_sys3/mem.rs::sys_sbrk for the full
@@ -135,10 +142,10 @@ pub(super) unsafe fn sys_sbrk(incr: i64) -> i64 {
     }
     p.heap_brk = new_brk;
     cur as i64
-}
+}}
 
 #[inline(never)]
-pub(super) unsafe fn sys_readdir(dir: u64, name_out: u64, len: u64) -> i64 {
+pub(super) unsafe fn sys_readdir(dir: u64, name_out: u64, len: u64) -> i64 { unsafe {
     let mut dir_buf = [0u8; 256];
     let dir_len = match parse_user_path(dir, &mut dir_buf) {
         Some(l) => l,
@@ -158,10 +165,10 @@ pub(super) unsafe fn sys_readdir(dir: u64, name_out: u64, len: u64) -> i64 {
         }
         Err(e) => e.as_i64(),
     }
-}
+}}
 
 #[inline(never)]
-pub(super) unsafe fn sys_write_fd(token: u64, buf: u64, len: u64) -> i64 {
+pub(super) unsafe fn sys_write_fd(token: u64, buf: u64, len: u64) -> i64 { unsafe {
     if !user_ptr_ok(buf, len) {
         return Errno::Inval.as_i64();
     }
@@ -169,10 +176,10 @@ pub(super) unsafe fn sys_write_fd(token: u64, buf: u64, len: u64) -> i64 {
         Ok(n) => n as i64,
         Err(e) => e.as_i64(),
     }
-}
+}}
 
 #[inline(never)]
-pub(super) unsafe fn sys_create(path: u64, mode: u64, _reserved: u64) -> i64 {
+pub(super) unsafe fn sys_create(path: u64, mode: u64, _reserved: u64) -> i64 { unsafe {
     let mut path_buf = [0u8; 256];
     let path_len = match parse_user_path(path, &mut path_buf) {
         Some(l) => l,
@@ -188,10 +195,10 @@ pub(super) unsafe fn sys_create(path: u64, mode: u64, _reserved: u64) -> i64 {
         Ok(token) => token as i64,
         Err(e) => e.as_i64(),
     }
-}
+}}
 
 #[inline(never)]
-pub(super) unsafe fn sys_mkdir(path: u64) -> i64 {
+pub(super) unsafe fn sys_mkdir(path: u64) -> i64 { unsafe {
     let mut path_buf = [0u8; 256];
     let path_len = match parse_user_path(path, &mut path_buf) {
         Some(l) => l,
@@ -202,4 +209,4 @@ pub(super) unsafe fn sys_mkdir(path: u64) -> i64 {
         Ok(()) => 0,
         Err(e) => e.as_i64(),
     }
-}
+}}

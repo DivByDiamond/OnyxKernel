@@ -4,7 +4,7 @@ pub(super) unsafe fn format_line(
     suffix: &[u8],
     buf: &mut [u8],
     pos: usize,
-) -> usize {
+) -> usize { unsafe {
     let mut written = 0;
     if pos + written + prefix.len() <= buf.len() {
         buf[pos + written..pos + written + prefix.len()].copy_from_slice(prefix);
@@ -16,7 +16,7 @@ pub(super) unsafe fn format_line(
         written += suffix.len();
     }
     written
-}
+}}
 
 pub(super) unsafe fn format_line_raw(line: &[u8], buf: &mut [u8], pos: usize) -> usize {
     if pos + line.len() <= buf.len() {

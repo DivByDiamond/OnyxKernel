@@ -1,25 +1,25 @@
 //! virtio-blk device probe / init and virtqueue setup.
 use super::{
-    reg_r, reg_w, BlkReq, VirtioBlkDev, VqAvail, VqDesc, VqUsed, G_DEVS, G_NDEVS, R_DEVICE_ID,
-    R_GUEST_FEATURES, R_GUEST_FEATURES_SEL, R_HOST_FEATURES, R_HOST_FEATURES_SEL, R_MAGIC_VALUE,
-    R_QUEUE_ALIGN, R_QUEUE_AVAIL_HIGH, R_QUEUE_AVAIL_LOW, R_QUEUE_DESC_HIGH, R_QUEUE_DESC_LOW,
-    R_QUEUE_NUM, R_QUEUE_PFN, R_QUEUE_READY, R_QUEUE_SEL, R_QUEUE_USED_HIGH, R_QUEUE_USED_LOW,
-    R_STATUS, R_VERSION, VIRTIO_F_VERSION_1, VIRTIO_ID_BLK, VIRTIO_MAX_DEVS, VIRTIO_S_ACK,
-    VIRTIO_S_DRIVER, VIRTIO_S_DRIVER_OK, VIRTIO_S_FEATURES_OK, VIRTQ_SIZE,
+    BlkReq, G_DEVS, G_NDEVS, R_DEVICE_ID, R_GUEST_FEATURES, R_GUEST_FEATURES_SEL, R_HOST_FEATURES,
+    R_HOST_FEATURES_SEL, R_MAGIC_VALUE, R_QUEUE_ALIGN, R_QUEUE_AVAIL_HIGH, R_QUEUE_AVAIL_LOW,
+    R_QUEUE_DESC_HIGH, R_QUEUE_DESC_LOW, R_QUEUE_NUM, R_QUEUE_PFN, R_QUEUE_READY, R_QUEUE_SEL,
+    R_QUEUE_USED_HIGH, R_QUEUE_USED_LOW, R_STATUS, R_VERSION, VIRTIO_F_VERSION_1, VIRTIO_ID_BLK,
+    VIRTIO_MAX_DEVS, VIRTIO_S_ACK, VIRTIO_S_DRIVER, VIRTIO_S_DRIVER_OK, VIRTIO_S_FEATURES_OK,
+    VIRTQ_SIZE, VirtioBlkDev, VqAvail, VqDesc, VqUsed, reg_r, reg_w,
 };
 use crate::mm::pmm;
 use core::ptr;
 use onyx_core::errno::{Errno, KResult};
 
-pub unsafe fn probe(base: usize) -> bool {
+pub unsafe fn probe(base: usize) -> bool { unsafe {
     let magic = reg_r(base, R_MAGIC_VALUE);
     if magic != 0x7472_6976 {
         return false;
     }
     reg_r(base, R_DEVICE_ID) == VIRTIO_ID_BLK
-}
+}}
 
-pub unsafe fn init(base: usize) -> KResult<usize> {
+pub unsafe fn init(base: usize) -> KResult<usize> { unsafe {
     let pn = &raw const G_NDEVS;
     if *pn >= VIRTIO_MAX_DEVS {
         return Err(Errno::NoMem);
@@ -37,7 +37,7 @@ pub unsafe fn init(base: usize) -> KResult<usize> {
         last_used: 0,
         req_buf: ptr::null_mut(),
     };
-    (*(&raw mut G_DEVS))[idx] = dev;
+    G_DEVS[idx] = dev;
     reg_w(base, R_STATUS, 0);
     reg_w(base, R_STATUS, VIRTIO_S_ACK | VIRTIO_S_DRIVER);
     // Read the full 64-bit feature word via the features_sel registers.
@@ -70,11 +70,11 @@ pub unsafe fn init(base: usize) -> KResult<usize> {
         R_STATUS,
         VIRTIO_S_ACK | VIRTIO_S_DRIVER | VIRTIO_S_FEATURES_OK | VIRTIO_S_DRIVER_OK,
     );
-    *(&raw mut G_NDEVS) += 1;
+    G_NDEVS += 1;
     Ok(idx)
-}
+}}
 
-unsafe fn setup_queue(idx: usize) -> KResult<()> {
+unsafe fn setup_queue(idx: usize) -> KResult<()> { unsafe {
     let pd = &raw mut G_DEVS;
     let dev = &mut (*pd)[idx];
     reg_w(dev.base, R_QUEUE_SEL, 0);
@@ -115,4 +115,4 @@ unsafe fn setup_queue(idx: usize) -> KResult<()> {
         reg_w(dev.base, R_QUEUE_PFN, (desc_pa / 4096) as u32);
     }
     Ok(())
-}
+}}

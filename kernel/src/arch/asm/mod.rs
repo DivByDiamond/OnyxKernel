@@ -20,9 +20,11 @@ pub use trap_asm::{drop_to_user, sched_switch, trap_entry, trap_return};
 #[cfg(all(not(test), target_pointer_width = "32"))]
 pub use trap_asm_32::{drop_to_user, sched_switch, trap_entry, trap_return};
 
+/// # Safety
+/// `tf` must point to a valid, exclusively-owned trap frame pushed by `trap_entry` in trap.S.
 #[cfg(not(test))]
 #[unsafe(no_mangle)]
-pub extern "C" fn trap_handler(tf: *mut crate::arch::trap_frame::TrapFrame) {
+pub unsafe extern "C" fn trap_handler(tf: *mut crate::arch::trap_frame::TrapFrame) {
     let frame = unsafe { &mut *tf };
     unsafe {
         crate::srv::trap::handle(frame);

@@ -8,7 +8,7 @@ use super::{
     OHCI_HC_BULK_CURRENT_ED, OHCI_HC_BULK_HEAD_ED, OHCI_HC_COMMAND_STATUS, OHCI_HC_CONTROL,
     OHCI_HC_CONTROL_CURRENT_ED, OHCI_HC_CONTROL_HEAD_ED, OHCI_HC_FM_INTERVAL, OHCI_HC_HCCA,
     OHCI_HC_INTERRUPT_STATUS, OHCI_HC_LS_THRESHOLD, OHCI_HC_PERIODIC_START, OHCI_HC_RH_DESC_A,
-    OHCI_HC_RH_PORT_STATUS, OHCI_HC_RH_STATUS, RH_PS_CSC, RH_PS_PES, RH_PS_PPS, RH_PS_PRS,
+    OHCI_HC_RH_PORT_STATUS, OHCI_HC_RH_STATUS, RH_PS_CSC, RH_PS_PPS,
     RH_PS_PRSC, TD_CC_MASK, TD_CC_NOT_ACCESSED, TD_DI_NO_INTR, TD_DP_IN, TD_DP_OUT, TD_R_3,
     TD_T_DATA0, TD_TERMINATE, ohci_alloc_ed, ohci_alloc_td, ohci_ed_phys, ohci_ed_ptr, ohci_rd,
     ohci_td_phys, ohci_td_ptr, ohci_wr,
@@ -20,7 +20,7 @@ pub unsafe fn ohci_bulk_transfer(
     data_in: bool,
     max_pkt: u32,
     speed: u8,
-) -> KResult<u32> {
+) -> KResult<u32> { unsafe {
     let data_len = data.as_ref().map(|d| d.len() as u32).unwrap_or(0);
     if data_len == 0 {
         return Ok(0);
@@ -96,9 +96,9 @@ pub unsafe fn ohci_bulk_transfer(
         }
         timeout -= 1;
     }
-}
+}}
 
-pub unsafe fn init_ohci(base: usize) -> KResult<()> {
+pub unsafe fn init_ohci(base: usize) -> KResult<()> { unsafe {
     if !super::probe_ohci(base) {
         return Err(Errno::NoEnt);
     }
@@ -169,4 +169,4 @@ pub unsafe fn init_ohci(base: usize) -> KResult<()> {
 
     crate::drivers::usb::G_ACTIVE = crate::drivers::usb::ControllerType::Ohci;
     Ok(())
-}
+}}

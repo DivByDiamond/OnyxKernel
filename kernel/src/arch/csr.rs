@@ -6,53 +6,53 @@ use core::arch::asm;
 macro_rules! csr_read_u64 {
     ($name:ident, $csr:literal) => {
         #[inline]
-        pub unsafe fn $name() -> u64 {
+        pub unsafe fn $name() -> u64 { unsafe {
             #[cfg(all(not(test), target_pointer_width = "64"))]
             { let v: u64; asm!(concat!("csrr {0}, ", $csr), out(reg) v, options(nomem, nostack)); v }
             #[cfg(all(not(test), target_pointer_width = "32"))]
             { let v: u32; asm!(concat!("csrr {0}, ", $csr), out(reg) v, options(nomem, nostack)); v as u64 }
             #[cfg(test)]
             { 0 }
-        }
+        }}
     };
 }
 macro_rules! csr_write_u64 {
     ($name:ident, $csr:literal) => {
         #[inline]
-        pub unsafe fn $name(v: u64) {
+        pub unsafe fn $name(v: u64) { unsafe {
             #[cfg(all(not(test), target_pointer_width = "64"))]
             asm!(concat!("csrw ", $csr, ", {0}"), in(reg) v, options(nomem, nostack));
             #[cfg(all(not(test), target_pointer_width = "32"))]
             asm!(concat!("csrw ", $csr, ", {0}"), in(reg) (v as u32), options(nomem, nostack));
             #[cfg(test)]
             { let _ = v; }
-        }
+        }}
     };
 }
 macro_rules! csr_set_u64 {
     ($name:ident, $csr:literal) => {
         #[inline]
-        pub unsafe fn $name(m: u64) {
+        pub unsafe fn $name(m: u64) { unsafe {
             #[cfg(all(not(test), target_pointer_width = "64"))]
             asm!(concat!("csrs ", $csr, ", {0}"), in(reg) m, options(nomem, nostack));
             #[cfg(all(not(test), target_pointer_width = "32"))]
             asm!(concat!("csrs ", $csr, ", {0}"), in(reg) (m as u32), options(nomem, nostack));
             #[cfg(test)]
             { let _ = m; }
-        }
+        }}
     };
 }
 macro_rules! csr_clear_u64 {
     ($name:ident, $csr:literal) => {
         #[inline]
-        pub unsafe fn $name(m: u64) {
+        pub unsafe fn $name(m: u64) { unsafe {
             #[cfg(all(not(test), target_pointer_width = "64"))]
             asm!(concat!("csrc ", $csr, ", {0}"), in(reg) m, options(nomem, nostack));
             #[cfg(all(not(test), target_pointer_width = "32"))]
             asm!(concat!("csrc ", $csr, ", {0}"), in(reg) (m as u32), options(nomem, nostack));
             #[cfg(test)]
             { let _ = m; }
-        }
+        }}
     };
 }
 
@@ -74,12 +74,12 @@ csr_write_u64!(write_sscratch, "sscratch");
 csr_read_u64!(read_mhartid, "mhartid");
 
 #[inline]
-pub unsafe fn sfence_vma_all() {
+pub unsafe fn sfence_vma_all() { unsafe {
     #[cfg(not(test))]
     asm!("sfence.vma zero, zero", options(nostack));
-}
+}}
 #[inline]
-pub unsafe fn sfence_vma(va: u64, asid: u64) {
+pub unsafe fn sfence_vma(va: u64, asid: u64) { unsafe {
     #[cfg(all(not(test), target_pointer_width = "64"))]
     asm!("sfence.vma {0}, {1}", in(reg) va, in(reg) asid, options(nostack));
     #[cfg(all(not(test), target_pointer_width = "32"))]
@@ -88,14 +88,14 @@ pub unsafe fn sfence_vma(va: u64, asid: u64) {
     {
         let _ = (va, asid);
     }
-}
+}}
 #[inline]
-pub unsafe fn wfi() {
+pub unsafe fn wfi() { unsafe {
     #[cfg(not(test))]
     asm!("wfi", options(nostack));
     #[cfg(test)]
     core::hint::spin_loop();
-}
+}}
 
 csr_read_u64!(read_cycle, "cycle");
 csr_read_u64!(read_time, "time");

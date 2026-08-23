@@ -6,7 +6,7 @@ use core::alloc::{GlobalAlloc, Layout};
 struct KernelAlloc;
 
 unsafe impl GlobalAlloc for KernelAlloc {
-    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+    unsafe fn alloc(&self, layout: Layout) -> *mut u8 { unsafe {
         let size = layout.size();
         let align = layout.align();
         if align <= 16 {
@@ -27,16 +27,16 @@ unsafe impl GlobalAlloc for KernelAlloc {
                 Err(_) => core::ptr::null_mut(),
             }
         }
-    }
+    }}
 
-    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) { unsafe {
         if layout.align() <= 16 {
             heap::kfree(ptr);
         } else {
             let orig_ptr = ((ptr as usize) - core::mem::size_of::<usize>()) as *const usize;
             heap::kfree(orig_ptr.read() as *mut u8);
         }
-    }
+    }}
 }
 
 #[cfg(not(test))]

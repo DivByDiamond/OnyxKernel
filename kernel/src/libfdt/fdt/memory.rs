@@ -1,8 +1,8 @@
+use super::FdtMemory;
 use super::reader::{cstr_at, rd64, rd64_hi};
 use super::walk::walk;
-use super::FdtMemory;
 
-pub unsafe fn memory() -> Option<FdtMemory> {
+pub unsafe fn memory() -> Option<FdtMemory> { unsafe {
     let mut result: Option<FdtMemory> = None;
     walk(&mut |name, props: &[(u32, &[u8])]| {
         if name.starts_with("memory") {
@@ -22,4 +22,4 @@ pub unsafe fn memory() -> Option<FdtMemory> {
         base: 0x8000_0000,
         size: 0x1000_0000,
     }))
-}
+}}

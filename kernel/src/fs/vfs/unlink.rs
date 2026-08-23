@@ -2,7 +2,7 @@ use super::resolve_mount;
 use crate::fs::onyxfs;
 use onyx_core::errno::{Errno, KResult};
 
-pub unsafe fn unlink(path: &[u8]) -> KResult<()> {
+pub unsafe fn unlink(path: &[u8]) -> KResult<()> { unsafe {
     if path.is_empty() || path[0] != b'/' {
         return Err(Errno::Inval);
     }
@@ -12,4 +12,4 @@ pub unsafe fn unlink(path: &[u8]) -> KResult<()> {
         return Err(Errno::NoSys);
     }
     onyxfs::unlink(path)
-}
+}}

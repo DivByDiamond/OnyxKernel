@@ -19,7 +19,7 @@ pub(crate) static mut G_KERNEL_FDS: [VfsFd; VFS_MAX_FDS] = [VfsFd {
 
 pub unsafe fn init() {}
 
-pub(crate) unsafe fn alloc_fd(perms: u32) -> KResult<usize> {
+pub(crate) unsafe fn alloc_fd(perms: u32) -> KResult<usize> { unsafe {
     if is_kernel_boot() {
         let p = &raw mut G_KERNEL_FDS;
         for i in 0..VFS_MAX_FDS {
@@ -58,9 +58,9 @@ pub(crate) unsafe fn alloc_fd(perms: u32) -> KResult<usize> {
     }
     // Bug (fs MINOR #3): same as above — EMFILE, not ENOMEM.
     Err(Errno::BadFd)
-}
+}}
 
-pub(crate) unsafe fn fd_check(token: super::vnode::FdToken) -> KResult<usize> {
+pub(crate) unsafe fn fd_check(token: super::vnode::FdToken) -> KResult<usize> { unsafe {
     let idx = fd_token_idx(token);
     if idx >= VFS_MAX_FDS {
         return Err(Errno::BadFd);
@@ -70,9 +70,9 @@ pub(crate) unsafe fn fd_check(token: super::vnode::FdToken) -> KResult<usize> {
         return Err(Errno::BadFd);
     }
     Ok(idx)
-}
+}}
 
-pub(crate) unsafe fn fd_set_cloexec(idx: usize, cloexec: bool) {
+pub(crate) unsafe fn fd_set_cloexec(idx: usize, cloexec: bool) { unsafe {
     if is_kernel_boot() {
         let p = &raw mut G_KERNEL_FDS;
         (*p)[idx].cloexec = cloexec;
@@ -80,18 +80,18 @@ pub(crate) unsafe fn fd_set_cloexec(idx: usize, cloexec: bool) {
         let p = crate::proc::current();
         p.fds[idx].cloexec = cloexec;
     }
-}
+}}
 
-pub(crate) unsafe fn fd_check_perm(token: super::vnode::FdToken, perm: u32) -> KResult<usize> {
+pub(crate) unsafe fn fd_check_perm(token: super::vnode::FdToken, perm: u32) -> KResult<usize> { unsafe {
     let idx = fd_check(token)?;
     let fd = fd_get(idx);
     if fd.perms & perm == 0 {
         return Err(Errno::Perm);
     }
     Ok(idx)
-}
+}}
 
-pub(crate) unsafe fn fd_get(idx: usize) -> VfsFd {
+pub(crate) unsafe fn fd_get(idx: usize) -> VfsFd { unsafe {
     if is_kernel_boot() {
         let p = &raw const G_KERNEL_FDS;
         (*p)[idx]
@@ -99,9 +99,9 @@ pub(crate) unsafe fn fd_get(idx: usize) -> VfsFd {
         let p = crate::proc::current();
         p.fds[idx]
     }
-}
+}}
 
-pub(crate) unsafe fn fd_set(idx: usize, ino: u32, size: u32, fs: Fs, pos: u32) {
+pub(crate) unsafe fn fd_set(idx: usize, ino: u32, size: u32, fs: Fs, pos: u32) { unsafe {
     if is_kernel_boot() {
         let p = &raw mut G_KERNEL_FDS;
         (*p)[idx].ino = ino;
@@ -115,9 +115,9 @@ pub(crate) unsafe fn fd_set(idx: usize, ino: u32, size: u32, fs: Fs, pos: u32) {
         p.fds[idx].fs = fs;
         p.fds[idx].pos = pos;
     }
-}
+}}
 
-pub(crate) unsafe fn fd_update_pos(idx: usize, pos: u32) {
+pub(crate) unsafe fn fd_update_pos(idx: usize, pos: u32) { unsafe {
     if is_kernel_boot() {
         let p = &raw mut G_KERNEL_FDS;
         (*p)[idx].pos = pos;
@@ -125,9 +125,9 @@ pub(crate) unsafe fn fd_update_pos(idx: usize, pos: u32) {
         let p = crate::proc::current();
         p.fds[idx].pos = pos;
     }
-}
+}}
 
-pub(crate) unsafe fn fd_clear(idx: usize) {
+pub(crate) unsafe fn fd_clear(idx: usize) { unsafe {
     if is_kernel_boot() {
         let p = &raw mut G_KERNEL_FDS;
         (*p)[idx].used = false;
@@ -135,8 +135,8 @@ pub(crate) unsafe fn fd_clear(idx: usize) {
         let p = crate::proc::current();
         p.fds[idx].used = false;
     }
-}
+}}
 
-pub unsafe fn rename(old_path: &[u8], new_path: &[u8]) -> KResult<()> {
+pub unsafe fn rename(old_path: &[u8], new_path: &[u8]) -> KResult<()> { unsafe {
     crate::fs::onyxfs::rename(old_path, new_path)
-}
+}}

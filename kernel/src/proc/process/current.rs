@@ -1,7 +1,7 @@
-use super::globals::hart_id;
 use super::globals::G_ALL_PROCS;
 use super::globals::G_HART_CURRENT;
-use super::types::{Proc, ProcState, PROC_RING_KERNEL};
+use super::globals::hart_id;
+use super::types::{PROC_RING_KERNEL, Proc, ProcState};
 
 pub fn current_pid() -> u32 {
     unsafe {
@@ -26,26 +26,22 @@ pub fn current_ring() -> u8 {
 pub fn current_opt() -> Option<&'static mut Proc> {
     unsafe {
         let p = G_HART_CURRENT[hart_id()];
-        if p.is_null() {
-            None
-        } else {
-            Some(&mut *p)
-        }
+        if p.is_null() { None } else { Some(&mut *p) }
     }
 }
 
-pub unsafe fn current() -> &'static mut Proc {
+pub unsafe fn current() -> &'static mut Proc { unsafe {
     let p = G_HART_CURRENT[hart_id()];
     &mut *p
-}
+}}
 
-pub unsafe fn set_cwd(path: &[u8]) {
+pub unsafe fn set_cwd(path: &[u8]) { unsafe {
     let p = current();
     let n = path.len().min(255);
     p.cwd[..n].copy_from_slice(&path[..n]);
     p.cwd[n] = 0;
     p.cwd_len = n as u16;
-}
+}}
 
 pub fn cwd() -> &'static [u8] {
     unsafe {
@@ -54,7 +50,7 @@ pub fn cwd() -> &'static [u8] {
     }
 }
 
-pub unsafe fn by_pid(pid: u32) -> Option<&'static mut Proc> {
+pub unsafe fn by_pid(pid: u32) -> Option<&'static mut Proc> { unsafe {
     let mut cur = G_ALL_PROCS;
     while !cur.is_null() {
         if (*cur).pid == pid && !matches!((*cur).state, ProcState::Free) {
@@ -63,7 +59,7 @@ pub unsafe fn by_pid(pid: u32) -> Option<&'static mut Proc> {
         cur = (*cur).all_next;
     }
     None
-}
+}}
 
 pub fn dump_all<W: onyx_core::fmt::Write>(w: &mut W) {
     unsafe {

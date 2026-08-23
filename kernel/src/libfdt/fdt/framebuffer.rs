@@ -16,7 +16,7 @@ pub struct SimpleFramebuffer {
     pub stride: u32,
 }
 
-pub unsafe fn find_simple_framebuffer() -> Option<SimpleFramebuffer> {
+pub unsafe fn find_simple_framebuffer() -> Option<SimpleFramebuffer> { unsafe {
     let mut result: Option<SimpleFramebuffer> = None;
     walk(&mut |_name, props: &[(u32, &[u8])]| {
         let mut compatible = false;
@@ -60,4 +60,4 @@ pub unsafe fn find_simple_framebuffer() -> Option<SimpleFramebuffer> {
         false
     });
     result
-}
+}}
