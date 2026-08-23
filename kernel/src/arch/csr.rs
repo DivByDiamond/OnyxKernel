@@ -71,31 +71,38 @@ csr_read_u64!(read_sie, "sie");
 csr_set_u64!(set_sie, "sie");
 csr_clear_u64!(clear_sie, "sie");
 csr_write_u64!(write_sscratch, "sscratch");
+csr_write_u64!(write_scounteren, "scounteren");
 csr_read_u64!(read_mhartid, "mhartid");
 
 #[inline]
-pub unsafe fn sfence_vma_all() { unsafe {
-    #[cfg(not(test))]
-    asm!("sfence.vma zero, zero", options(nostack));
-}}
-#[inline]
-pub unsafe fn sfence_vma(va: u64, asid: u64) { unsafe {
-    #[cfg(all(not(test), target_pointer_width = "64"))]
-    asm!("sfence.vma {0}, {1}", in(reg) va, in(reg) asid, options(nostack));
-    #[cfg(all(not(test), target_pointer_width = "32"))]
-    asm!("sfence.vma {0}, {1}", in(reg) (va as u32), in(reg) (asid as u32), options(nostack));
-    #[cfg(test)]
-    {
-        let _ = (va, asid);
+pub unsafe fn sfence_vma_all() {
+    unsafe {
+        #[cfg(not(test))]
+        asm!("sfence.vma zero, zero", options(nostack));
     }
-}}
+}
 #[inline]
-pub unsafe fn wfi() { unsafe {
-    #[cfg(not(test))]
-    asm!("wfi", options(nostack));
-    #[cfg(test)]
-    core::hint::spin_loop();
-}}
+pub unsafe fn sfence_vma(va: u64, asid: u64) {
+    unsafe {
+        #[cfg(all(not(test), target_pointer_width = "64"))]
+        asm!("sfence.vma {0}, {1}", in(reg) va, in(reg) asid, options(nostack));
+        #[cfg(all(not(test), target_pointer_width = "32"))]
+        asm!("sfence.vma {0}, {1}", in(reg) (va as u32), in(reg) (asid as u32), options(nostack));
+        #[cfg(test)]
+        {
+            let _ = (va, asid);
+        }
+    }
+}
+#[inline]
+pub unsafe fn wfi() {
+    unsafe {
+        #[cfg(not(test))]
+        asm!("wfi", options(nostack));
+        #[cfg(test)]
+        core::hint::spin_loop();
+    }
+}
 
 csr_read_u64!(read_cycle, "cycle");
 csr_read_u64!(read_time, "time");

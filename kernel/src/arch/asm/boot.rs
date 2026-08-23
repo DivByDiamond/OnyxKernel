@@ -56,6 +56,11 @@ _start:
     csrw medeleg, t0
     li t0, (1<<1)|(1<<5)|(1<<9)
     csrw mideleg, t0
+    // Allow S-mode (and via scounteren later U-mode) to read cycle/time/
+    // instret. Without this every `csrr cycle` from S-mode raises an
+    // illegal-instruction trap (mcounteren defaults to 0).
+    li t0, (1<<0)|(1<<1)|(1<<2)
+    csrw mcounteren, t0
     csrw mie, zero
     li t0, (1<<11)
     csrs mstatus, t0
