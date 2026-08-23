@@ -6,13 +6,25 @@ pub const PROC_RING_ROOT: u8 = 1;
 pub const PROC_RING_USER: u8 = 2;
 
 pub const PROC_PID_INIT: u32 = 1;
-// KSTACK_SIZE must comfortably exceed the largest kernel stack frame
-// (the syscall dispatcher inlines ~100 match arms; release builds peaked
-// at ~21 KB). 16 KB was too small — a deep onyfs call chain (unlink →
-// journal/free_inode with 4 KB buffers) overflowed the process kernel
-// stack and silently zeroed the *front* of the Proc struct (pid/ring/
-// root_pa), which is what turned login into "ring=KERNEL pid=0 root_pa=0".
-pub const KSTACK_SIZE: usize = 32 * 1024;
+// KSTACK_SIZE must comfortably exceed the deepest kernel syscall path.
+// The kstack lives INSIDE the Proc struct, so an overflow grows sp past the
+// start of the Proc and silently zeroes its front fields (pid/ring/state/
+// root_pa) — current_pid() then returns 0 and SYS_exit becomes a silent
+// no-op. That is exactly what a 16 KB size once produced (a deep onyfs
+// call chain turned login into "ring=KERNEL pid=0 root_pa=0"), and 32 KB
+// was still not enough. Measured high-water marks (release, riscv64):
+// ~22 KB for a deep vfs read chain, ~39.5 KB for execve (the syscall
+// dispatcher inlines ~100 match arms, and the exec path adds onx::load
+// plus onyxfs lookup_follow with its 4 KB/8 KB path buffers). 64 KB gives
+// ~24 KB of headroom over the measured worst case; worst-case memory cost
+// is 128 procs × 32 KB extra = 4 MB of heap.
+pub const KSTACK_SIZE: usize = 64 * 1024;
+/// Canary planted at the bottom (lowest address) of every process kernel
+/// stack by `alloc_proc`. Nothing legitimately writes there — stack usage
+/// grows down from the top of the kstack array and stops at the trap frame
+/// reserved above it — so a clobbered canary means some syscall path
+/// overflowed KSTACK_SIZE. Checked after every trap; see srv::trap::handle.
+pub const KSTACK_CANARY: u64 = 0x1F2E_3D4C_5B6A_7988;
 pub const PROC_MAX_FDS: usize = 16;
 
 #[derive(Clone, Copy, PartialEq, Eq)]

@@ -33,6 +33,29 @@ pub(crate) static mut SERVICES: [ServiceEntry; MAX_SERVICES] = [ServiceEntry {
 
 pub(crate) static mut NUM_SERVICES: usize = 0;
 
+/// PID of the current login session process (0 = none running). When the
+/// reaper observes this pid exiting, it is respawned so a dead shell never
+/// leaves the console without a login prompt.
+static LOGIN_PID: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
+
+/// Respawn /bin/login if no session process is running. Called from the
+/// init loops so that after `exit` (or a login/shell crash) users get a
+/// fresh "OnyxOS Login" banner instead of an orphaned console.
+unsafe fn ensure_login() {
+    unsafe {
+        use core::sync::atomic::Ordering;
+        if LOGIN_PID.load(Ordering::Acquire) != 0 {
+            return;
+        }
+        let m = b"[init] respawning /bin/login\n";
+        syscalls::write(1, m.as_ptr(), m.len());
+        let pid = syscalls::spawn(LOGIN_PATH.as_ptr(), core::ptr::null(), 1);
+        if pid > 0 {
+            LOGIN_PID.store(pid as u32, Ordering::Release);
+        }
+    }
+}
+
 pub(crate) unsafe fn pid1_main() -> ! {
     let etc_init = b"/etc/init\0";
     let _ = syscalls::mkdir(etc_init.as_ptr());
@@ -52,7 +75,7 @@ pub(crate) unsafe fn pid1_main() -> ! {
 
     let m = b"[init] launching /bin/login\n";
     syscalls::write(1, m.as_ptr(), m.len());
-    let _login_pid = syscalls::spawn(LOGIN_PATH.as_ptr(), core::ptr::null(), 1);
+    ensure_login();
 
     if req_chan >= 0 && resp_chan >= 0 {
         service_loop(req_chan as u32, resp_chan as u32);
@@ -67,6 +90,7 @@ unsafe fn service_loop(req_chan: u32, resp_chan: u32) -> ! {
 
     loop {
         reap_children();
+        ensure_login();
         let n = syscalls::chan_recv(req_chan, req_buf.as_mut_ptr(), req_buf.len() as u32);
         if n <= 0 {
             syscalls::yield_cpu();
@@ -81,6 +105,7 @@ unsafe fn service_loop(req_chan: u32, resp_chan: u32) -> ! {
 unsafe fn reaper_only_loop() -> ! {
     loop {
         reap_children();
+        ensure_login();
         syscalls::yield_cpu();
     }
 }
@@ -91,6 +116,12 @@ unsafe fn reap_children() {
         let pid = syscalls::waitpid(u32::MAX as u64, &mut status, WNOHANG);
         if pid <= 0 {
             break;
+        }
+        use core::sync::atomic::Ordering;
+        if pid as u32 == LOGIN_PID.load(Ordering::Acquire) {
+            LOGIN_PID.store(0, Ordering::Release);
+            let m = b"[init] login session ended\n";
+            syscalls::write(1, m.as_ptr(), m.len());
         }
         if let Some(idx) = exec::find_service_by_pid(pid as u32) {
             SERVICES[idx].running = false;
