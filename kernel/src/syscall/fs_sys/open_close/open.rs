@@ -8,15 +8,7 @@ use onyx_core::errno::Errno;
 use onyx_core::fmt::Arg;
 
 #[inline(never)]
-pub unsafe fn sys_open(path: u64, flags: u64, mode: u64) -> i64 {
-    crate::kinf!(
-        "sys_open",
-        "called path=%x flags=%x mode=%x",
-        Arg::from(path),
-        Arg::from(flags as u32),
-        Arg::from(mode as u32)
-    );
-
+pub unsafe fn sys_open(path: u64, flags: u64, mode: u64) -> i64 { unsafe {
     let mut path_buf = [0u8; 256];
     let path_len = match parse_user_path(path, &mut path_buf) {
         Some(l) => l,
@@ -46,6 +38,17 @@ pub unsafe fn sys_open(path: u64, flags: u64, mode: u64) -> i64 {
     let cur = proc::current();
     let is_root = cur.uid == 0 || ring <= proc::PROC_RING_ROOT;
     if !is_root {
+        let shadow_exact = path_bytes == b"/etc/shadow";
+        let shadow_nul = path_bytes.starts_with(b"/etc/shadow")
+            && path_bytes.get(b"/etc/shadow".len()) == Some(&0);
+        if shadow_exact || shadow_nul {
+            crate::kerr!(
+                "sys_open",
+                "EPERM: uid=%d denied access to /etc/shadow",
+                Arg::from(cur.uid)
+            );
+            return Errno::Perm.as_i64();
+        }
         let mut st = crate::fs::onyxfs::OnyfsStat::default();
         if crate::fs::onyxfs::lookup(path_bytes, &mut st).is_ok() {
             let flags32 = flags as u32;
@@ -90,16 +93,9 @@ pub unsafe fn sys_open(path: u64, flags: u64, mode: u64) -> i64 {
 
     let flags32 = flags as u32;
     let acc_mode = flags32 & O_ACCMODE;
-    let mut perms = vfs::PERM_SEEK;
+    let mut perms = vfs::PERM_SEEK | vfs::PERM_READ;
     if acc_mode != O_RDONLY {
         perms |= vfs::PERM_WRITE;
-    }
-    if acc_mode == O_RDWR {
-        perms |= vfs::PERM_READ;
-    } else if acc_mode == O_WRONLY {
-        perms |= vfs::PERM_READ;
-    } else {
-        perms |= vfs::PERM_READ;
     }
 
     let token = match vfs::open(path_bytes, perms) {
@@ -148,4 +144,4 @@ pub unsafe fn sys_open(path: u64, flags: u64, mode: u64) -> i64 {
     }
 
     token as i64
-}
+}}

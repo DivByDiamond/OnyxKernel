@@ -1,11 +1,17 @@
 use crate::drivers::fb;
-use crate::drivers::virtio_req;
 use core::ptr;
 use onyx_core::errno::{Errno, KResult};
 
+mod blk;
+
+pub use blk::{blk_ino, is_blk_ino};
+
 pub const DEVFS_ROOT_INO: u32 = 1;
 pub const DEVFS_FB0_INO: u32 = 2;
-pub const DEVFS_BLK0_INO: u32 = 3;
+
+/// Base inode for block devices: /dev/blk<N> has inode DEVFS_BLK_BASE_INO + N.
+/// Chosen to avoid collision with root (1), fb0 (2) and legacy blk0 (3).
+pub const DEVFS_BLK_BASE_INO: u32 = 16;
 
 pub struct DevfsStat {
     pub ino: u32,
@@ -20,13 +26,26 @@ pub fn lookup(name: &[u8]) -> KResult<u32> {
     if name == b"fb0" {
         return Ok(DEVFS_FB0_INO);
     }
-    if name == b"blk0" {
-        return Ok(DEVFS_BLK0_INO);
+    if let Some(idx) = blk::parse_name(name) {
+        if idx < crate::drivers::virtio::count() {
+            return Ok(blk_ino(idx));
+        }
+        return Err(Errno::NoEnt);
     }
     Err(Errno::NoEnt)
 }
 
 pub fn stat(ino: u32) -> KResult<DevfsStat> {
+    if let Some(idx) = is_blk_ino(ino) {
+        if idx >= crate::drivers::virtio::count() {
+            return Err(Errno::NoEnt);
+        }
+        return Ok(DevfsStat {
+            ino,
+            size: u32::MAX,
+            mode: 0o100666,
+        });
+    }
     match ino {
         DEVFS_ROOT_INO => Ok(DevfsStat {
             ino,
@@ -38,16 +57,16 @@ pub fn stat(ino: u32) -> KResult<DevfsStat> {
             size: fb::size_bytes() as u32,
             mode: 0o100666,
         }),
-        DEVFS_BLK0_INO => Ok(DevfsStat {
-            ino,
-            size: u32::MAX,
-            mode: 0o100666,
-        }),
         _ => Err(Errno::NoEnt),
     }
 }
 
-pub unsafe fn read(ino: u32, buf: *mut u8, offset: u32, len: u32) -> KResult<u32> {
+pub unsafe fn read(ino: u32, buf: *mut u8, offset: u32, len: u32) -> KResult<u32> { unsafe {
+    if let Some(idx) = is_blk_ino(ino) {
+        // SAFETY: caller guarantees buf points to a writable region of at
+        // least `len` bytes; blk::read validates the device index.
+        return blk::read(idx, buf, offset, len);
+    }
     match ino {
         DEVFS_FB0_INO => {
             let size = fb::size_bytes() as u32;
@@ -59,23 +78,16 @@ pub unsafe fn read(ino: u32, buf: *mut u8, offset: u32, len: u32) -> KResult<u32
             ptr::copy_nonoverlapping(fb_base.add(offset as usize), buf, to_read as usize);
             Ok(to_read)
         }
-        DEVFS_BLK0_INO => {
-            if offset % 512 != 0 {
-                return Err(Errno::Inval);
-            }
-            let lba = offset / 512;
-            let n_sectors = len / 512;
-            if n_sectors == 0 {
-                return Ok(0);
-            }
-            virtio_req::read_multi(0, lba as u64, n_sectors, buf)?;
-            Ok(n_sectors * 512)
-        }
         _ => Err(Errno::NoSys),
     }
-}
+}}
 
-pub unsafe fn write(ino: u32, buf: *const u8, offset: u32, len: u32) -> KResult<u32> {
+pub unsafe fn write(ino: u32, buf: *const u8, offset: u32, len: u32) -> KResult<u32> { unsafe {
+    if let Some(idx) = is_blk_ino(ino) {
+        // SAFETY: caller guarantees buf points to a readable region of at
+        // least `len` bytes; blk::write validates the device index.
+        return blk::write(idx, buf, offset, len);
+    }
     match ino {
         DEVFS_FB0_INO => {
             let size = fb::size_bytes() as u32;
@@ -87,21 +99,9 @@ pub unsafe fn write(ino: u32, buf: *const u8, offset: u32, len: u32) -> KResult<
             ptr::copy_nonoverlapping(buf, fb_base.add(offset as usize), to_write as usize);
             Ok(to_write)
         }
-        DEVFS_BLK0_INO => {
-            if offset % 512 != 0 {
-                return Err(Errno::Inval);
-            }
-            let lba = offset / 512;
-            let n_sectors = len / 512;
-            if n_sectors == 0 {
-                return Ok(0);
-            }
-            virtio_req::write_multi(0, lba as u64, n_sectors, buf)?;
-            Ok(n_sectors * 512)
-        }
         _ => Err(Errno::NoSys),
     }
-}
+}}
 
 pub fn readdir_entry(idx: u32, name_out: *mut u8, name_len: usize) -> Option<u32> {
     match idx {
@@ -117,15 +117,18 @@ pub fn readdir_entry(idx: u32, name_out: *mut u8, name_len: usize) -> Option<u32
             copy_name(b"fb0", name_out, name_len);
             Some(DEVFS_FB0_INO)
         }
-        3 => {
-            copy_name(b"blk0", name_out, name_len);
-            Some(DEVFS_BLK0_INO)
+        i => {
+            let dev_idx = (i - 3) as usize;
+            if dev_idx >= crate::drivers::virtio::count() {
+                return None;
+            }
+            copy_name(blk::name(dev_idx), name_out, name_len);
+            Some(blk_ino(dev_idx))
         }
-        _ => None,
     }
 }
 
-pub unsafe fn mmap(ino: u32, vaddr: u64, length: u64, pte_flags: u64) -> KResult<u64> {
+pub unsafe fn mmap(ino: u32, vaddr: u64, length: u64, pte_flags: u64) -> KResult<u64> { unsafe {
     match ino {
         DEVFS_FB0_INO => {
             let fb_pa = fb::fb_base_pa();
@@ -138,11 +141,11 @@ pub unsafe fn mmap(ino: u32, vaddr: u64, length: u64, pte_flags: u64) -> KResult
         }
         _ => Err(Errno::NoSys),
     }
-}
+}}
 
 pub const FB_IOCTL_GET_INFO: u64 = 0x4600;
 
-pub unsafe fn ioctl(ino: u32, request: u64, arg: u64) -> KResult<i64> {
+pub unsafe fn ioctl(ino: u32, request: u64, arg: u64) -> KResult<i64> { unsafe {
     match ino {
         DEVFS_FB0_INO => match request {
             FB_IOCTL_GET_INFO => {
@@ -161,10 +164,9 @@ pub unsafe fn ioctl(ino: u32, request: u64, arg: u64) -> KResult<i64> {
             }
             _ => Err(Errno::NoSys),
         },
-        DEVFS_BLK0_INO => Err(Errno::NoSys),
         _ => Err(Errno::NoSys),
     }
-}
+}}
 
 fn copy_name(name: &[u8], out: *mut u8, max_len: usize) {
     let n = name.len().min(max_len);
