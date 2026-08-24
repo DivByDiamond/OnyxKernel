@@ -69,7 +69,7 @@ pub unsafe fn create_user(
     (*p).tf.sp = if argc > 0 { argv_sp } else { ustack };
     (*p).tf.a0 = argc as u64;
     (*p).tf.a1 = if argc > 0 { argv_sp + 8 } else { 0 };
-    (*p).tf.sstatus = SSTATUS_SPIE;
+    (*p).tf.sstatus = SSTATUS_SPIE | crate::arch::regs::SSTATUS_FS_INITIAL;
     if cfg!(target_pointer_width = "64") {
         (*p).tf.satp = SATP_MODE_SV39 | (root_pa >> 12);
     } else {
