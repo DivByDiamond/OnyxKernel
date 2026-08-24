@@ -8,14 +8,16 @@ pub(super) unsafe fn sys_getring() -> i64 {
 }
 
 /// SYS_dropping: drop to less privileged ring (one-way, never raises).
-pub(super) unsafe fn sys_dropring(target: u8) -> i64 { unsafe {
-    let p = proc::current();
-    if target < p.ring {
-        return Errno::Perm.as_i64();
-    } // cannot raise
-    if target == p.ring {
-        return 0;
+pub(super) unsafe fn sys_dropring(target: u8) -> i64 {
+    unsafe {
+        let p = proc::current();
+        if target < p.ring {
+            return Errno::Perm.as_i64();
+        } // cannot raise
+        if target == p.ring {
+            return 0;
+        }
+        p.ring = target;
+        0
     }
-    p.ring = target;
-    0
-}}
+}

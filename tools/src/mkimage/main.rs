@@ -8,7 +8,9 @@ use std::fs::File;
 use std::io::Write;
 use std::process;
 
-use onyx_core::formats::{ONYFS_BLOCK_SIZE, ONYFS_SNAPSHOT_BLOCKS_EACH, OnyfsInode, ONYFS_DIRECT_BLKS};
+use onyx_core::formats::{
+    ONYFS_BLOCK_SIZE, ONYFS_DIRECT_BLKS, ONYFS_SNAPSHOT_BLOCKS_EACH, OnyfsInode,
+};
 
 // Image-layout policy (mkimage-only, not part of the on-disk format):
 const MAX_SNAPSHOTS: u32 = 4;

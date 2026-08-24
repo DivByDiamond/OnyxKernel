@@ -2,47 +2,49 @@ use super::FdtMmio;
 use super::reader::{cstr_at, rd32, reg_base};
 use super::walk::walk;
 
-pub unsafe fn find_sdhci() -> Option<FdtMmio> { unsafe {
-    let mut result: Option<FdtMmio> = None;
-    walk(&mut |_name, props: &[(u32, &[u8])]| {
-        let mut base = 0u64;
-        let mut irq = 0u32;
-        let mut is_sdhci = false;
-        for (name_off, data) in props {
-            match cstr_at(*name_off) {
-                "compatible" => {
-                    let mut start = 0;
-                    while start < data.len() {
-                        let end = data[start..]
-                            .iter()
-                            .position(|&b| b == 0)
-                            .unwrap_or(data.len() - start);
-                        let s = &data[start..start + end];
-                        if s == b"qemu,sdhci"
-                            || s == b"generic-sdhci"
-                            || s == b"arasan,sdhci"
-                            || s == b"snps,dw-sdhci"
-                            || s == b"sifive,sdio"
-                        {
-                            is_sdhci = true;
+pub unsafe fn find_sdhci() -> Option<FdtMmio> {
+    unsafe {
+        let mut result: Option<FdtMmio> = None;
+        walk(&mut |_name, props: &[(u32, &[u8])]| {
+            let mut base = 0u64;
+            let mut irq = 0u32;
+            let mut is_sdhci = false;
+            for (name_off, data) in props {
+                match cstr_at(*name_off) {
+                    "compatible" => {
+                        let mut start = 0;
+                        while start < data.len() {
+                            let end = data[start..]
+                                .iter()
+                                .position(|&b| b == 0)
+                                .unwrap_or(data.len() - start);
+                            let s = &data[start..start + end];
+                            if s == b"qemu,sdhci"
+                                || s == b"generic-sdhci"
+                                || s == b"arasan,sdhci"
+                                || s == b"snps,dw-sdhci"
+                                || s == b"sifive,sdio"
+                            {
+                                is_sdhci = true;
+                            }
+                            start += end + 1;
                         }
-                        start += end + 1;
                     }
+                    "reg" => base = reg_base(data),
+                    "interrupts" if data.len() >= 4 => irq = rd32(data.as_ptr()),
+                    _ => {}
                 }
-                "reg" => base = reg_base(data),
-                "interrupts" if data.len() >= 4 => irq = rd32(data.as_ptr()),
-                _ => {}
             }
-        }
-        if is_sdhci && base != 0 {
-            result = Some(FdtMmio {
-                base,
-                irq,
-                reg_shift: 0,
-            });
-            return true;
-        }
-        false
-    });
-    result
-}}
+            if is_sdhci && base != 0 {
+                result = Some(FdtMmio {
+                    base,
+                    irq,
+                    reg_shift: 0,
+                });
+                return true;
+            }
+            false
+        });
+        result
+    }
+}

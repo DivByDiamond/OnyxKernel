@@ -4,100 +4,104 @@ use super::super::{
 use onyx_core::errno::{Errno, KResult};
 use onyx_core::formats::{ONYFS_BLOCK_SIZE, ONYFS_DIRECT_BLKS, OnyfsInode};
 
-pub unsafe fn read_inode(ino: u32, out: &mut OnyfsInode) -> KResult<()> { unsafe {
-    // Bug (fs SERIOUS #10): bounds-check the inode number. A bogus ino
-    // (e.g. 0, or > max inodes) would compute a blk/slot that reads
-    // past the inode table into data blocks — silently returning
-    // garbage as an inode. We refuse ino == 0 (no inode 0 in OnyxFS)
-    // and rely on the page-aligned read_block to not OOB, but still
-    // sanity-check the resulting block number against the superblock.
-    if ino == 0 {
-        return Err(Errno::Inval);
-    }
-    let ipb = inodes_per_block();
-    let idx = (ino as usize).saturating_sub(1);
-    let blk = (G_SB).inode_table_start as usize + idx / ipb;
-    // Sanity: the inode table starts at inode_table_start and spans
-    // inode_count inodes. If blk is past the end of the table, reject.
-    let inode_table_blocks = ((G_SB).inode_count as usize).div_ceil(ipb);
-    let inode_table_end = (G_SB).inode_table_start as usize + inode_table_blocks;
-    if blk >= inode_table_end {
-        return Err(Errno::Inval);
-    }
-    let slot = idx % ipb;
-    {
-        let pb = &raw mut G_BUF;
-        read_block(blk as u32, &mut *pb)
-    }?;
-    let buf_view: &[u8] = &(G_BUF);
-    *out = match G_VERSION {
-        ONYFS_V1 => {
-            let off = slot * ONYFS_V1_INODE_SIZE;
-            if off + ONYFS_V1_INODE_SIZE > ONYFS_BLOCK_SIZE {
-                return Err(Errno::Inval);
-            }
-            let s = &buf_view[off..off + ONYFS_V1_INODE_SIZE];
-            let mut blocks = [0u32; ONYFS_DIRECT_BLKS];
-            for (i, b) in blocks.iter_mut().enumerate() {
-                let o = 8 + i * 4;
-                *b = u32::from_le_bytes([s[o], s[o + 1], s[o + 2], s[o + 3]]);
-            }
-            let mode = u32::from_le_bytes([s[0], s[1], s[2], s[3]]);
-            let size_u32 = u32::from_le_bytes([s[4], s[5], s[6], s[7]]);
-            let indirect = u32::from_le_bytes([s[48], s[49], s[50], s[51]]);
-            OnyfsInode {
-                mode,
-                size: size_u32 as u64,
-                uid: 0,
-                gid: 0,
-                nlink: 0,
-                blocks,
-                indirect,
-                double_indirect: 0,
-                crtime: 0,
-                mtime: 0,
-                atime: 0,
-                ctime: 0,
-                flags: 0,
-                reserved: 0,
-            }
+pub unsafe fn read_inode(ino: u32, out: &mut OnyfsInode) -> KResult<()> {
+    unsafe {
+        // Bug (fs SERIOUS #10): bounds-check the inode number. A bogus ino
+        // (e.g. 0, or > max inodes) would compute a blk/slot that reads
+        // past the inode table into data blocks — silently returning
+        // garbage as an inode. We refuse ino == 0 (no inode 0 in OnyxFS)
+        // and rely on the page-aligned read_block to not OOB, but still
+        // sanity-check the resulting block number against the superblock.
+        if ino == 0 {
+            return Err(Errno::Inval);
         }
-        _ => {
-            let off = slot * OnyfsInode::SIZE;
-            if off + OnyfsInode::SIZE > ONYFS_BLOCK_SIZE {
-                return Err(Errno::Inval);
-            }
-            OnyfsInode::from_bytes(&buf_view[off..off + OnyfsInode::SIZE]).ok_or(Errno::Io)?
+        let ipb = inodes_per_block();
+        let idx = (ino as usize).saturating_sub(1);
+        let blk = (G_SB).inode_table_start as usize + idx / ipb;
+        // Sanity: the inode table starts at inode_table_start and spans
+        // inode_count inodes. If blk is past the end of the table, reject.
+        let inode_table_blocks = ((G_SB).inode_count as usize).div_ceil(ipb);
+        let inode_table_end = (G_SB).inode_table_start as usize + inode_table_blocks;
+        if blk >= inode_table_end {
+            return Err(Errno::Inval);
         }
-    };
-    Ok(())
-}}
+        let slot = idx % ipb;
+        {
+            let pb = &raw mut G_BUF;
+            read_block(blk as u32, &mut *pb)
+        }?;
+        let buf_view: &[u8] = &(G_BUF);
+        *out = match G_VERSION {
+            ONYFS_V1 => {
+                let off = slot * ONYFS_V1_INODE_SIZE;
+                if off + ONYFS_V1_INODE_SIZE > ONYFS_BLOCK_SIZE {
+                    return Err(Errno::Inval);
+                }
+                let s = &buf_view[off..off + ONYFS_V1_INODE_SIZE];
+                let mut blocks = [0u32; ONYFS_DIRECT_BLKS];
+                for (i, b) in blocks.iter_mut().enumerate() {
+                    let o = 8 + i * 4;
+                    *b = u32::from_le_bytes([s[o], s[o + 1], s[o + 2], s[o + 3]]);
+                }
+                let mode = u32::from_le_bytes([s[0], s[1], s[2], s[3]]);
+                let size_u32 = u32::from_le_bytes([s[4], s[5], s[6], s[7]]);
+                let indirect = u32::from_le_bytes([s[48], s[49], s[50], s[51]]);
+                OnyfsInode {
+                    mode,
+                    size: size_u32 as u64,
+                    uid: 0,
+                    gid: 0,
+                    nlink: 0,
+                    blocks,
+                    indirect,
+                    double_indirect: 0,
+                    crtime: 0,
+                    mtime: 0,
+                    atime: 0,
+                    ctime: 0,
+                    flags: 0,
+                    reserved: 0,
+                }
+            }
+            _ => {
+                let off = slot * OnyfsInode::SIZE;
+                if off + OnyfsInode::SIZE > ONYFS_BLOCK_SIZE {
+                    return Err(Errno::Inval);
+                }
+                OnyfsInode::from_bytes(&buf_view[off..off + OnyfsInode::SIZE]).ok_or(Errno::Io)?
+            }
+        };
+        Ok(())
+    }
+}
 
-pub unsafe fn stat(ino: u32, out: &mut OnyfsStat) -> KResult<()> { unsafe {
-    let mut inode = OnyfsInode {
-        mode: 0,
-        size: 0,
-        uid: 0,
-        gid: 0,
-        nlink: 0,
-        blocks: [0; ONYFS_DIRECT_BLKS],
-        indirect: 0,
-        double_indirect: 0,
-        crtime: 0,
-        mtime: 0,
-        atime: 0,
-        ctime: 0,
-        flags: 0,
-        reserved: 0,
-    };
-    read_inode(ino, &mut inode)?;
-    out.ino = ino;
-    out.size = inode.size;
-    out.mode = inode.mode;
-    out.uid = inode.uid;
-    out.gid = inode.gid;
-    out.mtime = inode.mtime;
-    out.atime = inode.atime;
-    out.ctime = inode.ctime;
-    Ok(())
-}}
+pub unsafe fn stat(ino: u32, out: &mut OnyfsStat) -> KResult<()> {
+    unsafe {
+        let mut inode = OnyfsInode {
+            mode: 0,
+            size: 0,
+            uid: 0,
+            gid: 0,
+            nlink: 0,
+            blocks: [0; ONYFS_DIRECT_BLKS],
+            indirect: 0,
+            double_indirect: 0,
+            crtime: 0,
+            mtime: 0,
+            atime: 0,
+            ctime: 0,
+            flags: 0,
+            reserved: 0,
+        };
+        read_inode(ino, &mut inode)?;
+        out.ino = ino;
+        out.size = inode.size;
+        out.mode = inode.mode;
+        out.uid = inode.uid;
+        out.gid = inode.gid;
+        out.mtime = inode.mtime;
+        out.atime = inode.atime;
+        out.ctime = inode.ctime;
+        Ok(())
+    }
+}

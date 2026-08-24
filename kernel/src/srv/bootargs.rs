@@ -74,45 +74,47 @@ pub fn init() {
 /// into [`BUF`]. # Safety
 /// Caller must hold exclusive access to the statics (init runs once, before
 /// secondary harts start logging).
-unsafe fn parse(src: &[u8]) { unsafe {
-    let mut i = 0usize;
-    while i < src.len() {
-        while i < src.len() && matches!(src[i], b' ' | b'\t' | b'\n' | b'\r' | 0) {
-            i += 1;
+unsafe fn parse(src: &[u8]) {
+    unsafe {
+        let mut i = 0usize;
+        while i < src.len() {
+            while i < src.len() && matches!(src[i], b' ' | b'\t' | b'\n' | b'\r' | 0) {
+                i += 1;
+            }
+            let tok_start = i;
+            while i < src.len() && !matches!(src[i], b' ' | b'\t' | b'\n' | b'\r' | 0) {
+                i += 1;
+            }
+            if i == tok_start {
+                continue;
+            }
+            let eq = src[tok_start..i]
+                .iter()
+                .position(|&b| b == b'=')
+                .map_or(i, |off| tok_start + off);
+            let n = N_ENTRIES;
+            if n >= MAX_ENTRIES || BUF_USED + (i - tok_start) > BUF_LEN {
+                return;
+            }
+            // Values live inline right after their key so one flat buffer holds
+            // the whole command line; the only limit is BUF_LEN.
+            let dst = BUF_USED;
+            BUF[dst..dst + (i - tok_start)].copy_from_slice(&src[tok_start..i]);
+            BUF_USED += i - tok_start;
+            ENTRIES[n] = Entry {
+                key: Range {
+                    start: dst,
+                    end: dst + (eq - tok_start),
+                },
+                val: Range {
+                    start: dst + (eq - tok_start) + usize::from(eq < i),
+                    end: dst + (i - tok_start),
+                },
+            };
+            N_ENTRIES += 1;
         }
-        let tok_start = i;
-        while i < src.len() && !matches!(src[i], b' ' | b'\t' | b'\n' | b'\r' | 0) {
-            i += 1;
-        }
-        if i == tok_start {
-            continue;
-        }
-        let eq = src[tok_start..i]
-            .iter()
-            .position(|&b| b == b'=')
-            .map_or(i, |off| tok_start + off);
-        let n = N_ENTRIES;
-        if n >= MAX_ENTRIES || BUF_USED + (i - tok_start) > BUF_LEN {
-            return;
-        }
-        // Values live inline right after their key so one flat buffer holds
-        // the whole command line; the only limit is BUF_LEN.
-        let dst = BUF_USED;
-        BUF[dst..dst + (i - tok_start)].copy_from_slice(&src[tok_start..i]);
-        BUF_USED += i - tok_start;
-        ENTRIES[n] = Entry {
-            key: Range {
-                start: dst,
-                end: dst + (eq - tok_start),
-            },
-            val: Range {
-                start: dst + (eq - tok_start) + usize::from(eq < i),
-                end: dst + (i - tok_start),
-            },
-        };
-        N_ENTRIES += 1;
     }
-}}
+}
 
 /// Looks up `key` in the parsed command line. Returns the value slice for
 /// `key=value`, an empty slice for a bare `key`, or `None` when absent.

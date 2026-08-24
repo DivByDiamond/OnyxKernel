@@ -34,8 +34,8 @@ pub use vnode::*;
 
 pub(crate) use mount::{G_ROOT_FS, resolve_mount};
 pub(crate) use ops::{
-    alloc_fd, fd_check, fd_check_perm, fd_clear, fd_get, fd_set, fd_set_cloexec,
-    fd_update_pos, is_kernel_boot,
+    alloc_fd, fd_check, fd_check_perm, fd_clear, fd_get, fd_set, fd_set_cloexec, fd_update_pos,
+    is_kernel_boot,
 };
 
 #[cfg(test)]
