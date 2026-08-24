@@ -107,7 +107,7 @@ pub(super) unsafe fn sys_exec(tf: &mut TrapFrame, path: u64, argv: u64) -> i64 {
         } else {
             0
         };
-        tf.sstatus = crate::arch::regs::SSTATUS_SPIE;
+        tf.sstatus = crate::arch::regs::SSTATUS_SPIE | crate::arch::regs::SSTATUS_FS_INITIAL;
         if cfg!(target_pointer_width = "64") {
             tf.satp = crate::arch::regs::SATP_MODE_SV39 | (r.root_pa >> 12);
         } else {
@@ -122,9 +122,8 @@ pub(super) unsafe fn sys_sbrk(incr: i64) -> i64 {
     unsafe {
         let pid = proc::current_pid();
         // Audit fix (🔴 #8): replace `proc::by_pid(pid).unwrap()` with a
-        // graceful error return. See fs_sys3/mem.rs::sys_sbrk for the full
-        // rationale — same fix, different call site (this is the live
-        // sys_sbrk, mem.rs::sys_sbrk is the dead_code-tagged twin).
+        // graceful error return. Same rationale as the brk path in
+        // fs_sys3/mem/brk.rs::sys_brk.
         let p = match proc::by_pid(pid) {
             Some(proc) => proc,
             None => return Errno::Inval.as_i64(),

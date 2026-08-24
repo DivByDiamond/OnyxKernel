@@ -93,27 +93,3 @@ pub unsafe fn sys_brk(addr: u64) -> i64 {
         addr as i64
     }
 }
-
-#[expect(dead_code)]
-pub unsafe fn sys_sbrk(incr: i64) -> i64 {
-    unsafe {
-        let pid = proc::current_pid();
-        let p = match proc::by_pid(pid) {
-            Some(proc) => proc,
-            None => return Errno::Inval.as_i64(),
-        };
-        let cur = p.heap_brk;
-        let heap_end = regs::USER_HEAP_BASE + regs::USER_HEAP_SIZE;
-        let new_brk = (cur as i64 + incr) as u64;
-        if new_brk < regs::USER_HEAP_BASE || new_brk > heap_end {
-            return Errno::NoMem.as_i64();
-        }
-        if new_brk > cur
-            && let Err(e) = ensure_heap_pages(p.root_pa, cur, new_brk)
-        {
-            return e.as_i64();
-        }
-        p.heap_brk = new_brk;
-        cur as i64
-    }
-}

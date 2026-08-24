@@ -91,7 +91,7 @@ pub unsafe fn sys_execve(tf: &mut TrapFrame, path: u64, argv: u64, envp: u64) ->
         tf.a0 = argc as u64;
         tf.a1 = argv_sp + 8;
         tf.a2 = envp_sp;
-        tf.sstatus = crate::arch::regs::SSTATUS_SPIE;
+        tf.sstatus = crate::arch::regs::SSTATUS_SPIE | crate::arch::regs::SSTATUS_FS_INITIAL;
         if cfg!(target_pointer_width = "64") {
             tf.satp = crate::arch::regs::SATP_MODE_SV39 | (r.root_pa >> 12);
         } else {
