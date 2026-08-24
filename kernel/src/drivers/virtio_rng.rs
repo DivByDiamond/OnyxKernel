@@ -41,88 +41,94 @@ pub fn is_present() -> bool {
     unsafe { G_N > 0 }
 }
 
-pub unsafe fn probe(base: usize) -> bool { unsafe {
-    let magic = reg_r(base, R_MAGIC_VALUE);
-    if magic != 0x7472_6976 {
-        return false;
+pub unsafe fn probe(base: usize) -> bool {
+    unsafe {
+        let magic = reg_r(base, R_MAGIC_VALUE);
+        if magic != 0x7472_6976 {
+            return false;
+        }
+        reg_r(base, R_DEVICE_ID) == VIRTIO_ID_RNG
     }
-    reg_r(base, R_DEVICE_ID) == VIRTIO_ID_RNG
-}}
+}
 
-pub unsafe fn init(base: usize) -> KResult<()> { unsafe {
-    let pn = &raw const G_N;
-    if *pn >= MAX_RNG_DEVS {
-        return Err(Errno::NoMem);
-    }
-    let idx = *pn;
-    let version = reg_r(base, R_VERSION);
-    let modern = version >= 2;
-    let dev = RngDev {
-        base,
-        modern,
-        desc: ptr::null_mut(),
-        avail: ptr::null_mut(),
-        used: ptr::null_mut(),
-        last_used: 0,
-    };
-    G_DEVS_RNG[idx] = dev;
-    reg_w(base, R_STATUS, 0);
-    reg_w(base, R_STATUS, VIRTIO_S_ACK | VIRTIO_S_DRIVER);
-    let hf = reg_r(base, R_HOST_FEATURES);
-    reg_w(base, R_GUEST_FEATURES, hf & 0x1FFF_FFFF);
-    if modern {
+pub unsafe fn init(base: usize) -> KResult<()> {
+    unsafe {
+        let pn = &raw const G_N;
+        if *pn >= MAX_RNG_DEVS {
+            return Err(Errno::NoMem);
+        }
+        let idx = *pn;
+        let version = reg_r(base, R_VERSION);
+        let modern = version >= 2;
+        let dev = RngDev {
+            base,
+            modern,
+            desc: ptr::null_mut(),
+            avail: ptr::null_mut(),
+            used: ptr::null_mut(),
+            last_used: 0,
+        };
+        G_DEVS_RNG[idx] = dev;
+        reg_w(base, R_STATUS, 0);
+        reg_w(base, R_STATUS, VIRTIO_S_ACK | VIRTIO_S_DRIVER);
+        let hf = reg_r(base, R_HOST_FEATURES);
+        reg_w(base, R_GUEST_FEATURES, hf & 0x1FFF_FFFF);
+        if modern {
+            reg_w(
+                base,
+                R_STATUS,
+                VIRTIO_S_ACK | VIRTIO_S_DRIVER | VIRTIO_S_FEATURES_OK,
+            );
+            if reg_r(base, R_STATUS) & VIRTIO_S_FEATURES_OK == 0 {
+                return Err(Errno::Inval);
+            }
+        }
+        setup_queue(idx)?;
         reg_w(
             base,
             R_STATUS,
-            VIRTIO_S_ACK | VIRTIO_S_DRIVER | VIRTIO_S_FEATURES_OK,
+            VIRTIO_S_ACK | VIRTIO_S_DRIVER | VIRTIO_S_DRIVER_OK,
         );
-        if reg_r(base, R_STATUS) & VIRTIO_S_FEATURES_OK == 0 {
-            return Err(Errno::Inval);
-        }
+        G_N += 1;
+        Ok(())
     }
-    setup_queue(idx)?;
-    reg_w(
-        base,
-        R_STATUS,
-        VIRTIO_S_ACK | VIRTIO_S_DRIVER | VIRTIO_S_DRIVER_OK,
-    );
-    G_N += 1;
-    Ok(())
-}}
+}
 
-unsafe fn setup_queue(idx: usize) -> KResult<()> { unsafe {
-    let p = &raw mut G_DEVS_RNG;
-    let dev = &mut (*p)[idx];
-    reg_w(dev.base, R_QUEUE_SEL, 0);
-    reg_w(dev.base, R_QUEUE_NUM, VIRTQ_SIZE as u32);
-    if dev.modern {
-        let desc_pa = pmm::alloc_zero()? as usize;
-        let avail_pa = pmm::alloc_zero()? as usize;
-        let used_pa = pmm::alloc_zero()? as usize;
-        dev.desc = desc_pa as *mut VqDesc;
-        dev.avail = avail_pa as *mut VqAvail;
-        dev.used = used_pa as *mut VqUsed;
-        reg_w(dev.base, R_QUEUE_DESC_LOW, desc_pa as u32);
-        reg_w(dev.base, R_QUEUE_DESC_HIGH, ((desc_pa as u64) >> 32) as u32);
-        reg_w(dev.base, R_QUEUE_AVAIL_LOW, avail_pa as u32);
-        reg_w(
-            dev.base,
-            R_QUEUE_AVAIL_HIGH,
-            ((avail_pa as u64) >> 32) as u32,
-        );
-        reg_w(dev.base, R_QUEUE_USED_LOW, used_pa as u32);
-        reg_w(dev.base, R_QUEUE_USED_HIGH, ((used_pa as u64) >> 32) as u32);
-        reg_w(dev.base, R_QUEUE_READY, 1);
-    } else {
-        let pa = pmm::alloc_n(3)? as usize;
-        dev.desc = pa as *mut VqDesc;
-        dev.avail = (pa + 4096) as *mut VqAvail;
-        dev.used = (pa + 8192) as *mut VqUsed;
-        reg_w(dev.base, R_QUEUE_ALIGN, 4096);
-        reg_w(dev.base, R_QUEUE_PFN, (pa / 4096) as u32);
+unsafe fn setup_queue(idx: usize) -> KResult<()> {
+    unsafe {
+        let p = &raw mut G_DEVS_RNG;
+        let dev = &mut (*p)[idx];
+        reg_w(dev.base, R_QUEUE_SEL, 0);
+        reg_w(dev.base, R_QUEUE_NUM, VIRTQ_SIZE as u32);
+        if dev.modern {
+            let desc_pa = pmm::alloc_zero()? as usize;
+            let avail_pa = pmm::alloc_zero()? as usize;
+            let used_pa = pmm::alloc_zero()? as usize;
+            dev.desc = desc_pa as *mut VqDesc;
+            dev.avail = avail_pa as *mut VqAvail;
+            dev.used = used_pa as *mut VqUsed;
+            reg_w(dev.base, R_QUEUE_DESC_LOW, desc_pa as u32);
+            reg_w(dev.base, R_QUEUE_DESC_HIGH, ((desc_pa as u64) >> 32) as u32);
+            reg_w(dev.base, R_QUEUE_AVAIL_LOW, avail_pa as u32);
+            reg_w(
+                dev.base,
+                R_QUEUE_AVAIL_HIGH,
+                ((avail_pa as u64) >> 32) as u32,
+            );
+            reg_w(dev.base, R_QUEUE_USED_LOW, used_pa as u32);
+            reg_w(dev.base, R_QUEUE_USED_HIGH, ((used_pa as u64) >> 32) as u32);
+            reg_w(dev.base, R_QUEUE_READY, 1);
+        } else {
+            let pa = pmm::alloc_n(3)? as usize;
+            dev.desc = pa as *mut VqDesc;
+            dev.avail = (pa + 4096) as *mut VqAvail;
+            dev.used = (pa + 8192) as *mut VqUsed;
+            reg_w(dev.base, R_QUEUE_ALIGN, 4096);
+            reg_w(dev.base, R_QUEUE_PFN, (pa / 4096) as u32);
+        }
+        Ok(())
     }
-    Ok(())
-}}
+}
 
 /// Synchronously read `buf.len()` bytes of entropy. `buf` must be 4K-aligned
 /// and at most one page; the caller should chunk larger requests.
@@ -153,8 +159,11 @@ pub fn read(buf: &mut [u8]) -> KResult<()> {
         ptr::write_volatile(ptr::addr_of_mut!((*dev.avail).idx), idx.wrapping_add(1));
         reg_w(dev.base, crate::drivers::virtio::R_QUEUE_NOTIFY, 0);
         let used_idx_ptr = ptr::addr_of!((*dev.used).idx);
-        #[allow(clippy::while_immutable_condition)]
-        while ptr::read_volatile(used_idx_ptr) == dev.last_used {}
+        loop {
+            if ptr::read_volatile(used_idx_ptr) != dev.last_used {
+                break;
+            }
+        }
         dev.last_used = ptr::read_volatile(used_idx_ptr);
         Ok(())
     }

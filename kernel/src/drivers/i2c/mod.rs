@@ -33,24 +33,28 @@ pub(crate) const _S_IF: u32 = 1 << 0;
 pub(crate) static mut G_BASE: usize = I2C_BASE;
 
 #[inline]
-pub(crate) unsafe fn rd(off: u32) -> u32 { unsafe {
-    Mmio::<u32>::at(G_BASE + off as usize).read() & 0xFF
-}}
+pub(crate) unsafe fn rd(off: u32) -> u32 {
+    unsafe { Mmio::<u32>::at(G_BASE + off as usize).read() & 0xFF }
+}
 
 #[inline]
-pub(crate) unsafe fn wr(off: u32, v: u32) { unsafe {
-    Mmio::<u32>::at(G_BASE + off as usize).write(v & 0xFF);
-}}
+pub(crate) unsafe fn wr(off: u32, v: u32) {
+    unsafe {
+        Mmio::<u32>::at(G_BASE + off as usize).write(v & 0xFF);
+    }
+}
 
 /// Initialise the controller. `prescale` = (clk / (5 * i2c_hz)) - 1.
 /// For 100 kHz on a 50 MHz peripheral clock, prescale ≈ 99.
-pub unsafe fn init(base: usize, prescale: u16) { unsafe {
-    G_BASE = base;
-    wr(R_CONTROL, 0);
-    wr(R_PRESCALE_LO, prescale as u32);
-    wr(R_PRESCALE_HI, (prescale >> 8) as u32);
-    wr(R_CONTROL, C_ENABLE);
-}}
+pub unsafe fn init(base: usize, prescale: u16) {
+    unsafe {
+        G_BASE = base;
+        wr(R_CONTROL, 0);
+        wr(R_PRESCALE_LO, prescale as u32);
+        wr(R_PRESCALE_HI, (prescale >> 8) as u32);
+        wr(R_CONTROL, C_ENABLE);
+    }
+}
 
 pub mod edid;
 pub mod ops;

@@ -94,3 +94,15 @@ pub fn source_name() -> &'static str {
     }
     "lcg-fallback"
 }
+
+/// Signal-degradation API (no behavioral change to `next_u32`/`fill`: they
+/// still silently fall back — see the "silence contract" in the module doc).
+///
+/// `true` iff a cryptographically meaningful source is currently reachable
+/// (Zkr `seed` CSR or virtio-rng); `false` means callers are consuming LCG
+/// output and should treat downstream material (password salts, keys) as
+/// degraded. Kernel consumers: `drivers::entropy`; userspace learns about
+/// degradation only via an explicit query surface, not from getentropy.
+pub fn strong_source_available() -> bool {
+    (unsafe { try_seed_csr().is_some() }) || virtio_rng::is_present()
+}

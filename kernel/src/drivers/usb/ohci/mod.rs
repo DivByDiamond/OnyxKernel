@@ -103,68 +103,76 @@ static mut G_OHCI_ED_OFFSETS: [usize; MAX_OHCI_ED] = [0; MAX_OHCI_ED];
 static mut G_OHCI_TD_OFFSETS: [usize; MAX_OHCI_TD] = [0; MAX_OHCI_TD];
 
 #[inline]
-pub(super) unsafe fn ohci_rd(reg: u32) -> u32 { unsafe {
-    Mmio::<u32>::at(G_OHCI_BASE + reg as usize).read()
-}}
+pub(super) unsafe fn ohci_rd(reg: u32) -> u32 {
+    unsafe { Mmio::<u32>::at(G_OHCI_BASE + reg as usize).read() }
+}
 
 #[inline]
-pub(super) unsafe fn ohci_wr(reg: u32, v: u32) { unsafe {
-    Mmio::<u32>::at(G_OHCI_BASE + reg as usize).write(v);
-}}
+pub(super) unsafe fn ohci_wr(reg: u32, v: u32) {
+    unsafe {
+        Mmio::<u32>::at(G_OHCI_BASE + reg as usize).write(v);
+    }
+}
 
 unsafe fn ohci_pool_phys(off: usize) -> u32 {
     let pool_va = &raw const G_OHCI_DMA as usize;
     (pool_va + off) as u32
 }
 
-unsafe fn ohci_alloc_dma(size: usize) -> KResult<usize> { unsafe {
-    let aligned = (size + 15) & !15;
-    let off = G_OHCI_DMA_USED;
-    if off + aligned > OHCI_DMA_POOL_SIZE {
-        return Err(Errno::NoMem);
+unsafe fn ohci_alloc_dma(size: usize) -> KResult<usize> {
+    unsafe {
+        let aligned = (size + 15) & !15;
+        let off = G_OHCI_DMA_USED;
+        if off + aligned > OHCI_DMA_POOL_SIZE {
+            return Err(Errno::NoMem);
+        }
+        G_OHCI_DMA_USED = off + aligned;
+        ::core::ptr::write_bytes(G_OHCI_DMA.data.as_mut_ptr().add(off), 0, aligned);
+        Ok(off)
     }
-    G_OHCI_DMA_USED = off + aligned;
-    ::core::ptr::write_bytes(G_OHCI_DMA.data.as_mut_ptr().add(off), 0, aligned);
-    Ok(off)
-}}
+}
 
-pub(super) unsafe fn ohci_alloc_ed() -> KResult<usize> { unsafe {
-    if G_OHCI_ED_COUNT >= MAX_OHCI_ED {
-        return Err(Errno::NoMem);
+pub(super) unsafe fn ohci_alloc_ed() -> KResult<usize> {
+    unsafe {
+        if G_OHCI_ED_COUNT >= MAX_OHCI_ED {
+            return Err(Errno::NoMem);
+        }
+        let off = ohci_alloc_dma(OHCI_ED_SIZE)?;
+        let idx = G_OHCI_ED_COUNT;
+        G_OHCI_ED_OFFSETS[idx] = off;
+        G_OHCI_ED_COUNT += 1;
+        Ok(idx)
     }
-    let off = ohci_alloc_dma(OHCI_ED_SIZE)?;
-    let idx = G_OHCI_ED_COUNT;
-    G_OHCI_ED_OFFSETS[idx] = off;
-    G_OHCI_ED_COUNT += 1;
-    Ok(idx)
-}}
+}
 
-pub(super) unsafe fn ohci_alloc_td() -> KResult<usize> { unsafe {
-    if G_OHCI_TD_COUNT >= MAX_OHCI_TD {
-        return Err(Errno::NoMem);
+pub(super) unsafe fn ohci_alloc_td() -> KResult<usize> {
+    unsafe {
+        if G_OHCI_TD_COUNT >= MAX_OHCI_TD {
+            return Err(Errno::NoMem);
+        }
+        let off = ohci_alloc_dma(OHCI_TD_SIZE)?;
+        let idx = G_OHCI_TD_COUNT;
+        G_OHCI_TD_OFFSETS[idx] = off;
+        G_OHCI_TD_COUNT += 1;
+        Ok(idx)
     }
-    let off = ohci_alloc_dma(OHCI_TD_SIZE)?;
-    let idx = G_OHCI_TD_COUNT;
-    G_OHCI_TD_OFFSETS[idx] = off;
-    G_OHCI_TD_COUNT += 1;
-    Ok(idx)
-}}
+}
 
-pub(super) unsafe fn ohci_ed_ptr(idx: usize) -> *mut OhciED { unsafe {
-    G_OHCI_DMA.data.as_mut_ptr().add(G_OHCI_ED_OFFSETS[idx]) as *mut OhciED
-}}
+pub(super) unsafe fn ohci_ed_ptr(idx: usize) -> *mut OhciED {
+    unsafe { G_OHCI_DMA.data.as_mut_ptr().add(G_OHCI_ED_OFFSETS[idx]) as *mut OhciED }
+}
 
-pub(super) unsafe fn ohci_td_ptr(idx: usize) -> *mut OhciTD { unsafe {
-    G_OHCI_DMA.data.as_mut_ptr().add(G_OHCI_TD_OFFSETS[idx]) as *mut OhciTD
-}}
+pub(super) unsafe fn ohci_td_ptr(idx: usize) -> *mut OhciTD {
+    unsafe { G_OHCI_DMA.data.as_mut_ptr().add(G_OHCI_TD_OFFSETS[idx]) as *mut OhciTD }
+}
 
-pub(super) unsafe fn ohci_ed_phys(idx: usize) -> u32 { unsafe {
-    ohci_pool_phys(G_OHCI_ED_OFFSETS[idx])
-}}
+pub(super) unsafe fn ohci_ed_phys(idx: usize) -> u32 {
+    unsafe { ohci_pool_phys(G_OHCI_ED_OFFSETS[idx]) }
+}
 
-pub(super) unsafe fn ohci_td_phys(idx: usize) -> u32 { unsafe {
-    ohci_pool_phys(G_OHCI_TD_OFFSETS[idx])
-}}
+pub(super) unsafe fn ohci_td_phys(idx: usize) -> u32 {
+    unsafe { ohci_pool_phys(G_OHCI_TD_OFFSETS[idx]) }
+}
 
 pub(super) fn ohci_n_ports() -> u8 {
     unsafe { G_OHCI_N_PORTS }

@@ -82,96 +82,98 @@ unsafe fn parse_established(data: &[u8; 128], timings: &mut [EdidTiming; 8], n: 
     }
 }
 
-pub unsafe fn parse_edid(data: &[u8; 128]) -> KResult<EdidInfo> { unsafe {
-    if data[0] != 0x00
-        || data[1] != 0xFF
-        || data[2] != 0xFF
-        || data[3] != 0xFF
-        || data[4] != 0xFF
-        || data[5] != 0xFF
-        || data[6] != 0xFF
-        || data[7] != 0x00
-    {
-        return Err(Errno::Inval);
-    }
-    if !edid_checksum(data) {
-        return Err(Errno::Inval);
-    }
-    let manufacturer = [data[8] & 0x7F, data[9] & 0x7F];
-    let product = (data[11] as u16) << 8 | data[10] as u16;
-    let serial = (data[15] as u32) << 24
-        | (data[14] as u32) << 16
-        | (data[13] as u32) << 8
-        | data[12] as u32;
-    let width_cm = data[21];
-    let height_cm = data[22];
-    let mut timings: [EdidTiming; 8] = [EdidTiming {
-        width: 0,
-        height: 0,
-        refresh: 0,
-        hsync_pol: false,
-        vsync_pol: false,
-        interlaced: false,
-    }; 8];
-    let mut n = 0;
-    parse_established(data, &mut timings, &mut n);
-    for i in 0..8 {
-        if n >= 8 {
-            break;
+pub unsafe fn parse_edid(data: &[u8; 128]) -> KResult<EdidInfo> {
+    unsafe {
+        if data[0] != 0x00
+            || data[1] != 0xFF
+            || data[2] != 0xFF
+            || data[3] != 0xFF
+            || data[4] != 0xFF
+            || data[5] != 0xFF
+            || data[6] != 0xFF
+            || data[7] != 0x00
+        {
+            return Err(Errno::Inval);
         }
-        let off = 38 + i * 2;
-        let hi = data[off];
-        let lo = data[off + 1];
-        if hi == 0x01 && lo == 0x01 {
-            continue;
+        if !edid_checksum(data) {
+            return Err(Errno::Inval);
         }
-        if hi == 0x00 || lo == 0x00 {
-            continue;
-        }
-        let h = (hi as u16) << 8 | lo as u16;
-        let h_act = (h >> 6) + 31;
-        let v_act = (h & 0x3F) + 1;
-        let refresh = 60u8;
-        timings[n] = EdidTiming {
-            width: h_act * 8,
-            height: v_act,
-            refresh,
+        let manufacturer = [data[8] & 0x7F, data[9] & 0x7F];
+        let product = (data[11] as u16) << 8 | data[10] as u16;
+        let serial = (data[15] as u32) << 24
+            | (data[14] as u32) << 16
+            | (data[13] as u32) << 8
+            | data[12] as u32;
+        let width_cm = data[21];
+        let height_cm = data[22];
+        let mut timings: [EdidTiming; 8] = [EdidTiming {
+            width: 0,
+            height: 0,
+            refresh: 0,
             hsync_pol: false,
             vsync_pol: false,
             interlaced: false,
-        };
-        n += 1;
-    }
-    let mut preferred_width = 0u16;
-    let mut preferred_height = 0u16;
-    for i in 0..4 {
-        let off = 54 + i * 18;
-        if off + 18 > 126 {
-            break;
-        }
-        let tag = data[off + 3];
-        // Tags 0xFC..=0xFF (monitor descriptors) are skipped.
-        if tag <= 0x0F {
-            let t = parse_detailed_timing(&data[off..off + 18]);
-            if i == 0 {
-                preferred_width = t.width;
-                preferred_height = t.height;
+        }; 8];
+        let mut n = 0;
+        parse_established(data, &mut timings, &mut n);
+        for i in 0..8 {
+            if n >= 8 {
+                break;
             }
-            if n < 8 {
-                timings[n] = t;
-                n += 1;
+            let off = 38 + i * 2;
+            let hi = data[off];
+            let lo = data[off + 1];
+            if hi == 0x01 && lo == 0x01 {
+                continue;
+            }
+            if hi == 0x00 || lo == 0x00 {
+                continue;
+            }
+            let h = (hi as u16) << 8 | lo as u16;
+            let h_act = (h >> 6) + 31;
+            let v_act = (h & 0x3F) + 1;
+            let refresh = 60u8;
+            timings[n] = EdidTiming {
+                width: h_act * 8,
+                height: v_act,
+                refresh,
+                hsync_pol: false,
+                vsync_pol: false,
+                interlaced: false,
+            };
+            n += 1;
+        }
+        let mut preferred_width = 0u16;
+        let mut preferred_height = 0u16;
+        for i in 0..4 {
+            let off = 54 + i * 18;
+            if off + 18 > 126 {
+                break;
+            }
+            let tag = data[off + 3];
+            // Tags 0xFC..=0xFF (monitor descriptors) are skipped.
+            if tag <= 0x0F {
+                let t = parse_detailed_timing(&data[off..off + 18]);
+                if i == 0 {
+                    preferred_width = t.width;
+                    preferred_height = t.height;
+                }
+                if n < 8 {
+                    timings[n] = t;
+                    n += 1;
+                }
             }
         }
+        Ok(EdidInfo {
+            manufacturer,
+            product,
+            serial,
+            width_cm,
+            height_cm,
+            timing: timings,
+            ntiming: n,
+            preferred_width,
+            preferred_height,
+        })
     }
-    Ok(EdidInfo {
-        manufacturer,
-        product,
-        serial,
-        width_cm,
-        height_cm,
-        timing: timings,
-        ntiming: n,
-        preferred_width,
-        preferred_height,
-    })
-}}
+}

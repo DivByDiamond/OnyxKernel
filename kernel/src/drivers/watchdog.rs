@@ -24,19 +24,23 @@ static mut G_ENABLED: bool = false;
 static mut G_TIMEOUT: u32 = 0;
 
 #[inline]
-unsafe fn rd(off: u32) -> u32 { unsafe {
-    Mmio::<u32>::at(G_BASE + off as usize).read()
-}}
+unsafe fn rd(off: u32) -> u32 {
+    unsafe { Mmio::<u32>::at(G_BASE + off as usize).read() }
+}
 
 #[inline]
-unsafe fn wr(off: u32, v: u32) { unsafe {
-    Mmio::<u32>::at(G_BASE + off as usize).write(v);
-}}
+unsafe fn wr(off: u32, v: u32) {
+    unsafe {
+        Mmio::<u32>::at(G_BASE + off as usize).write(v);
+    }
+}
 
 /// Initialise the watchdog base address without enabling it.
-pub unsafe fn init(base: usize) { unsafe {
-    G_BASE = base;
-}}
+pub unsafe fn init(base: usize) {
+    unsafe {
+        G_BASE = base;
+    }
+}
 
 /// Arm the watchdog with a `timeout_ms` millisecond deadline. The kernel
 /// must call `ping()` at least that often to avoid a reset.
@@ -97,8 +101,10 @@ pub fn counter() -> u64 {
 
 /// PLIC handler: ping the watchdog from a timer-tick context. Called by
 /// the scheduler every jiffie to keep the system alive.
-pub unsafe fn tick() { unsafe {
-    if G_ENABLED {
-        ping();
+pub unsafe fn tick() {
+    unsafe {
+        if G_ENABLED {
+            ping();
+        }
     }
-}}
+}

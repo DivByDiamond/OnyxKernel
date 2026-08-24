@@ -23,46 +23,50 @@ static mut G_SHIFT: bool = false;
 static mut G_CAPS: bool = false;
 
 #[inline]
-unsafe fn status() -> u32 { unsafe {
-    Mmio::<u32>::at(PORT_STATUS).read()
-}}
+unsafe fn status() -> u32 {
+    unsafe { Mmio::<u32>::at(PORT_STATUS).read() }
+}
 
 #[inline]
-unsafe fn data() -> u8 { unsafe {
-    Mmio::<u32>::at(PORT_DATA).read() as u8
-}}
+unsafe fn data() -> u8 {
+    unsafe { Mmio::<u32>::at(PORT_DATA).read() as u8 }
+}
 
 #[inline]
-unsafe fn wait_read() -> bool { unsafe {
-    let mut t = 100_000u32;
-    while t > 0 {
-        if status() & SR_OUT_BUF != 0 {
-            return true;
+unsafe fn wait_read() -> bool {
+    unsafe {
+        let mut t = 100_000u32;
+        while t > 0 {
+            if status() & SR_OUT_BUF != 0 {
+                return true;
+            }
+            t -= 1;
         }
-        t -= 1;
+        false
     }
-    false
-}}
+}
 
 /// Initialise the controller. Disables both ports, flushes the output
 /// buffer, then re-enables the keyboard port. Returns false on timeout.
-pub unsafe fn init() -> bool { unsafe {
-    // Disable both ports.
-    Mmio::<u32>::at(PORT_COMMAND).write(0xAD);
-    Mmio::<u32>::at(PORT_COMMAND).write(0xA7);
-    // Flush output buffer.
-    while status() & SR_OUT_BUF != 0 {
-        let _ = data();
+pub unsafe fn init() -> bool {
+    unsafe {
+        // Disable both ports.
+        Mmio::<u32>::at(PORT_COMMAND).write(0xAD);
+        Mmio::<u32>::at(PORT_COMMAND).write(0xA7);
+        // Flush output buffer.
+        while status() & SR_OUT_BUF != 0 {
+            let _ = data();
+        }
+        // Self-test.
+        Mmio::<u32>::at(PORT_COMMAND).write(0xAA);
+        if !wait_read() || data() != 0x55 {
+            return false;
+        }
+        // Re-enable keyboard port.
+        Mmio::<u32>::at(PORT_COMMAND).write(0xAE);
+        true
     }
-    // Self-test.
-    Mmio::<u32>::at(PORT_COMMAND).write(0xAA);
-    if !wait_read() || data() != 0x55 {
-        return false;
-    }
-    // Re-enable keyboard port.
-    Mmio::<u32>::at(PORT_COMMAND).write(0xAE);
-    true
-}}
+}
 
 /// Poll the PS/2 keyboard for one byte. Returns `None` if no data.
 pub fn poll_byte() -> Option<u8> {

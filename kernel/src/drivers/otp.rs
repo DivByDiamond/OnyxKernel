@@ -24,38 +24,44 @@ static mut G_CACHE: [u8; OTP_SIZE] = [0; OTP_SIZE];
 static mut G_CACHED: bool = false;
 
 #[inline]
-unsafe fn rd(off: u32) -> u32 { unsafe {
-    Mmio::<u32>::at(G_BASE + off as usize).read()
-}}
+unsafe fn rd(off: u32) -> u32 {
+    unsafe { Mmio::<u32>::at(G_BASE + off as usize).read() }
+}
 
 #[inline]
-unsafe fn wr(off: u32, v: u32) { unsafe {
-    Mmio::<u32>::at(G_BASE + off as usize).write(v);
-}}
+unsafe fn wr(off: u32, v: u32) {
+    unsafe {
+        Mmio::<u32>::at(G_BASE + off as usize).write(v);
+    }
+}
 
 /// Initialise the OTP controller and prime the cache.
-pub unsafe fn init(base: usize) -> KResult<()> { unsafe {
-    G_BASE = base;
-    cache_all()?;
-    Ok(())
-}}
-
-unsafe fn cache_all() -> KResult<()> { unsafe {
-    for (i, slot) in G_CACHE.iter_mut().enumerate() {
-        wr(R_ADDR, i as u32);
-        wr(R_CTRL, CTRL_READ);
-        let mut t = 100_000u32;
-        while t > 0 && rd(R_CTRL) & CTRL_BUSY != 0 {
-            t -= 1;
-        }
-        if t == 0 {
-            return Err(Errno::Io);
-        }
-        *slot = rd(R_DATA) as u8;
+pub unsafe fn init(base: usize) -> KResult<()> {
+    unsafe {
+        G_BASE = base;
+        cache_all()?;
+        Ok(())
     }
-    G_CACHED = true;
-    Ok(())
-}}
+}
+
+unsafe fn cache_all() -> KResult<()> {
+    unsafe {
+        for (i, slot) in G_CACHE.iter_mut().enumerate() {
+            wr(R_ADDR, i as u32);
+            wr(R_CTRL, CTRL_READ);
+            let mut t = 100_000u32;
+            while t > 0 && rd(R_CTRL) & CTRL_BUSY != 0 {
+                t -= 1;
+            }
+            if t == 0 {
+                return Err(Errno::Io);
+            }
+            *slot = rd(R_DATA) as u8;
+        }
+        G_CACHED = true;
+        Ok(())
+    }
+}
 
 /// Read a single byte from the fuse array. Returns from cache.
 pub fn read_byte(idx: usize) -> KResult<u8> {

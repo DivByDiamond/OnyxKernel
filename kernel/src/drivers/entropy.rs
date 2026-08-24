@@ -107,3 +107,12 @@ pub fn below(bound: u32) -> u32 {
 pub fn is_seeded() -> bool {
     unsafe { G_SEEDED }
 }
+
+/// Signal-degradation passthrough to `hwrand::strong_source_available`:
+/// `false` means this module's output is statistically fine but NOT
+/// cryptographic (LCG fallback). Exposed so kernel subsystems can check
+/// strength without depending on hwrand directly. Read-only signal — it
+/// does not alter seeding behavior.
+pub fn strong_source_available() -> bool {
+    hwrand::strong_source_available()
+}

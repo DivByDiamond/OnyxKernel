@@ -32,79 +32,92 @@ pub struct PhyInfo {
     pub link_partner: u16,
 }
 
-unsafe fn mdio_read(phy: u8, reg: u8) -> KResult<u16> { unsafe {
-    let base = G_GMAC.base;
-    let v = ((phy as u32 & 0x1F) << 11) | ((reg as u32 & 0x1F) << 6) | regs::MII_CR_42;
-    regs::reg_w(base, regs::MII_ADDR, v);
-    regs::reg_w(base, regs::MII_ADDR, v | regs::MII_B);
-    let mut t = 100_000u32;
-    while t > 0 && regs::reg_r(base, regs::MII_ADDR) & regs::MII_B != 0 {
-        t -= 1;
+unsafe fn mdio_read(phy: u8, reg: u8) -> KResult<u16> {
+    unsafe {
+        let base = G_GMAC.base;
+        let v = ((phy as u32 & 0x1F) << 11) | ((reg as u32 & 0x1F) << 6) | regs::MII_CR_42;
+        regs::reg_w(base, regs::MII_ADDR, v);
+        regs::reg_w(base, regs::MII_ADDR, v | regs::MII_B);
+        let mut t = 100_000u32;
+        while t > 0 && regs::reg_r(base, regs::MII_ADDR) & regs::MII_B != 0 {
+            t -= 1;
+        }
+        if t == 0 {
+            return Err(Errno::Io);
+        }
+        Ok(regs::reg_r(base, regs::MII_DATA) as u16)
     }
-    if t == 0 {
-        return Err(Errno::Io);
+}
+
+unsafe fn mdio_write(phy: u8, reg: u8, data: u16) -> KResult<()> {
+    unsafe {
+        let base = G_GMAC.base;
+        let v = ((phy as u32 & 0x1F) << 11) | ((reg as u32 & 0x1F) << 6) | regs::MII_CR_42;
+        regs::reg_w(base, regs::MII_ADDR, v);
+        regs::reg_w(base, regs::MII_DATA, data as u32);
+        regs::reg_w(base, regs::MII_ADDR, v | regs::MII_B | regs::MII_W);
+        let mut t = 100_000u32;
+        while t > 0 && regs::reg_r(base, regs::MII_ADDR) & regs::MII_B != 0 {
+            t -= 1;
+        }
+        if t == 0 {
+            return Err(Errno::Io);
+        }
+        Ok(())
     }
-    Ok(regs::reg_r(base, regs::MII_DATA) as u16)
-}}
+}
 
-unsafe fn mdio_write(phy: u8, reg: u8, data: u16) -> KResult<()> { unsafe {
-    let base = G_GMAC.base;
-    let v = ((phy as u32 & 0x1F) << 11) | ((reg as u32 & 0x1F) << 6) | regs::MII_CR_42;
-    regs::reg_w(base, regs::MII_ADDR, v);
-    regs::reg_w(base, regs::MII_DATA, data as u32);
-    regs::reg_w(base, regs::MII_ADDR, v | regs::MII_B | regs::MII_W);
-    let mut t = 100_000u32;
-    while t > 0 && regs::reg_r(base, regs::MII_ADDR) & regs::MII_B != 0 {
-        t -= 1;
+pub unsafe fn identify(phy_addr: u8) -> KResult<PhyInfo> {
+    unsafe {
+        let id1 = mdio_read(phy_addr, PHY_ID1)?;
+        let id2 = mdio_read(phy_addr, PHY_ID2)?;
+        let adv = mdio_read(phy_addr, AN_ADV).unwrap_or(0);
+        let lpa = mdio_read(phy_addr, LPA).unwrap_or(0);
+        Ok(PhyInfo {
+            id1,
+            id2,
+            advertised: adv,
+            link_partner: lpa,
+        })
     }
-    if t == 0 {
-        return Err(Errno::Io);
+}
+
+pub unsafe fn autoneg(phy_addr: u8) -> KResult<()> {
+    unsafe {
+        let adv = AN_ADV_100TX_FD | AN_ADV_100TX | AN_ADV_10T_FD | AN_ADV_10T;
+        mdio_write(phy_addr, AN_ADV, adv)?;
+        let bmcr = mdio_read(phy_addr, BMCR)?;
+        mdio_write(phy_addr, BMCR, bmcr | BMCR_AN_EN | BMCR_RESTART_AN)?;
+        Ok(())
     }
-    Ok(())
-}}
+}
 
-pub unsafe fn identify(phy_addr: u8) -> KResult<PhyInfo> { unsafe {
-    let id1 = mdio_read(phy_addr, PHY_ID1)?;
-    let id2 = mdio_read(phy_addr, PHY_ID2)?;
-    let adv = mdio_read(phy_addr, AN_ADV).unwrap_or(0);
-    let lpa = mdio_read(phy_addr, LPA).unwrap_or(0);
-    Ok(PhyInfo {
-        id1,
-        id2,
-        advertised: adv,
-        link_partner: lpa,
-    })
-}}
-
-pub unsafe fn autoneg(phy_addr: u8) -> KResult<()> { unsafe {
-    let adv = AN_ADV_100TX_FD | AN_ADV_100TX | AN_ADV_10T_FD | AN_ADV_10T;
-    mdio_write(phy_addr, AN_ADV, adv)?;
-    let bmcr = mdio_read(phy_addr, BMCR)?;
-    mdio_write(phy_addr, BMCR, bmcr | BMCR_AN_EN | BMCR_RESTART_AN)?;
-    Ok(())
-}}
-
-pub unsafe fn wait_link(phy_addr: u8) -> bool { unsafe {
-    for _ in 0..500_000 {
-        if let Ok(bmsr) = mdio_read(phy_addr, BMSR)
-            && bmsr & BMSR_LINK_STATUS != 0 {
+pub unsafe fn wait_link(phy_addr: u8) -> bool {
+    unsafe {
+        for _ in 0..500_000 {
+            if let Ok(bmsr) = mdio_read(phy_addr, BMSR)
+                && bmsr & BMSR_LINK_STATUS != 0
+            {
                 return true;
             }
+        }
+        false
     }
-    false
-}}
+}
 
-pub unsafe fn speed_duplex(phy_addr: u8) -> (u8, bool) { unsafe {
-    let lpa = mdio_read(phy_addr, LPA).unwrap_or(0);
-    let adv = mdio_read(phy_addr, AN_ADV).unwrap_or(0);
-    let combined = lpa & adv;
-    if combined & AN_ADV_100TX_FD != 0 {
-        (1, true)
-    } else if combined & AN_ADV_100TX != 0 {
-        (1, false)
-    } else if combined & AN_ADV_10T_FD != 0 {
-        (0, true)
-    } else {
-        (0, false)
+pub unsafe fn speed_duplex(phy_addr: u8) -> (u8, bool) {
+    unsafe {
+        let lpa = mdio_read(phy_addr, LPA).unwrap_or(0);
+        let adv = mdio_read(phy_addr, AN_ADV).unwrap_or(0);
+        let combined = lpa & adv;
+        if combined & AN_ADV_100TX_FD != 0 {
+            (1, true)
+        } else if combined & AN_ADV_100TX != 0 {
+            (1, false)
+        } else if combined & AN_ADV_10T_FD != 0 {
+            (0, true)
+        } else {
+            (0, false)
+        }
     }
-}}
+}

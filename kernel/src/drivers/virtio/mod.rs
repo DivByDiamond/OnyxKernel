@@ -102,27 +102,31 @@ pub(crate) static mut G_DEVS: [VirtioBlkDev; VIRTIO_MAX_DEVS] = [VirtioBlkDev {
 pub(crate) static mut G_NDEVS: usize = 0;
 
 #[inline]
-pub(crate) unsafe fn reg_w(base: usize, off: u32, v: u32) { unsafe {
-    Mmio::<u32>::at(base + off as usize).write(v);
-}}
+pub(crate) unsafe fn reg_w(base: usize, off: u32, v: u32) {
+    unsafe {
+        Mmio::<u32>::at(base + off as usize).write(v);
+    }
+}
 #[inline]
-pub(crate) unsafe fn reg_r(base: usize, off: u32) -> u32 { unsafe {
-    Mmio::<u32>::at(base + off as usize).read()
-}}
+pub(crate) unsafe fn reg_r(base: usize, off: u32) -> u32 {
+    unsafe { Mmio::<u32>::at(base + off as usize).read() }
+}
 
 pub fn count() -> usize {
     unsafe { G_NDEVS }
 }
 
-pub unsafe fn dev(idx: usize) -> *mut VirtioBlkDev { unsafe {
-    let pn = &raw const G_NDEVS;
-    if idx < *pn {
-        let pd = &raw mut G_DEVS;
-        &mut (*pd)[idx]
-    } else {
-        ptr::null_mut()
+pub unsafe fn dev(idx: usize) -> *mut VirtioBlkDev {
+    unsafe {
+        let pn = &raw const G_NDEVS;
+        if idx < *pn {
+            let pd = &raw mut G_DEVS;
+            &mut (*pd)[idx]
+        } else {
+            ptr::null_mut()
+        }
     }
-}}
+}
 
 pub mod queue;
 

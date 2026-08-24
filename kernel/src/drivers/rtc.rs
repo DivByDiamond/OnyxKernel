@@ -33,60 +33,68 @@ enum RtcKind {
 }
 
 #[inline]
-unsafe fn rd32(base: usize, off: u32) -> u32 { unsafe {
-    Mmio::<u32>::at(base + off as usize).read()
-}}
+unsafe fn rd32(base: usize, off: u32) -> u32 {
+    unsafe { Mmio::<u32>::at(base + off as usize).read() }
+}
 
 #[inline]
-unsafe fn wr32(base: usize, off: u32, v: u32) { unsafe {
-    Mmio::<u32>::at(base + off as usize).write(v);
-}}
+unsafe fn wr32(base: usize, off: u32, v: u32) {
+    unsafe {
+        Mmio::<u32>::at(base + off as usize).write(v);
+    }
+}
 
 /// Probe for a known RTC. `fdt_base` is the base from the device tree (0 if
 /// none). When the FDT provides a base we probe ONLY that address — on
 /// OC2R/sedna the RTC lives at the FDT address and the hardcoded QEMU
 /// goldfish base (0x10100000) is not a real device there (load access fault).
-pub unsafe fn probe(fdt_base: usize) -> bool { unsafe {
-    if fdt_base != 0 {
-        return probe_at(fdt_base, RtcKind::Goldfish);
-    }
-    if probe_at(GOLDFISH_RTC_BASE, RtcKind::Goldfish) {
-        return true;
-    }
-    probe_at(SIFIVE_RTC_BASE, RtcKind::SiFive)
-}}
-
-unsafe fn probe_at(base: usize, kind: RtcKind) -> bool { unsafe {
-    let t1 = read_kind(base, kind);
-    if t1 == 0 {
-        return false;
-    }
-    // Spin briefly — clock must advance.
-    for _ in 0..1000 {
-        if read_kind(base, kind) != t1 {
-            G_BASE = base;
-            G_KIND = kind;
+pub unsafe fn probe(fdt_base: usize) -> bool {
+    unsafe {
+        if fdt_base != 0 {
+            return probe_at(fdt_base, RtcKind::Goldfish);
+        }
+        if probe_at(GOLDFISH_RTC_BASE, RtcKind::Goldfish) {
             return true;
         }
+        probe_at(SIFIVE_RTC_BASE, RtcKind::SiFive)
     }
-    false
-}}
+}
 
-unsafe fn read_kind(base: usize, kind: RtcKind) -> u64 { unsafe {
-    match kind {
-        RtcKind::Goldfish => {
-            let lo = rd32(base, GF_TIME_LOW) as u64;
-            let hi = rd32(base, GF_TIME_HIGH) as u64;
-            (hi << 32) | lo
+unsafe fn probe_at(base: usize, kind: RtcKind) -> bool {
+    unsafe {
+        let t1 = read_kind(base, kind);
+        if t1 == 0 {
+            return false;
         }
-        RtcKind::SiFive => {
-            let lo = rd32(base, S5_RTC_LO) as u64;
-            let hi = rd32(base, S5_RTC_HI) as u64;
-            (hi << 32) | lo
+        // Spin briefly — clock must advance.
+        for _ in 0..1000 {
+            if read_kind(base, kind) != t1 {
+                G_BASE = base;
+                G_KIND = kind;
+                return true;
+            }
         }
-        RtcKind::None => 0,
+        false
     }
-}}
+}
+
+unsafe fn read_kind(base: usize, kind: RtcKind) -> u64 {
+    unsafe {
+        match kind {
+            RtcKind::Goldfish => {
+                let lo = rd32(base, GF_TIME_LOW) as u64;
+                let hi = rd32(base, GF_TIME_HIGH) as u64;
+                (hi << 32) | lo
+            }
+            RtcKind::SiFive => {
+                let lo = rd32(base, S5_RTC_LO) as u64;
+                let hi = rd32(base, S5_RTC_HI) as u64;
+                (hi << 32) | lo
+            }
+            RtcKind::None => 0,
+        }
+    }
+}
 
 /// Wall-clock seconds since Unix epoch. Returns 0 if no RTC was probed.
 pub fn now_secs() -> u64 {
@@ -106,27 +114,31 @@ pub fn now_nanos() -> u64 {
 
 /// Program a one-shot alarm `secs` seconds in the future and enable IRQ.
 /// `irq` is the PLIC IRQ the RTC is wired to (QEMU virt: IRQ 11).
-pub unsafe fn arm_alarm(secs: u64, irq: u32) -> KResult<()> { unsafe {
-    if G_KIND != RtcKind::Goldfish {
-        return Err(Errno::NoSys);
+pub unsafe fn arm_alarm(secs: u64, irq: u32) -> KResult<()> {
+    unsafe {
+        if G_KIND != RtcKind::Goldfish {
+            return Err(Errno::NoSys);
+        }
+        let now = now_nanos();
+        // Goldfish alarm is in nanoseconds.
+        let target = now + secs * 1_000_000_000;
+        wr32(G_BASE, GF_ALARM_HIGH, (target >> 32) as u32);
+        wr32(G_BASE, GF_ALARM_LOW, target as u32);
+        wr32(G_BASE, GF_IRQ_ENABLE, 1);
+        crate::drivers::plic::set_priority(irq, 4);
+        crate::drivers::plic::enable(irq, 0);
+        Ok(())
     }
-    let now = now_nanos();
-    // Goldfish alarm is in nanoseconds.
-    let target = now + secs * 1_000_000_000;
-    wr32(G_BASE, GF_ALARM_HIGH, (target >> 32) as u32);
-    wr32(G_BASE, GF_ALARM_LOW, target as u32);
-    wr32(G_BASE, GF_IRQ_ENABLE, 1);
-    crate::drivers::plic::set_priority(irq, 4);
-    crate::drivers::plic::enable(irq, 0);
-    Ok(())
-}}
+}
 
 /// Clear a pending alarm interrupt.
-pub unsafe fn clear_alarm() { unsafe {
-    if G_KIND == RtcKind::Goldfish {
-        wr32(G_BASE, GF_CLEAR_ALARM, 1);
+pub unsafe fn clear_alarm() {
+    unsafe {
+        if G_KIND == RtcKind::Goldfish {
+            wr32(G_BASE, GF_CLEAR_ALARM, 1);
+        }
     }
-}}
+}
 
 /// Base address of the active RTC (0 if none).
 pub fn base() -> usize {

@@ -17,7 +17,9 @@ pub(super) unsafe fn vcopy(dst: *mut u8, src: *const u8, len: usize) {
     // SAFETY: caller guarantees both regions are valid, mapped, and disjoint
     // enough for a forward copy; all accesses are volatile MMIO-safe.
     unsafe {
-        if !(dst as usize).is_multiple_of(WORD) || ((dst as usize) ^ (src as usize)) & (WORD - 1) != 0 {
+        if !(dst as usize).is_multiple_of(WORD)
+            || ((dst as usize) ^ (src as usize)) & (WORD - 1) != 0
+        {
             for i in 0..len {
                 let b = core::ptr::read_volatile(src.add(i));
                 core::ptr::write_volatile(dst.add(i), b);

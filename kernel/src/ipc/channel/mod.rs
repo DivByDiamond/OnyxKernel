@@ -1,8 +1,7 @@
-// channel/channel.rs keeps the IPC-channel impl next to its types/ringbuf peers.
-#[allow(clippy::module_inception)]
-pub mod channel;
+//! IPC channels — create/connect/send/recv over a lock-protected ring buffer.
+mod chan;
 pub mod ringbuf;
 pub mod types;
-pub use channel::*;
+pub use chan::*;
 pub use ringbuf::*;
 pub use types::*;
