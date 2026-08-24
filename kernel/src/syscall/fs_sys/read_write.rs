@@ -3,7 +3,7 @@ use crate::drivers::uart;
 use crate::fs::vfs;
 use crate::mm::vmm;
 use crate::proc;
-use crate::syscall::tty::{ECHO_ENABLED, filter_input};
+use crate::syscall::tty::filter_input;
 use onyx_core::errno::Errno;
 
 use super::super::handler::user_ptr_ok;
@@ -98,11 +98,42 @@ pub(in super::super) unsafe fn sys_read(tf: &mut TrapFrame, _fd: u64, buf: u64, 
                 return n as i64;
             }
 
+            // ── Non-canonical termios: byte-stream semantics ─────────────
+            // A program that cleared ICANON via tcsetattr(TCSETS) — vim is
+            // the canonical case — reads one byte at a time with
+            // read(0, &c, 1) and must block until a key arrives. Without
+            // this branch it falls into the cooked loop below whose
+            // `len - 1` bound turns len==1 into an immediate "0 bytes read",
+            // which the caller interprets as EOF (vim then spins redrawing
+            // forever). Same contract as the raw_stdin path above: block
+            // until ≥1 byte, then return whatever else is already queued
+            // (up to len). No line editing, no NUL terminator. Ctrl+C is
+            // still translated to SIGINT by filter_input.
+            if !p.term_icanon {
+                let first = loop {
+                    match uart::getc().and_then(filter_input) {
+                        Some(b) => break b,
+                        None => proc::sched_yield(tf),
+                    }
+                };
+                *dst.add(0) = first;
+                let mut n = 1usize;
+                while n < len as usize {
+                    match uart::getc().and_then(filter_input) {
+                        Some(b) => {
+                            *dst.add(n) = b;
+                            n += 1;
+                        }
+                        None => break,
+                    }
+                }
+                return n as i64;
+            }
+
             // ── Cooked mode: line editing (echo, backspace, Enter) ───────
             // Echo reflects the CALLING process's termios (TCSETS), not the
             // legacy globals.
-            let echo = proc::current().term_echo;
-            let _ = ECHO_ENABLED;
+            let echo = p.term_echo;
             let mut n: usize = 0;
             let max = (len - 1).max(1) as usize;
             while n < max {

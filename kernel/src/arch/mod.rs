@@ -1,4 +1,4 @@
-//! arch — RISC-V 64 архитектурно-зависимый слой.
+//! arch — RISC-V 64 architecture-specific layer.
 
 pub mod asm;
 pub mod bits;

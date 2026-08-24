@@ -5,7 +5,7 @@ use alloc::vec::Vec;
 use super::segment::{ONX_MAX_SEGS, OnxSegment};
 
 // ════════════════════════════════════════════════════════════════════════════
-// OnyxExec v2 — расширенный формат бинарников
+// OnyxExec v2 — extended binary format
 // ════════════════════════════════════════════════════════════════════════════
 
 pub const ONX_MAGIC: u32 = 0x31584E4F; // 'ONX1' LE

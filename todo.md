@@ -285,7 +285,7 @@ CI-воркфлоу, dead-code зачистка (~25 pub fn), SAFETY-комме�
       riscv32imac (заявлен в .cargo/config.toml, в CI нет); MSRV-проверку против плавающего nightly.
 - [ ] release-профиль: debug=true + strip="none" раздувает ELF DWARF'ом → strip="debuginfo"
       (unstripped уже аплоудится как artifact); lto="fat" почти бесплатен (deps=0).
-- [ ] docs/architecture.md протух: 31 syscall против фактических 85 (abi.rs), битые ссылки на
+- [x] docs/architecture.md протух: 31 syscall против фактических 85 (abi.rs), битые ссылки на
       handler.rs:38-59 (теперь handler/dispatch.rs); todo.md «Syscalls (77)» выше — фактически 85.
 - [ ] Дублирование форматов: tools/mkimage и elf2onx вручную копируют константы/layout из
       onyx_core::formats (magic, DT_REG, SNAPSHOT_BLOCKS_EACH=64 в двух местах) → сделать

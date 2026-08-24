@@ -73,6 +73,13 @@ pub(super) unsafe fn alloc_proc() -> KResult<*mut Proc> {
         (*p).affinity = -1;
         (*p).on_rq = false;
         (*p).raw_stdin = false;
+        // Sane per-process termios defaults (ECHO|ICANON, VMIN=1, VTIME=0):
+        // the blanket zeroing above would otherwise leave every process with
+        // echo/canonical mode disabled forever.
+        (*p).term_echo = true;
+        (*p).term_icanon = true;
+        (*p).term_vmin = 1;
+        (*p).term_vtime = 0;
         // Plant the kstack overflow canary (see KSTACK_CANARY in types.rs).
         ptr::write_volatile(
             (*p).kstack.as_mut_ptr() as *mut u64,
