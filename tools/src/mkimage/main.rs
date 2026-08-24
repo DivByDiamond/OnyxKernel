@@ -8,7 +8,7 @@ use std::fs::File;
 use std::io::Write;
 use std::process;
 
-use onyx_core::formats::{ONYFS_BLOCK_SIZE, ONYFS_SNAPSHOT_BLOCKS_EACH, OnyfsInode};
+use onyx_core::formats::{ONYFS_BLOCK_SIZE, ONYFS_SNAPSHOT_BLOCKS_EACH, OnyfsInode, ONYFS_DIRECT_BLKS};
 
 // Image-layout policy (mkimage-only, not part of the on-disk format):
 const MAX_SNAPSHOTS: u32 = 4;
@@ -124,7 +124,11 @@ fn main() {
         data_blocks_needed += 1;
     }
     for f in &files {
-        data_blocks_needed += f.data.len().div_ceil(ONYFS_BLOCK_SIZE) as u32;
+        let nblks = f.data.len().div_ceil(ONYFS_BLOCK_SIZE) as u32;
+        data_blocks_needed += nblks;
+        if nblks > ONYFS_DIRECT_BLKS as u32 {
+            data_blocks_needed += 1; // single-indirect table block
+        }
     }
 
     let snapshot_blocks = if !v1 {
