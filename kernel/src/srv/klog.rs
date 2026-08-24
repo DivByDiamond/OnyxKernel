@@ -134,7 +134,11 @@ pub fn panic_handler(info: &PanicInfo) -> ! {
         ];
         vformat(&mut w, "  at %s:%d:%d\n", args);
     }
-    #[allow(deprecated)]
+    // TODO(dead-code): `core::panic::PanicInfo::payload` is deprecated
+    // upstream (pending PanicHookInfo migration); the &str downcast remains
+    // the only no_std-compatible way to read a string panic message.
+    // Revisit on a toolchain bump. 2026-08-24
+    #[expect(deprecated)]
     if let Some(msg) = info.payload().downcast_ref::<&str>() {
         w.write_str("  msg: ");
         w.write_str(msg);

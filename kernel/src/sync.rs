@@ -16,14 +16,19 @@ use core::{
 /// # Interrupt invariant (CRITICAL)
 ///
 /// Must only be taken with interrupts disabled in kernel context. This is
-/// enforced today by `trap_return` (`arch/asm/trap_asm.rs`), which
+/// enforced by `trap_return` (`arch/asm/trap_asm.rs`), which
 /// unconditionally clears `sstatus.SIE` before returning to ANY context —
 /// user or idle — so a timer tick can never preempt a hart while it holds
 /// one of these locks. Do NOT re-enable SIE in kernel context around code
 /// that takes a `SpinLock`; doing so reintroduces the classic
-/// preempted-while-holding-spinlock deadlock. Re-enabling SIE safely for
-/// idle harts is a documented follow-up (see `proc/scheduler/idle.rs`) and
-/// must be designed together with this contract.
+/// preempted-while-holding-spinlock deadlock.
+///
+/// The only context that runs with SIE set is the idle loop
+/// (`proc/scheduler/idle.rs`), which re-enables SIE immediately before
+/// `wfi` while provably holding no lock (its body takes none, and any
+/// interrupt it takes re-enters the SIE = 0 world before running kernel
+/// code). Return to user mode relies on the hardware SPIE → SIE mechanism
+/// in `sret`, not on this loop.
 pub struct SpinLock {
     locked: AtomicBool,
 }

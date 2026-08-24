@@ -15,11 +15,22 @@ use crate::sync::SpinLock;
 /// interrupts disabled in kernel context — see `crate::sync::SpinLock`).
 pub(super) static G_VMM_LOCK: SpinLock = SpinLock::new();
 
+/// Acquire the global VMM lock.
+///
+/// # Safety
+///
+/// Must only be called with interrupts disabled (see `SpinLock`'s interrupt
+/// invariant) and must be paired with exactly one [`vmm_unlock`].
 #[inline]
 pub unsafe fn vmm_lock() {
     G_VMM_LOCK.lock();
 }
 
+/// Release the global VMM lock.
+///
+/// # Safety
+///
+/// The caller must currently hold the VMM lock on this hart.
 #[inline]
 pub unsafe fn vmm_unlock() {
     G_VMM_LOCK.unlock();

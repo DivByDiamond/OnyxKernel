@@ -19,8 +19,6 @@ pub(super) struct Pmm {
     pub(super) total_pages: usize,
     pub(super) free_pages: usize,
     pub(super) bitmap: *mut u8,
-    #[expect(dead_code)]
-    pub(super) bitmap_bytes: usize,
     pub(super) slab_heads: [*mut slab::SlabHeader; SLAB_SIZES.len()],
 }
 
@@ -29,7 +27,6 @@ pub(super) static mut G_PMM: Pmm = Pmm {
     total_pages: 0,
     free_pages: 0,
     bitmap: ptr::null_mut(),
-    bitmap_bytes: 0,
     slab_heads: [ptr::null_mut(); SLAB_SIZES.len()],
 };
 
@@ -44,16 +41,36 @@ pub(super) static mut G_PMM: Pmm = Pmm {
 pub(super) static G_PMM_LOCK: SpinLock = SpinLock::new();
 
 #[inline]
+/// # Safety
+///
+/// Must only be called with interrupts disabled (see `SpinLock`'s interrupt
+/// invariant) and must be paired with exactly one `pmm_unlock`.
 pub(super) unsafe fn pmm_lock() {
     G_PMM_LOCK.lock();
 }
 
 #[inline]
+/// # Safety
+///
+/// The caller must currently hold `pmm_lock` on this hart.
 pub(super) unsafe fn pmm_unlock() {
     G_PMM_LOCK.unlock();
 }
 
+/// Initialise the PMM over `[dram_base, dram_base + dram_size)`, reserving
+/// the kernel image plus `KERNEL_HEAP_RESERVE` and placing the bitmap at the
+/// start of the managed region.
+///
+/// # Safety
+///
+/// Must run once, single-threaded, before any page allocation. `[dram_base,
+/// dram_base + dram_size)` must be writable physical memory not otherwise in
+/// use; the region below `managed_base` (kernel image + heap reserve) must
+/// already be committed to the kernel.
 pub unsafe fn init(dram_base: u64, dram_size: u64) {
+    // SAFETY: single-threaded early boot per the `# Safety` contract;
+    // raw-pointer writes below target reserved physical memory and the
+    // global `G_PMM` before any other hart runs.
     unsafe {
         let kernel_end_pa = &__kernel_end as *const u8 as usize;
         let heap_end_pa = kernel_end_pa + KERNEL_HEAP_RESERVE;
@@ -74,7 +91,6 @@ pub unsafe fn init(dram_base: u64, dram_size: u64) {
             total_pages: data_pages,
             free_pages: data_pages,
             bitmap,
-            bitmap_bytes,
             slab_heads: [ptr::null_mut(); SLAB_SIZES.len()],
         };
         for i in 0..bitmap_pages {
@@ -126,14 +142,19 @@ pub unsafe fn init(dram_base: u64, dram_size: u64) {
 }
 
 pub fn free_pages() -> usize {
+    // SAFETY: plain `usize` read from the global; a stale value is harmless
+    // (statistics only).
     unsafe { (G_PMM).free_pages }
 }
 
 pub fn total_pages() -> usize {
+    // SAFETY: plain `usize` read of an immutable-after-init field.
     unsafe { (G_PMM).total_pages }
 }
 
 pub fn is_managed(paddr: u64) -> bool {
+    // SAFETY: read-only access to `G_PMM`; all fields are initialised by
+    // `pmm::init` before any caller can reach this function.
     unsafe {
         let p = &raw const G_PMM;
         let pa = paddr as usize;

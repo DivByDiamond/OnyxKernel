@@ -9,7 +9,16 @@ use super::walk::walk;
 #[cfg(target_pointer_width = "32")]
 use super::walk::walk;
 
+/// Unmap and free every 4 KiB page in `[vaddr, vaddr+size)`, releasing
+/// user pages back to the PMM (and the user-memory budget).
+///
+/// # Safety
+///
+/// `root_pa` must be a live root table; `[vaddr, vaddr+size)` must not be
+/// concurrently mapped/unmapped by another hart. Interrupts disabled.
 pub unsafe fn unmap(root_pa: u64, vaddr: u64, size: usize) -> KResult<()> {
+    // SAFETY: lock acquisition itself is safe; `unmap_impl` upholds the
+    // contract above under the VMM lock.
     unsafe {
         super::lock::vmm_lock();
         let r = unmap_impl(root_pa, vaddr, size);
@@ -18,7 +27,18 @@ pub unsafe fn unmap(root_pa: u64, vaddr: u64, size: usize) -> KResult<()> {
     }
 }
 
+/// Locking variant of [`unmap`]. Caller MUST hold the VMM lock.
+///
+/// # Safety
+///
+/// Same as [`unmap`] plus: caller must hold the VMM lock so PTE reads,
+/// page frees and the clearing write below are atomic with respect to
+/// other mappers.
 unsafe fn unmap_impl(root_pa: u64, vaddr: u64, size: usize) -> KResult<()> {
+    // SAFETY: VMM lock held. Each `walk(.., false)` returns a live PTE
+    // slot per its contract; the volatile read/write pair plus sfence_vma
+    // atomically retire one mapping, and `pmm::free` is only called for
+    // PMM-managed user pages.
     unsafe {
         let mut va = vaddr;
         let size_aligned = (size + 4095) & !4095;

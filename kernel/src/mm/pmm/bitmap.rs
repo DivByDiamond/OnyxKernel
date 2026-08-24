@@ -6,14 +6,30 @@ use onyx_core::errno::{Errno, KResult};
 
 use super::{G_PMM, PAGE_SIZE};
 
+/// Read bitmap bit `bit` (0 = first managed page).
+///
+/// # Safety
+///
+/// `bit` must be `< G_PMM.total_pages` and `pmm::init` must have completed.
 pub(super) unsafe fn bm_get(bit: usize) -> bool {
+    // SAFETY: `G_PMM.bitmap` points at `bitmap_bytes` bytes allocated by
+    // `pmm::init`; `bit / 8` is in range by the caller contract above.
     unsafe {
         let p = &raw const G_PMM;
         let bmp = (*p).bitmap;
         *bmp.add(bit / 8) & (1 << (bit % 8)) != 0
     }
 }
+/// Mark page `bit` as used and decrement the free-page counter.
+///
+/// # Safety
+///
+/// Same contract as [`bm_get`]; additionally the caller must hold
+/// `pmm_lock()` (or be in single-threaded early init) since this mutates
+/// shared allocator state.
 pub(super) unsafe fn bm_set(bit: usize) {
+    // SAFETY: see `bm_get`; mutation is serialised by the PMM lock per the
+    // caller contract.
     unsafe {
         let p = &raw const G_PMM;
         let bmp = (*p).bitmap;
@@ -21,7 +37,14 @@ pub(super) unsafe fn bm_set(bit: usize) {
         G_PMM.free_pages -= 1;
     }
 }
+/// Mark page `bit` as free and increment the free-page counter.
+///
+/// # Safety
+///
+/// Same contract as [`bm_set`] (valid `bit`, lock held).
 pub(super) unsafe fn bm_clr(bit: usize) {
+    // SAFETY: see `bm_get`; mutation is serialised by the PMM lock per the
+    // caller contract.
     unsafe {
         let p = &raw const G_PMM;
         let bmp = (*p).bitmap;
@@ -30,18 +53,26 @@ pub(super) unsafe fn bm_clr(bit: usize) {
     }
 }
 fn pa_to_idx(pa: usize) -> usize {
+    // SAFETY: read-only access to fields initialised by `pmm::init`.
     unsafe {
         let p = &raw const G_PMM;
         (pa - (*p).base) / PAGE_SIZE
     }
 }
 fn idx_to_pa(idx: usize) -> usize {
+    // SAFETY: read-only access to fields initialised by `pmm::init`.
     unsafe {
         let p = &raw const G_PMM;
         (*p).base + idx * PAGE_SIZE
     }
 }
 
+/// Allocate a single zeroed physical page.
+///
+/// # Safety
+///
+/// `pmm::init` must have completed. Interrupts must be disabled (spinlock
+/// invariant).
 pub unsafe fn alloc() -> KResult<u64> {
     unsafe {
         super::pmm_lock();
@@ -52,7 +83,15 @@ pub unsafe fn alloc() -> KResult<u64> {
 }
 
 /// Internal alloc without locking. Caller MUST hold `pmm_lock()`.
+///
+/// # Safety
+///
+/// Same as [`alloc`] plus: the caller must hold `pmm_lock()` so the
+/// bitmap scan-and-set is atomic with respect to other allocators.
 pub(super) unsafe fn alloc_unlocked() -> KResult<u64> {
+    // SAFETY: raw pointer reads of `G_PMM` fields and a write of
+    // PAGE_SIZE zero bytes to the returned frame; the index is bounded by
+    // `total_pages` and the frame is PMM-managed RAM.
     unsafe {
         let p = &raw const G_PMM;
         let n = (*p).total_pages;
@@ -70,6 +109,11 @@ pub(super) unsafe fn alloc_unlocked() -> KResult<u64> {
     }
 }
 
+/// Allocate `n` contiguous zeroed physical pages.
+///
+/// # Safety
+///
+/// Same as [`alloc`]: PMM initialised, interrupts disabled.
 pub unsafe fn alloc_n(n: usize) -> KResult<u64> {
     unsafe {
         super::pmm_lock();
@@ -80,7 +124,13 @@ pub unsafe fn alloc_n(n: usize) -> KResult<u64> {
 }
 
 /// Internal alloc_n without locking. Caller MUST hold `pmm_lock()`.
+///
+/// # Safety
+///
+/// Same as [`alloc_n`] plus: caller must hold `pmm_lock()`.
 pub(super) unsafe fn alloc_n_unlocked(n: usize) -> KResult<u64> {
+    // SAFETY: `G_PMM` field reads and a zeroing write of `n * PAGE_SIZE`
+    // bytes into PMM-managed RAM; all indices bounded by `total_pages`.
     unsafe {
         if n == 0 {
             return Err(Errno::Inval);
@@ -117,6 +167,13 @@ pub(super) unsafe fn alloc_n_unlocked(n: usize) -> KResult<u64> {
     }
 }
 
+/// Return one previously allocated page to the free pool.
+///
+/// # Safety
+///
+/// `pa` must be a page-aligned physical address that was returned by a
+/// previous allocation and is not in use; PMM must be initialised and
+/// interrupts disabled.
 pub unsafe fn free(pa: u64) {
     unsafe {
         super::pmm_lock();
@@ -126,7 +183,13 @@ pub unsafe fn free(pa: u64) {
 }
 
 /// Internal free without locking. Caller MUST hold `pmm_lock()`.
+///
+/// # Safety
+///
+/// Same as [`free`] plus: caller must hold `pmm_lock()`.
 pub(super) unsafe fn free_unlocked(pa: u64) {
+    // SAFETY: `pa_to_idx` only reads `G_PMM` fields; the index is
+    // range-checked against `total_pages` before the bit is cleared.
     unsafe {
         let idx = pa_to_idx(pa as usize);
         if idx < G_PMM.total_pages && bm_get(idx) {
@@ -135,6 +198,11 @@ pub(super) unsafe fn free_unlocked(pa: u64) {
     }
 }
 
+/// Allocate a single zeroed physical page (same contract as [`alloc`]).
+///
+/// # Safety
+///
+/// Same as [`alloc`].
 pub unsafe fn alloc_zero() -> KResult<u64> {
     unsafe {
         // alloc() already acquires pmm_lock; no extra locking needed here.

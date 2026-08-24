@@ -46,6 +46,8 @@ fn test_heap_used_initial() {
 
 #[test]
 fn test_vmm_translate_empty() {
+    // SAFETY: `translate` only reads PTE slots of the stack-resident fake
+    // table; all-zero entries terminate the walk immediately.
     unsafe {
         let pt = [0u64; 512];
         let result = crate::mm::vmm::translate(pt.as_ptr() as u64, 0x1000);
@@ -59,6 +61,9 @@ fn test_vmm_translate_leaf() {
     // fake tables must themselves be page-aligned.
     #[repr(align(4096))]
     struct Page([u64; 512]);
+    // SAFETY: all three fake tables are stack-resident and fully
+    // initialised before the walk; PTEs reference each other by valid
+    // page-aligned addresses, so every volatile read stays in bounds.
     unsafe {
         let mut l2 = Page([0u64; 512]);
         let mut l1 = Page([0u64; 512]);
@@ -82,6 +87,7 @@ fn test_vmm_translate_leaf() {
 
 #[test]
 fn test_vmm_translate_not_mapped() {
+    // SAFETY: read-only walk of a stack-resident all-zero fake table.
     unsafe {
         let pt = [0u64; 512];
         let result = crate::mm::vmm::translate(pt.as_ptr() as u64, 0x2000);
@@ -91,6 +97,9 @@ fn test_vmm_translate_not_mapped() {
 
 #[test]
 fn test_vmm_translate_invalid_pte() {
+    // SAFETY: read-only walk of a stack-resident fake table; the invalid
+    // (PTE_V-clear) leaf terminates the walk before any dereference of a
+    // fabricated address.
     unsafe {
         let mut pt = [0u64; 512];
         let vaddr = 0x1000u64;

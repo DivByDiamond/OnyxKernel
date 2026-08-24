@@ -29,16 +29,10 @@ impl Block {
 }
 
 struct Heap {
-    #[expect(dead_code)]
-    base: usize,
-    #[expect(dead_code)]
-    size: usize,
     used: usize,
     free_list: *mut Block,
 }
 static mut G_HEAP: Heap = Heap {
-    base: 0,
-    size: 0,
     used: 0,
     free_list: core::ptr::null_mut(),
 };
@@ -50,7 +44,18 @@ pub use alloc::*;
 
 pub use realloc::*;
 
+/// Initialise the bump/free-list kernel heap over the `HEAP_SIZE` region
+/// that starts at the linker-provided `__kernel_end` symbol.
+///
+/// # Safety
+///
+/// Must be called exactly once during early boot, single-threaded, before
+/// any allocation is made. The caller guarantees that `[__kernel_end,
+/// __kernel_end + HEAP_SIZE)` is writable physical memory (reserved by the
+/// PMM/linker script) and that no other code aliases it yet.
 pub unsafe fn init() {
+    // SAFETY: single-threaded early boot per the `# Safety` contract; the
+    // Block write targets reserved physical memory past `__kernel_end`.
     unsafe {
         let kernel_end_pa = &crate::arch::__kernel_end as *const u8 as usize;
         let block = kernel_end_pa as *mut Block;
@@ -59,9 +64,9 @@ pub unsafe fn init() {
         (*block).next = core::ptr::null_mut();
         (*block).prev = core::ptr::null_mut();
         let p = &raw mut G_HEAP;
+        // SAFETY: `G_HEAP` is only ever written here during early boot,
+        // before any other hart or allocator call can observe it.
         *p = Heap {
-            base: kernel_end_pa,
-            size: HEAP_SIZE,
             used: 0,
             free_list: block,
         };
@@ -69,5 +74,7 @@ pub unsafe fn init() {
 }
 
 pub fn used() -> usize {
+    // SAFETY: reading a `usize` counter; torn reads are impossible on the
+    // supported targets and callers accept the (slightly stale) value.
     unsafe { G_HEAP.used }
 }

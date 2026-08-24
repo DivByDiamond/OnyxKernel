@@ -13,11 +13,30 @@ use onyx_core::errno::KResult;
 
 pub(super) static mut G_KERNEL_ROOT_PA: u64 = 0;
 
+/// Allocate a zeroed page-table root.
+///
+/// # Safety
+///
+/// PMM must be initialised; interrupts disabled (spinlock invariant).
 pub unsafe fn new_root() -> KResult<u64> {
+    // SAFETY: `pmm::alloc_zero` returns a zeroed PMM-managed frame, which
+    // is exactly a valid empty root table (all PTEs invalid).
     unsafe { pmm::alloc_zero() }
 }
 
+/// Switch the current hart's SATP to `root_pa` and flush all TLB entries.
+///
+/// # Safety
+///
+/// `root_pa` must be a valid, fully initialised root table for this hart;
+/// switching while code running on this hart still relies on the previous
+/// address space will fault — callers must ensure the switch point is
+/// safe (e.g. inside `trap_return`/context switch with kernel mappings
+/// identity-reachable).
 pub unsafe fn install_root(root_pa: u64) {
+    // SAFETY: CSR writes are inherently privileged but not memory-unsafe;
+    // the contract above guarantees the target root is valid. sfence_vma_all
+    // ensures no stale translations from the previous satp survive.
     unsafe {
         #[cfg(target_pointer_width = "64")]
         {
@@ -32,7 +51,19 @@ pub unsafe fn install_root(root_pa: u64) {
     }
 }
 
+/// Create and install the global kernel address space: 1 GiB identity
+/// leaf mappings covering the kernel's physical window, recorded in
+/// `G_KERNEL_ROOT_PA` (and `arch::smp`), then loaded into SATP.
+///
+/// # Safety
+///
+/// Must run once per boot, single-threaded, before any hart relies on
+/// virtual addressing. PMM initialised; interrupts disabled.
 pub unsafe fn init() -> KResult<u64> {
+    // SAFETY: root comes fresh from `pmm::alloc_zero` (valid, zeroed);
+    // the volatile writes target slots 0..3 of that table; `G_KERNEL_ROOT_PA`
+    // is written single-threaded here; `install_root` upholds its own
+    // contract for this freshly built table.
     unsafe {
         let root_pa = new_root()?;
         crate::arch::smp::G_KERNEL_ROOT_PA = root_pa;
@@ -63,10 +94,23 @@ pub unsafe fn init() -> KResult<u64> {
 }
 
 pub fn kernel_root() -> u64 {
+    // SAFETY: plain u64 read of a value written once during boot init;
+    // no aliasing `&mut` exists, so this cannot race with a write.
     unsafe { G_KERNEL_ROOT_PA }
 }
 
+/// Free every table and user page reachable from `root_pa`, then the root
+/// itself, and flush all TLB entries.
+///
+/// # Safety
+///
+/// The address space must be dead: no hart may still run on (or translate
+/// through) `root_pa`. Interrupts disabled; caller must not hold the VMM
+/// lock already (this takes it).
 pub unsafe fn destroy_root(root_pa: u64) {
+    // SAFETY: VMM lock held so no concurrent mapper can resurrect PTEs;
+    // `free_subtree` only dereferences table slots reachable from a valid
+    // root and only frees PMM-managed pages (guarded by `is_managed`).
     unsafe {
         super::lock::vmm_lock();
         let root = root_pa as *mut u64;
@@ -80,7 +124,18 @@ pub unsafe fn destroy_root(root_pa: u64) {
     }
 }
 
+/// Recursively free the leaf pages of a table subtree (the tables
+/// themselves are freed by the callers).
+///
+/// # Safety
+///
+/// Caller must hold the VMM lock. `table` must point at a live, mapped-in
+/// page table of level `level` whose entries were produced by this VMM;
+/// recursion depth is bounded by the paging levels.
 unsafe fn free_subtree(table: *mut u64, level: u32) {
+    // SAFETY: VMM lock held; `table.add(i)` with i < PTES_PER_TABLE is in
+    // bounds for a page-table page, and child PAs dereferenced recursively
+    // come from valid non-leaf PTEs guarded by `level > 0`.
     unsafe {
         #[cfg(target_pointer_width = "64")]
         let entries = SV39_PTES_PER_TABLE;
