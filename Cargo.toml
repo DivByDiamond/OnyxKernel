@@ -15,9 +15,11 @@ opt-level = 1
 
 [profile.release]
 panic = "abort"
+# Audit blocker: arithmetic bugs in kernel paths (page align, size math)
+# must panic in release builds too instead of silently wrapping.
+overflow-checks = true
 lto = false
 codegen-units = 1
 opt-level = "z"
 debug = true
 strip = "none"
-overflow-checks = false
