@@ -1,11 +1,12 @@
 //! virtio-blk device probe / init and virtqueue setup.
 use super::{
-    BlkReq, G_DEVS, G_NDEVS, R_DEVICE_ID, R_GUEST_FEATURES, R_GUEST_FEATURES_SEL, R_HOST_FEATURES,
-    R_HOST_FEATURES_SEL, R_MAGIC_VALUE, R_QUEUE_ALIGN, R_QUEUE_AVAIL_HIGH, R_QUEUE_AVAIL_LOW,
-    R_QUEUE_DESC_HIGH, R_QUEUE_DESC_LOW, R_QUEUE_NUM, R_QUEUE_PFN, R_QUEUE_READY, R_QUEUE_SEL,
-    R_QUEUE_USED_HIGH, R_QUEUE_USED_LOW, R_STATUS, R_VERSION, VIRTIO_F_VERSION_1, VIRTIO_ID_BLK,
-    VIRTIO_MAX_DEVS, VIRTIO_S_ACK, VIRTIO_S_DRIVER, VIRTIO_S_DRIVER_OK, VIRTIO_S_FEATURES_OK,
-    VIRTQ_SIZE, VirtioBlkDev, VqAvail, VqDesc, VqUsed, reg_r, reg_w,
+    BlkReq, G_DEVS, G_NDEVS, R_DEVICE_ID, R_GUEST_FEATURES, R_GUEST_FEATURES_SEL,
+    R_GUEST_PAGE_SIZE, R_HOST_FEATURES, R_HOST_FEATURES_SEL, R_MAGIC_VALUE, R_QUEUE_ALIGN,
+    R_QUEUE_AVAIL_HIGH, R_QUEUE_AVAIL_LOW, R_QUEUE_DESC_HIGH, R_QUEUE_DESC_LOW, R_QUEUE_NUM,
+    R_QUEUE_PFN, R_QUEUE_READY, R_QUEUE_SEL, R_QUEUE_USED_HIGH, R_QUEUE_USED_LOW, R_STATUS,
+    R_VERSION, VIRTIO_F_VERSION_1, VIRTIO_ID_BLK, VIRTIO_MAX_DEVS, VIRTIO_S_ACK, VIRTIO_S_DRIVER,
+    VIRTIO_S_DRIVER_OK, VIRTIO_S_FEATURES_OK, VIRTQ_SIZE, VirtioBlkDev, VqAvail, VqDesc, VqUsed,
+    reg_r, reg_w,
 };
 use crate::mm::pmm;
 use core::ptr;
@@ -116,6 +117,7 @@ unsafe fn setup_queue(idx: usize) -> KResult<()> {
             dev.used = used_pa as *mut VqUsed;
             dev.req_buf = req_pa as *mut BlkReq;
             dev.last_used = 0;
+            reg_w(dev.base, R_GUEST_PAGE_SIZE, 4096);
             reg_w(dev.base, R_QUEUE_ALIGN, 4096);
             reg_w(dev.base, R_QUEUE_PFN, (desc_pa / 4096) as u32);
         }
