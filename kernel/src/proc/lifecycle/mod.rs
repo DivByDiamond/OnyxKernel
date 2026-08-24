@@ -50,10 +50,6 @@ pub(super) unsafe fn alloc_proc() -> KResult<*mut Proc> {
     (*p).affinity = -1;
     (*p).on_rq = false;
     (*p).raw_stdin = false;
-    (*p).term_echo = true;
-    (*p).term_icanon = true;
-    (*p).term_vmin = 1;
-    (*p).term_vtime = 0;
     G_ALL_PROCS = p;
     Ok(p)
 }
