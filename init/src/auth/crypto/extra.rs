@@ -2,55 +2,45 @@
 // items unused by one binary are used by others (dead_code/unused_imports fire per-bin).
 #![allow(dead_code, unused_imports)]
 
-use super::sha256::sha256;
 use crate::syscalls;
 
-pub fn bytes_to_hex(bytes: &[u8]) -> [u8; 64] {
-    let mut out = [0u8; 64];
-    let hex_chars = b"0123456789abcdef";
-    let n = bytes.len().min(32);
-    for i in 0..n {
-        out[i * 2] = hex_chars[(bytes[i] >> 4) as usize];
-        out[i * 2 + 1] = hex_chars[(bytes[i] & 0xF) as usize];
+pub use onyx_core::crypto::kdf::{
+    KDF_ITERS, bytes_to_hex, const_time_eq, format_shadow_field, hash_password, hex_decode_8,
+    legacy_hash_password,
+};
+
+static mut WEAK_ENTROPY_WARNED: bool = false;
+
+/// One-time console warning when salt generation has to fall back to a
+/// non-cryptographic PRNG. Guarded by a static bool so each userspace
+/// process (login/useradd/passwd/su share this module) prints at most one
+/// line regardless of how many salts it generates.
+///
+/// NOTE: the kernel's getentropy always succeeds even when the underlying
+/// hwrand source is only an LCG (the "silence contract"), so this warning
+/// fires only on genuine syscall failure — the kernel-side degradation
+/// signal lives in `kernel/src/drivers/hwrand.rs::strong_source_available`.
+fn warn_weak_entropy_once() {
+    unsafe {
+        if WEAK_ENTROPY_WARNED {
+            return;
+        }
+        WEAK_ENTROPY_WARNED = true;
     }
-    out
+    const MSG: &[u8] = b"warning: weak entropy source, password salts degraded\n";
+    unsafe { syscalls::write(2, MSG.as_ptr(), MSG.len()) };
 }
 
-fn hex_val(c: u8) -> u8 {
-    match c {
-        b'0'..=b'9' => c - b'0',
-        b'a'..=b'f' => c - b'a' + 10,
-        b'A'..=b'F' => c - b'A' + 10,
-        _ => 0,
-    }
-}
-
-pub(crate) fn hex_decode_8(hex: &[u8]) -> [u8; 8] {
-    let mut out = [0u8; 8];
-    let n = (hex.len() / 2).min(8);
-    for i in 0..n {
-        out[i] = (hex_val(hex[i * 2]) << 4) | hex_val(hex[i * 2 + 1]);
-    }
-    out
-}
-
-pub fn const_time_eq(a: &[u8], b: &[u8]) -> bool {
-    if a.len() != b.len() {
-        return false;
-    }
-    let mut r = 0u8;
-    for (ai, bi) in a.iter().zip(b.iter()) {
-        r |= ai ^ bi;
-    }
-    r == 0
-}
-
-pub(crate) fn generate_salt() -> [u8; 8] {
+/// Generate an 8-byte salt from `getentropy`. If the syscall fails, degrade
+/// to a time/pid-seeded LCG (never fail open by returning early) and emit
+/// a single warning line.
+pub fn generate_salt() -> [u8; 8] {
     let mut salt = [0u8; 8];
     let r = unsafe { syscalls::getentropy(salt.as_mut_ptr(), 8) };
     if r == 0 {
         return salt;
     }
+    warn_weak_entropy_once();
     let pid = unsafe { syscalls::getpid() } as u64;
     let mut ts = [0u64; 2];
     let _ = unsafe { syscalls::clock_gettime(0, ts.as_mut_ptr()) };
@@ -60,20 +50,6 @@ pub(crate) fn generate_salt() -> [u8; 8] {
         *s = (seed >> 16) as u8;
     }
     salt
-}
-
-pub const KDF_ITERS: usize = 10_000;
-
-pub fn hash_password(password: &[u8], salt: &[u8; 8]) -> [u8; 32] {
-    let mut h = sha256(password);
-    let mut buf = [0u8; 40];
-    buf[..32].copy_from_slice(&h);
-    buf[32..].copy_from_slice(salt);
-    for _ in 0..KDF_ITERS {
-        h = sha256(&buf);
-        buf[..32].copy_from_slice(&h);
-    }
-    h
 }
 
 pub(crate) fn format_dec(n: u32) -> [u8; 12] {

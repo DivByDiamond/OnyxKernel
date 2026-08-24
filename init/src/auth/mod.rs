@@ -7,6 +7,11 @@ pub mod group;
 pub mod passwd;
 pub mod shadow;
 
+// Linker contract: onyx_core (shared crypto) declares `extern crate alloc`,
+// so every binary compiling this module needs a global allocator. See
+// kalloc.rs — inert unless something actually allocates.
+mod kalloc;
+
 pub const PASSWD_PATH: &[u8] = b"/etc/passwd";
 pub const SHADOW_PATH: &[u8] = b"/etc/shadow";
 pub const GROUP_PATH: &[u8] = b"/etc/group";

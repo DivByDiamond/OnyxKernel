@@ -164,11 +164,23 @@ pub unsafe extern "C" fn _start() -> ! {
         }
         let password = &pass_buf[..pn];
 
-        if !auth::verify_shadow_password(username, password) {
+        let outcome = auth::verify_shadow_outcome(username, password);
+        if outcome == auth::VerifyOutcome::Fail {
             syscalls::write(1, b"Login incorrect\n\n".as_ptr(), 17);
             backoff::backoff_sleep(fails);
             fails = fails.saturating_add(1);
             continue;
+        }
+
+        // Transparent migration: if the entry matched only the legacy
+        // single-round scheme, rewrite it in the current iterated $5$
+        // format — but only from a root session, since rewriting
+        // /etc/shadow needs write access (ACL allows uid==0).
+        if outcome == auth::VerifyOutcome::OkLegacy && users[user_idx].uid == 0 {
+            if auth::update_shadow_password(username, password).is_ok() {
+                const MIG_MSG: &[u8] = b"[login] shadow entry migrated to iterated $5$ format\n";
+                syscalls::write(1, MIG_MSG.as_ptr(), MIG_MSG.len());
+            }
         }
 
         fails = 0;
