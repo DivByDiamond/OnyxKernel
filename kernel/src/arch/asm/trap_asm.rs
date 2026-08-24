@@ -93,6 +93,18 @@ trap_return:
     ld t6, 240(sp)
     ld t0, 248(sp)
     csrw sepc, t0
+    // Restore sstatus with SIE (bit 1) force-cleared: ALL trap-handler and
+    // scheduler code runs with interrupts off, which is what makes the
+    // kernel's SpinLocks safe (see crate::sync). Interrupts are turned back
+    // on at exactly two kinds of points, never here:
+    //   * Return to USER mode: user trap frames carry sstatus.SPIE = 1
+    //     (set by drop_to_user / spawn / fork / sigreturn frame fixups), so
+    //     the sret below performs SPIE -> SIE in hardware as it drops to
+    //     U-mode.
+    //   * The idle loop (proc/scheduler/idle.rs) re-enables SIE itself right
+    //     after re-arming its timer, immediately before wfi, holding no
+    //     locks. Kernel-mode returns (SPP = 1, SPIE = old SIE = 0) resume
+    //     with interrupts still off.
     ld t0, 256(sp)
     li t1, ~(1 << 1)
     and t0, t0, t1
