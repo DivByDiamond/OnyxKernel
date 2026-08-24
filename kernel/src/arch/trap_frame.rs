@@ -17,6 +17,38 @@ pub type Reg = u64;
 #[cfg(target_pointer_width = "32")]
 pub type Reg = u32;
 
+/// Truncate a canonical 64-bit value to this target's register width.
+/// Used when storing u64 ABI values (addresses, syscall args) into a
+/// TrapFrame field on rv32 (no-op narrowing-free move on rv64).
+#[inline]
+#[must_use]
+pub const fn reg_truncate(v: u64) -> Reg {
+    #[cfg(target_pointer_width = "64")]
+    {
+        v
+    }
+    #[cfg(target_pointer_width = "32")]
+    {
+        v as u32
+    }
+}
+
+/// Widen this target's register width to the canonical 64-bit value.
+/// Zero-extends u32 register reads into the u64 ABI domain on rv32
+/// (identity on rv64).
+#[inline]
+#[must_use]
+pub const fn reg_widen(v: Reg) -> u64 {
+    #[cfg(target_pointer_width = "64")]
+    {
+        v
+    }
+    #[cfg(target_pointer_width = "32")]
+    {
+        v as u64
+    }
+}
+
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct TrapFrame {

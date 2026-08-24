@@ -1,6 +1,6 @@
 //! Filesystem syscalls (part 2) — `sys_exec`, `sys_sbrk`, `sys_readdir`,
 //! `sys_write_fd`, `sys_create`, `sys_mkdir`.
-use crate::arch::trap_frame::TrapFrame;
+use crate::arch::trap_frame::{TrapFrame, reg_truncate};
 use crate::fs::vfs;
 use crate::mm::heap;
 use crate::proc;
@@ -96,23 +96,27 @@ pub(super) unsafe fn sys_exec(tf: &mut TrapFrame, path: u64, argv: u64) -> i64 {
         // we get correct values:
         //   sepc = entry  (tf.sepc - 4 to compensate for handler's +4)
         //   a0   = argc   (return argc, handler will set a0 = ret)
-        tf.sepc = r.entry.wrapping_sub(4);
-        tf.sp = if argc > 0 { argv_sp } else { r.ustack };
-        tf.a0 = argc as u64;
-        tf.a1 = if argc > 0 { argv_sp + 8 } else { 0 };
+        tf.sepc = reg_truncate(r.entry.wrapping_sub(4));
+        tf.sp = reg_truncate(if argc > 0 { argv_sp } else { r.ustack });
+        tf.a0 = reg_truncate(argc as u64);
+        tf.a1 = reg_truncate(if argc > 0 { argv_sp + 8 } else { 0 });
         // envp (a2): copy_argv_to_stack builds [argc][argv..NULL][envp={NULL}][auxv],
         // so the empty envp array sits right after argv's NULL terminator.
-        tf.a2 = if argc > 0 {
+        tf.a2 = reg_truncate(if argc > 0 {
             argv_sp + 8 + (argc as u64 + 1) * 8
         } else {
             0
-        };
-        tf.sstatus = crate::arch::regs::SSTATUS_SPIE | crate::arch::regs::SSTATUS_FS_INITIAL;
-        if cfg!(target_pointer_width = "64") {
+        });
+        tf.sstatus =
+            reg_truncate(crate::arch::regs::SSTATUS_SPIE | crate::arch::regs::SSTATUS_FS_INITIAL);
+        #[cfg(target_pointer_width = "64")]
+        {
             tf.satp = crate::arch::regs::SATP_MODE_SV39 | (r.root_pa >> 12);
-        } else {
-            tf.satp = (crate::arch::bits::SATP_MODE_SV32 | ((r.root_pa >> 12) & 0x3FFFFF) as u32)
-                as crate::arch::trap_frame::Reg;
+        }
+        #[cfg(target_pointer_width = "32")]
+        {
+            tf.satp = crate::arch::bits::SATP_MODE_SV32
+                | (((r.root_pa >> 12) & 0x3FF_FFFF) as crate::arch::trap_frame::Reg);
         }
         argc as i64
     }

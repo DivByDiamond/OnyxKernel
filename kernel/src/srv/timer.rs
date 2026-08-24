@@ -1,5 +1,15 @@
 //! CLINT timer (100 Hz tick).
-use core::sync::atomic::{AtomicU64, Ordering};
+//!
+//! Tick counters use the widest atomically-accessible integer on the
+//! target: AtomicU64 on rv64, AtomicU32 on rv32 (riscv32imac has no
+//! 64-bit AMOs). At 100 Hz a u32 jiffies counter wraps after ~497 days;
+//! all readers use wrapping arithmetic (`uptime_us`, `sys_nanosleep`),
+//! so wraparound degrades gracefully instead of panicking.
+#[cfg(target_pointer_width = "32")]
+use core::sync::atomic::AtomicU32 as AtomicTick;
+#[cfg(target_pointer_width = "64")]
+use core::sync::atomic::AtomicU64 as AtomicTick;
+use core::sync::atomic::Ordering;
 
 #[cfg(not(feature = "smode"))]
 use crate::arch::mmio::Mmio;
@@ -16,20 +26,38 @@ static mut G_TICK_INTERVAL: u64 = 0;
 // Audit fix: G_UPTICKS/G_JIFFIES were `static mut u64` with non-atomic RMW
 // from every ticking hart — concurrent increments could be lost. Both are now
 // only written via atomic fetch_add.
-static G_UPTICKS: AtomicU64 = AtomicU64::new(0);
+static G_UPTICKS: AtomicTick = AtomicTick::new(0);
 /// Monotonic tick counter, incremented once per timer tick per hart.
-/// Written ONLY through the atomic view below (`AtomicU64::from_ptr`);
-/// external readers still access this `pub static mut u64` directly
-/// (fs timestamps, nanosleep), which is why the type is unchanged.
-/// Migrating those readers to a load(Acquire) accessor is a follow-up.
+/// Written ONLY through the atomic view below (`AtomicTick::from_ptr`);
+/// external readers must go through [`jiffies`], which performs an
+/// atomic Acquire load and widens to u64.
+#[cfg(target_pointer_width = "64")]
 pub static mut G_JIFFIES: u64 = 0;
+#[cfg(target_pointer_width = "32")]
+pub static mut G_JIFFIES: u32 = 0;
 
 #[inline]
-fn jiffies_atomic() -> &'static AtomicU64 {
-    // SAFETY: G_JIFFIES is a naturally-aligned u64 static that outlives the
-    // program; the pointer stays valid forever. Same pattern as
-    // arch/smp.rs G_RELEASE.
-    unsafe { AtomicU64::from_ptr(core::ptr::addr_of_mut!(G_JIFFIES)) }
+fn jiffies_atomic() -> &'static AtomicTick {
+    // SAFETY: G_JIFFIES is a naturally-aligned machine-word static of the
+    // matching atomic type that outlives the program; the pointer stays
+    // valid forever. Same pattern as arch/smp.rs G_RELEASE.
+    unsafe { AtomicTick::from_ptr(core::ptr::addr_of_mut!(G_JIFFIES)) }
+}
+
+/// Atomic snapshot of the monotonic tick counter, widened to u64.
+/// On rv32 the underlying u32 wraps after ~497 days at 100 Hz; callers
+/// already treat the value as wrapping.
+#[inline]
+#[must_use]
+pub fn jiffies() -> u64 {
+    #[cfg(target_pointer_width = "64")]
+    {
+        jiffies_atomic().load(Ordering::Acquire)
+    }
+    #[cfg(target_pointer_width = "32")]
+    {
+        jiffies_atomic().load(Ordering::Acquire) as u64
+    }
 }
 
 pub unsafe fn init() {
@@ -154,6 +182,14 @@ pub unsafe fn handle() {
 }
 pub fn uptime_us() -> u64 {
     // Acquire load: readers of uptime get a consistent (if wrapping) sample.
-    // The multiply intentionally wraps like the old code.
-    G_UPTICKS.load(Ordering::Acquire).wrapping_mul(10_000)
+    // The multiply wraps on rv64 like the old code; on rv32 the widened
+    // product cannot overflow for any u32 tick count.
+    #[cfg(target_pointer_width = "64")]
+    {
+        G_UPTICKS.load(Ordering::Acquire).wrapping_mul(10_000)
+    }
+    #[cfg(target_pointer_width = "32")]
+    {
+        (G_UPTICKS.load(Ordering::Acquire) as u64).wrapping_mul(10_000)
+    }
 }

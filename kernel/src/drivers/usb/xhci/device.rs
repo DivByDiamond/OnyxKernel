@@ -142,7 +142,16 @@ pub unsafe fn configure_endpoint(slot_id: u8, ep_idx: u8, ep_type: u8, mps: u16)
         set_input_ctx_ep(input_pa as *mut u8, ep_idx, ep_type, mps, deq_val);
         let mut trb = ring::Trb::zero();
         trb.params[0] = input_pa as u32;
-        trb.params[1] = (input_pa >> 32) as u32;
+        // xHCI TRBs carry 64-bit addresses even though this target can
+        // only physically address 32 bits; the high word is simply zero.
+        #[cfg(target_pointer_width = "64")]
+        {
+            trb.params[1] = (input_pa >> 32) as u32;
+        }
+        #[cfg(target_pointer_width = "32")]
+        {
+            trb.params[1] = 0;
+        }
         trb.params[2] = (slot_id as u32) << 24;
         trb.set_type(ring::TRB_CONFIG_EP);
         trb.set_flags(ring::TRB_IOC);

@@ -46,7 +46,7 @@ pub unsafe fn update_mtime(ino: u32) -> KResult<()> {
             reserved: 0,
         };
         read_inode(ino, &mut inode)?;
-        inode.mtime = timer::G_JIFFIES;
+        inode.mtime = timer::jiffies();
         write_inode(ino, &inode)
     }
 }
@@ -74,7 +74,7 @@ pub unsafe fn set_mode(ino: u32, mode: u32) -> KResult<()> {
         };
         read_inode(ino, &mut inode)?;
         inode.mode = mode;
-        inode.mtime = timer::G_JIFFIES;
+        inode.mtime = timer::jiffies();
         write_inode(ino, &inode)?;
         super::super::journal::journal_commit()
     }
@@ -104,7 +104,7 @@ pub unsafe fn set_uid_gid(ino: u32, uid: u32, gid: u32) -> KResult<()> {
         read_inode(ino, &mut inode)?;
         inode.uid = uid;
         inode.gid = gid;
-        inode.mtime = timer::G_JIFFIES;
+        inode.mtime = timer::jiffies();
         write_inode(ino, &inode)?;
         super::super::journal::journal_commit()
     }

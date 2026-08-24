@@ -14,7 +14,7 @@ pub unsafe fn create(dir_ino: u32, name: &[u8], mode: u32) -> KResult<u32> {
             return Err(Errno::Inval);
         }
         let new_ino = alloc_inode()?;
-        let now = timer::G_JIFFIES;
+        let now = timer::jiffies();
         let inode = OnyfsInode {
             mode,
             size: 0,
@@ -128,7 +128,7 @@ pub unsafe fn truncate(ino: u32) -> KResult<()> {
         read_inode(ino, &mut inode)?;
         free_all_blocks(&mut inode)?;
         inode.size = 0;
-        inode.mtime = timer::G_JIFFIES;
+        inode.mtime = timer::jiffies();
         write_inode(ino, &inode)?;
         journal_commit()?;
         Ok(())
@@ -321,7 +321,7 @@ pub unsafe fn truncate_to_length(ino: u32, length: u64) -> KResult<()> {
         }
 
         inode.size = length;
-        inode.mtime = timer::G_JIFFIES;
+        inode.mtime = timer::jiffies();
         write_inode(ino, &inode)?;
         journal_commit()?;
         Ok(())

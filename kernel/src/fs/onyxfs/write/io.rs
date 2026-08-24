@@ -107,7 +107,7 @@ pub unsafe fn write(ino: u32, buf: *const u8, off: u32, len: u32) -> KResult<u32
         if (end as u64) > inode.size {
             inode.size = end as u64;
         }
-        inode.mtime = timer::G_JIFFIES;
+        inode.mtime = timer::jiffies();
         write_inode(ino, &inode)?;
         journal_commit()?;
         Ok(written)

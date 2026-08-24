@@ -3,7 +3,7 @@ use super::process::{
     PROC_PID_INIT, PROC_RING_ROOT, PROC_RING_USER, ProcState, alloc_pid, hart_id,
 };
 use crate::arch::regs::*;
-use crate::arch::trap_frame::TrapFrame;
+use crate::arch::trap_frame::{TrapFrame, reg_truncate};
 use crate::mm::heap;
 use crate::proc::onx;
 use crate::proc::scheduler::{enqueue, rq_lock, rq_unlock};
@@ -66,16 +66,19 @@ pub unsafe fn create_user(
         (*p).tf = TrapFrame::zero();
         (*p).pending_signals = 0;
         (*p).signal_mask = 0;
-        (*p).tf.sepc = entry;
-        (*p).tf.sp = if argc > 0 { argv_sp } else { ustack };
-        (*p).tf.a0 = argc as u64;
-        (*p).tf.a1 = if argc > 0 { argv_sp + 8 } else { 0 };
-        (*p).tf.sstatus = SSTATUS_SPIE | crate::arch::regs::SSTATUS_FS_INITIAL;
-        if cfg!(target_pointer_width = "64") {
+        (*p).tf.sepc = reg_truncate(entry);
+        (*p).tf.sp = reg_truncate(if argc > 0 { argv_sp } else { ustack });
+        (*p).tf.a0 = reg_truncate(argc as u64);
+        (*p).tf.a1 = reg_truncate(if argc > 0 { argv_sp + 8 } else { 0 });
+        (*p).tf.sstatus = reg_truncate(SSTATUS_SPIE | crate::arch::regs::SSTATUS_FS_INITIAL);
+        #[cfg(target_pointer_width = "64")]
+        {
             (*p).tf.satp = SATP_MODE_SV39 | (root_pa >> 12);
-        } else {
-            (*p).tf.satp = (crate::arch::bits::SATP_MODE_SV32 | ((root_pa >> 12) & 0x3FFFFF) as u32)
-                as crate::arch::trap_frame::Reg;
+        }
+        #[cfg(target_pointer_width = "32")]
+        {
+            (*p).tf.satp = crate::arch::bits::SATP_MODE_SV32
+                | (((root_pa >> 12) & 0x3FF_FFFF) as crate::arch::trap_frame::Reg);
         }
         let caller_hart = hart_id();
         rq_lock(caller_hart);

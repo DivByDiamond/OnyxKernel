@@ -1,4 +1,4 @@
-use crate::arch::trap_frame::TrapFrame;
+use crate::arch::trap_frame::{TrapFrame, reg_widen};
 use crate::proc;
 use crate::syscall::abi::*;
 use onyx_core::errno::Errno;
@@ -35,10 +35,16 @@ pub unsafe fn parse_user_path(path: u64, out: &mut [u8; 256]) -> Option<usize> {
 
 pub unsafe fn handle(tf: &mut TrapFrame) -> i64 {
     unsafe {
-        let nr = tf.a7;
-        let a0 = tf.a0;
-        let a1 = tf.a1;
-        let a2 = tf.a2;
+        // Syscall arguments are widened to u64 on every target so the ABI
+        // layer stays pointer-width independent (on rv32 the raw registers
+        // are u32 and zero-extend into the canonical u64 ABI values).
+        let nr = reg_widen(tf.a7);
+        let a0 = reg_widen(tf.a0);
+        let a1 = reg_widen(tf.a1);
+        let a2 = reg_widen(tf.a2);
+        let a3 = reg_widen(tf.a3);
+        let a4 = reg_widen(tf.a4);
+        let a5 = reg_widen(tf.a5);
         let cur_ring = proc::current_ring();
 
         if !acl::syscall_allowed(nr, cur_ring) {
@@ -78,7 +84,7 @@ pub unsafe fn handle(tf: &mut TrapFrame) -> i64 {
             SYS_chan_recv => crate::syscall::ipc_sys::sys_chan_recv(tf, a0 as u32, a1, a2),
             SYS_chan_close => crate::syscall::ipc_sys::sys_chan_close(a0 as u32),
             SYS_brk => crate::syscall::fs_sys3::sys_brk(a0),
-            SYS_mmap => crate::syscall::fs_sys3::sys_mmap(a0, a1, a2, tf.a3, tf.a4, tf.a5),
+            SYS_mmap => crate::syscall::fs_sys3::sys_mmap(a0, a1, a2, a3, a4, a5),
             SYS_munmap => crate::syscall::fs_sys3::sys_munmap(a0, a1),
             SYS_dup => crate::syscall::fs_sys3::sys_dup(a0),
             SYS_pipe => crate::syscall::fs_sys3::sys_pipe(a0),

@@ -1,6 +1,6 @@
 use onyx_core::errno::Errno;
 
-use crate::arch::trap_frame::TrapFrame;
+use crate::arch::trap_frame::{TrapFrame, reg_truncate};
 use crate::fs::vfs;
 use crate::proc;
 use crate::syscall::handler::parse_user_path;
@@ -86,17 +86,21 @@ pub unsafe fn sys_execve(tf: &mut TrapFrame, path: u64, argv: u64, envp: u64) ->
         } else {
             proc::PROC_RING_USER
         };
-        tf.sepc = r.entry.wrapping_sub(4);
-        tf.sp = argv_sp;
-        tf.a0 = argc as u64;
-        tf.a1 = argv_sp + 8;
-        tf.a2 = envp_sp;
-        tf.sstatus = crate::arch::regs::SSTATUS_SPIE | crate::arch::regs::SSTATUS_FS_INITIAL;
-        if cfg!(target_pointer_width = "64") {
+        tf.sepc = reg_truncate(r.entry.wrapping_sub(4));
+        tf.sp = reg_truncate(argv_sp);
+        tf.a0 = reg_truncate(argc as u64);
+        tf.a1 = reg_truncate(argv_sp + 8);
+        tf.a2 = reg_truncate(envp_sp);
+        tf.sstatus =
+            reg_truncate(crate::arch::regs::SSTATUS_SPIE | crate::arch::regs::SSTATUS_FS_INITIAL);
+        #[cfg(target_pointer_width = "64")]
+        {
             tf.satp = crate::arch::regs::SATP_MODE_SV39 | (r.root_pa >> 12);
-        } else {
-            tf.satp = (crate::arch::bits::SATP_MODE_SV32 | ((r.root_pa >> 12) & 0x3FFFFF) as u32)
-                as crate::arch::trap_frame::Reg;
+        }
+        #[cfg(target_pointer_width = "32")]
+        {
+            tf.satp = crate::arch::bits::SATP_MODE_SV32
+                | (((r.root_pa >> 12) & 0x3FF_FFFF) as crate::arch::trap_frame::Reg);
         }
         argc as i64
     }

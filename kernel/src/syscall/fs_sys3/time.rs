@@ -42,7 +42,7 @@ pub unsafe fn sys_utimens(path: u64, times: u64) -> i64 {
         };
         let path_bytes = &path_buf[..path_len];
         if times == 0 {
-            let now = crate::srv::timer::G_JIFFIES;
+            let now = crate::srv::timer::jiffies();
             return match vfs::utimens(path_bytes, now, now) {
                 Ok(()) => 0,
                 Err(e) => e.as_i64(),
@@ -71,7 +71,7 @@ pub unsafe fn sys_utimens(path: u64, times: u64) -> i64 {
 /// nanosleep — block (yielding the CPU) until at least `req.tv_sec*1e9 +
 /// req.tv_nsec` nanoseconds have elapsed. The old implementation busy-looped
 /// with `set_need_resched`, which burnt CPU; this version yields properly
-/// while still polling `G_JIFFIES` from the timer tick.
+/// while still polling the timer tick counter (`timer::jiffies`).
 pub unsafe fn sys_nanosleep(req: u64, _rem: u64) -> i64 {
     unsafe {
         if !user_ptr_ok(req, 16) {
@@ -89,9 +89,9 @@ pub unsafe fn sys_nanosleep(req: u64, _rem: u64) -> i64 {
         let (secs, nsecs) = (t[0], t[1]);
         let total_ns = secs.saturating_mul(1_000_000_000).saturating_add(nsecs);
         let ticks = total_ns / 10_000_000; // 10 ms per tick
-        let target = (crate::srv::timer::G_JIFFIES).wrapping_add(ticks.max(1));
+        let target = crate::srv::timer::jiffies().wrapping_add(ticks.max(1));
         loop {
-            let now = crate::srv::timer::G_JIFFIES;
+            let now = crate::srv::timer::jiffies();
             if now >= target {
                 break;
             }

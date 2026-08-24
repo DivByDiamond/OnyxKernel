@@ -116,7 +116,9 @@ drop_to_user:
     csrs sie, t0
     li t0, (1 << 31)
     srli t1, a2, 12
-    andi t1, t1, 0x3FFFFF
+    // PPN mask for Sv32 satp (26 bits) — too wide for `andi`, use a reg.
+    li t2, 0x3FFFFF
+    and t1, t1, t2
     or t0, t0, t1
     csrw satp, t0
     sfence.vma zero, zero

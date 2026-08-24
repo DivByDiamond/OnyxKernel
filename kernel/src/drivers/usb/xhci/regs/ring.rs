@@ -81,7 +81,15 @@ pub unsafe fn alloc_ring(nentries: u16) -> KResult<TrbRing> {
         };
         let link = &mut *ring.base.add((nentries - 1) as usize);
         link.params[0] = pa as u32;
-        link.params[1] = (pa >> 32) as u32;
+        #[cfg(target_pointer_width = "64")]
+        {
+            link.params[1] = (pa >> 32) as u32;
+        }
+        #[cfg(target_pointer_width = "32")]
+        {
+            // See device.rs: high TRB address word is zero on rv32.
+            link.params[1] = 0;
+        }
         link.params[2] = 0;
         link.params[3] = TRB_C | trb_type_flags(TRB_LINK);
         Ok(ring)

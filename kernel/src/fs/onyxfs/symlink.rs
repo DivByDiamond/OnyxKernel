@@ -20,7 +20,7 @@ pub unsafe fn symlink(dir_ino: u32, name: &[u8], target: &[u8]) -> KResult<u32> 
             return Err(Errno::Inval);
         }
         let new_ino = alloc_inode()?;
-        let now = timer::G_JIFFIES;
+        let now = timer::jiffies();
         let data_blk = alloc_data_block()?;
         let mut inode = OnyfsInode {
             mode: ONYFS_DT_LNK,
