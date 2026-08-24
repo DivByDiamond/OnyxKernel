@@ -18,8 +18,13 @@ panic = "abort"
 # Audit blocker: arithmetic bugs in kernel paths (page align, size math)
 # must panic in release builds too instead of silently wrapping.
 overflow-checks = true
+# Audit note: lto = "fat" AND lto = "thin" both break the kernel link
+# (undefined __rust_alloc / slice_index_fail / raw_vec::handle_error pulled
+# from onyx_core objects when std bitcode is LTO-merged; verified after a
+# clean rebuild of target/<target>/release/deps). Kept at false until the
+# global_allocator / panic-handler shims survive cross-crate LTO.
 lto = false
 codegen-units = 1
 opt-level = "z"
 debug = true
-strip = "none"
+strip = "debuginfo"

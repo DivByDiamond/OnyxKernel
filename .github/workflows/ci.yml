@@ -11,30 +11,144 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  build:
+  fmt:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@nightly
+      - name: Install Rust (MSRV)
+        uses: dtolnay/rust-toolchain@1.85.0
         with:
-          targets: riscv64gc-unknown-none-elf
+          components: rustfmt
+
+      # Strict for everything except the known-dirty kernel sources.
+      - name: cargo fmt --check
+        run: cargo fmt --check -p onyx_core -p onyx_init -p onyx_tools
+
+      # Pre-existing kernel sources (~226 files, hand-written
+      # "{ unsafe { ... }}" brace style) don't satisfy rustfmt yet.
+      # Advisory until they're reformatted; the step above already
+      # hard-fails any regression outside those known-dirty files.
+      - name: cargo fmt --check (known-dirty kernel sources)
+        run: cargo fmt --check -p onyx_kernel
+        continue-on-error: true
+
+  clippy-kernel:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust (MSRV)
+        uses: dtolnay/rust-toolchain@1.85.0
+        with:
+          targets: riscv64gc-unknown-none-elf, riscv32imac-unknown-none-elf
+          components: clippy
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
 
-      - name: Build kernel
-        run: cargo build --release -p onyx_kernel --target riscv64gc-unknown-none-elf
+      # NOTE: `cargo clippy -p onyx_kernel --target riscv64gc-...` cannot
+      # run strict yet: cargo always builds the package lib alongside its
+      # bins, and kernel/src/lib.rs is a std-based host-test harness
+      # (no #![no_std]). Until lib.rs becomes target-aware, cross-target
+      # linting is advisory below; real target coverage comes from the
+      # build matrix.
+      - name: clippy onyx_kernel lib (host, strict)
+        run: cargo clippy -p onyx_kernel --lib -- -D warnings
 
-      - name: Build tools
-        run: cargo build --release -p onyx_tools
+      - name: clippy onyx_kernel target riscv64 (advisory)
+        run: cargo clippy -p onyx_kernel --release --target riscv64gc-unknown-none-elf --bin onyx-kernel -- -D warnings
+        continue-on-error: true
 
-      - name: Run core tests
+      - name: clippy onyx_kernel bin+tests (host, advisory)
+        run: cargo clippy -p onyx_kernel --all-targets -- -D warnings
+        continue-on-error: true
+
+  test-core:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust (MSRV)
+        uses: dtolnay/rust-toolchain@1.85.0
+        with:
+          components: clippy
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      # Strict clippy on the library itself (-A non-snake-case: SIG0/SIG1
+      # in core/src/crypto/sha256.rs follow standard SHA-256 paper naming).
+      # Note: core/src/lib.rs has #![warn(clippy::all)], and source
+      # attributes take precedence over command-line -A flags, so
+      # pre-existing style lints in the embedded tests can't be allowed
+      # from here — they're tracked by the advisory step below.
+      - name: clippy onyx_core lib (strict)
+        run: cargo clippy -p onyx_core -- -D warnings -A non-snake-case
+
+      # Advisory until the cfg(test) code in core passes clippy
+      # (b"..\0" c-string literals, vec! in tests, const asserts).
+      - name: clippy onyx_core tests (advisory)
+        run: cargo clippy -p onyx_core --all-targets -- -D warnings -A non-snake-case
+        continue-on-error: true
+
+      - name: Test core
         run: cargo test -p onyx_core
 
-      - name: Upload kernel
+  test-kernel-host:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust (MSRV)
+        uses: dtolnay/rust-toolchain@1.85.0
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Test kernel (host tests)
+        run: cargo test -p onyx_kernel
+
+  build:
+    runs-on: ubuntu-latest
+    continue-on-error: ${{ matrix.experimental || false }}
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [riscv64gc-unknown-none-elf, riscv32imac-unknown-none-elf]
+        include:
+          - target: riscv64gc-unknown-none-elf
+            alias: kbuild
+          - target: riscv32imac-unknown-none-elf
+            alias: kbuild32
+            # Sources don't compile for rv32imac yet (AtomicU64,
+            # u32/u64 type mismatches). Advisory until fixed.
+            experimental: true
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust (MSRV)
+        uses: dtolnay/rust-toolchain@1.85.0
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build kernel (${{ matrix.target }})
+        run: cargo ${{ matrix.alias }}
+
+      # smode feature variant of the 64-bit build only.
+      - name: Build kernel (riscv64, smode)
+        if: matrix.target == 'riscv64gc-unknown-none-elf'
+        run: cargo kbuild --features smode
+
+      - name: Build tools
+        run: cargo tbuild
+
+      - name: Upload kernel ELF
         uses: actions/upload-artifact@v6
         with:
-          name: onyxkernel-elf
-          path: target/riscv64gc-unknown-none-elf/release/onyx-kernel
+          name: onyxkernel-${{ matrix.target }}
+          path: |
+            target/${{ matrix.target }}/release/onyx-kernel
