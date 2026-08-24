@@ -8,8 +8,8 @@
 use onyx_core::errno::{Errno, KResult};
 
 use super::super::{
-    fat32_name_8_3, fat_entry, is_eoc, is_valid_cluster, read_cluster_sector, scan_dir_entries,
-    ATTR_DIRECTORY, ATTR_LFN, DIR_ENTRY_SIZE, ENTRIES_PER_SECTOR, G_ROOT_CLUSTER, G_SPC,
+    ATTR_DIRECTORY, ATTR_LFN, DIR_ENTRY_SIZE, ENTRIES_PER_SECTOR, G_ROOT_CLUSTER, G_SPC, fat_entry,
+    fat32_name_8_3, is_eoc, is_valid_cluster, read_cluster_sector, scan_dir_entries,
 };
 use super::dirent::{find_free_dirent_slot, write_dirent};
 use super::fat::{alloc_cluster, free_chain, write_cluster_sector};

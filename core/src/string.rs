@@ -54,17 +54,17 @@ pub unsafe fn memset(s: *mut u8, c: u8, n: usize) -> *mut u8 {
     s
 }
 pub unsafe fn memmove(dst: *mut u8, src: *const u8, n: usize) -> *mut u8 {
-    if dst < src as *mut u8 {
-        memcpy(dst, src, n)
-    } else if dst > src as *mut u8 {
-        let mut i = n;
-        while i > 0 {
-            i -= 1;
-            *dst.add(i) = *src.add(i);
+    match dst.cmp(&(src as *mut u8)) {
+        core::cmp::Ordering::Less => memcpy(dst, src, n),
+        core::cmp::Ordering::Greater => {
+            let mut i = n;
+            while i > 0 {
+                i -= 1;
+                *dst.add(i) = *src.add(i);
+            }
+            dst
         }
-        dst
-    } else {
-        dst
+        core::cmp::Ordering::Equal => dst,
     }
 }
 

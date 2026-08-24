@@ -14,16 +14,18 @@ pub use shared::{
 
 use onyx_core::errno::{Errno, KResult};
 
-pub unsafe fn init(data: &[u8]) -> KResult<()> { unsafe {
-    if data.len() < 4 {
-        return Err(Errno::Io);
+pub unsafe fn init(data: &[u8]) -> KResult<()> {
+    unsafe {
+        if data.len() < 4 {
+            return Err(Errno::Io);
+        }
+        let magic = u32::from_le_bytes(data[..4].try_into().unwrap());
+        if magic == 0x0436 || (magic & 0xFFFF) == 0x0436 {
+            psf1::init_psf1(data)
+        } else if magic == 0x864ab572 {
+            psf2::init_psf2(data)
+        } else {
+            Err(Errno::NoEnt)
+        }
     }
-    let magic = u32::from_le_bytes(data[..4].try_into().unwrap());
-    if magic == 0x0436 || (magic & 0xFFFF) == 0x0436 {
-        psf1::init_psf1(data)
-    } else if magic == 0x864ab572 {
-        psf2::init_psf2(data)
-    } else {
-        Err(Errno::NoEnt)
-    }
-}}
+}

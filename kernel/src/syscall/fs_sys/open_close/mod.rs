@@ -15,52 +15,58 @@ use crate::fs::vfs;
 use crate::syscall::abi::{F_DUPFD, F_GETFD, F_GETFL, F_SETFD, F_SETFL, FD_CLOEXEC, O_RDONLY};
 use onyx_core::errno::Errno;
 
-pub(in super::super) unsafe fn sys_close(token: u64) -> i64 { unsafe {
-    match vfs::close(token) {
-        Ok(()) => 0,
-        Err(e) => e.as_i64(),
+pub(in super::super) unsafe fn sys_close(token: u64) -> i64 {
+    unsafe {
+        match vfs::close(token) {
+            Ok(()) => 0,
+            Err(e) => e.as_i64(),
+        }
     }
-}}
+}
 
-pub(in super::super) unsafe fn sys_lseek(token: u64, off: i64, whence: u32) -> i64 { unsafe {
-    match vfs::lseek(token, off, whence) {
-        Ok(pos) => pos as i64,
-        Err(e) => e.as_i64(),
+pub(in super::super) unsafe fn sys_lseek(token: u64, off: i64, whence: u32) -> i64 {
+    unsafe {
+        match vfs::lseek(token, off, whence) {
+            Ok(pos) => pos as i64,
+            Err(e) => e.as_i64(),
+        }
     }
-}}
+}
 
-pub(in super::super) unsafe fn sys_fcntl(fd: u64, cmd: u32, arg: u64) -> i64 { unsafe {
-    match cmd {
-        F_DUPFD => vfs::dup(fd)
-            .map(|t| t as i64)
-            .unwrap_or_else(|e| e.as_i64()),
-        F_GETFD => {
-            let idx = match vfs::fd_check(fd) {
-                Ok(i) => i,
-                Err(e) => return e.as_i64(),
-            };
-            if vfs::fd_get(idx).cloexec {
-                FD_CLOEXEC as i64
-            } else {
+pub(in super::super) unsafe fn sys_fcntl(fd: u64, cmd: u32, arg: u64) -> i64 {
+    unsafe {
+        match cmd {
+            F_DUPFD => vfs::dup(fd)
+                .map(|t| t as i64)
+                .unwrap_or_else(|e| e.as_i64()),
+            F_GETFD => {
+                let idx = match vfs::fd_check(fd) {
+                    Ok(i) => i,
+                    Err(e) => return e.as_i64(),
+                };
+                if vfs::fd_get(idx).cloexec {
+                    FD_CLOEXEC as i64
+                } else {
+                    0
+                }
+            }
+            F_SETFD => {
+                let idx = match vfs::fd_check(fd) {
+                    Ok(i) => i,
+                    Err(e) => return e.as_i64(),
+                };
+                vfs::fd_set_cloexec(idx, (arg & FD_CLOEXEC as u64) != 0);
                 0
             }
+            F_GETFL => O_RDONLY as i64,
+            F_SETFL => {
+                let _ = arg;
+                0
+            }
+            _ => Errno::NoSys.as_i64(),
         }
-        F_SETFD => {
-            let idx = match vfs::fd_check(fd) {
-                Ok(i) => i,
-                Err(e) => return e.as_i64(),
-            };
-            vfs::fd_set_cloexec(idx, (arg & FD_CLOEXEC as u64) != 0);
-            0
-        }
-        F_GETFL => O_RDONLY as i64,
-        F_SETFL => {
-            let _ = arg;
-            0
-        }
-        _ => Errno::NoSys.as_i64(),
     }
-}}
+}
 
 pub use crate::syscall::abi::{
     O_ACCMODE as _O_ACCMODE, O_APPEND as _O_APPEND, O_CREAT as _O_CREAT,

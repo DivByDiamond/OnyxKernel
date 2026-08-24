@@ -104,7 +104,15 @@ pub fn write_table(
         if v1 {
             write_v1(img, off, ONYFS_DT_REG, f.data.len() as u32, &blocks);
         } else {
-            write_v2(img, off, ONYFS_DT_REG, f.data.len() as u64, &blocks, false, indirect_blk);
+            write_v2(
+                img,
+                off,
+                ONYFS_DT_REG,
+                f.data.len() as u64,
+                &blocks,
+                false,
+                indirect_blk,
+            );
         }
     }
 }

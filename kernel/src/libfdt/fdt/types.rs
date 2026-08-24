@@ -1,4 +1,3 @@
-
 pub struct FdtMemory {
     pub base: u64,
     pub size: u64,

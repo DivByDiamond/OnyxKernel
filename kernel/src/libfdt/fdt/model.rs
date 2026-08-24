@@ -28,20 +28,22 @@ fn stored() -> &'static str {
 }
 
 /// Read the root node's `model` property into a static buffer.
-pub unsafe fn model() -> &'static str { unsafe {
-    let mut found = false;
-    walk(&mut |_name, props: &[(u32, &[u8])]| {
-        for (name_off, data) in props {
-            if cstr_at(*name_off) == "model" && !data.is_empty() {
-                copy_prop(data);
-                found = true;
-                return true;
+pub unsafe fn model() -> &'static str {
+    unsafe {
+        let mut found = false;
+        walk(&mut |_name, props: &[(u32, &[u8])]| {
+            for (name_off, data) in props {
+                if cstr_at(*name_off) == "model" && !data.is_empty() {
+                    copy_prop(data);
+                    found = true;
+                    return true;
+                }
             }
-        }
-        false
-    });
-    if found { stored() } else { "unknown" }
-}}
+            false
+        });
+        if found { stored() } else { "unknown" }
+    }
+}
 
 /// Detect the OC2R/sedna platform. The device tree carries the root
 /// compatible "riscv-sedna" and/or the model "riscv-virtio,sedna" — both
@@ -49,27 +51,29 @@ pub unsafe fn model() -> &'static str { unsafe {
 /// platform the peripheral nodes (UART/PLIC/CLINT/virtio) are NOT present in
 /// the device tree — the stock minux firmware uses hardcoded addresses, so
 /// we do too.
-pub unsafe fn is_sedna() -> bool { unsafe {
-    let dtb = super::G_DTB;
-    if dtb == 0 {
-        return false;
-    }
-    let needle = b"sedna";
-    for i in 0..0x40000usize {
-        let p = (dtb + i) as *const u8;
-        let mut ok = true;
-        for (j, &nb) in needle.iter().enumerate() {
-            if *p.add(j) != nb {
-                ok = false;
-                break;
+pub unsafe fn is_sedna() -> bool {
+    unsafe {
+        let dtb = super::G_DTB;
+        if dtb == 0 {
+            return false;
+        }
+        let needle = b"sedna";
+        for i in 0..0x40000usize {
+            let p = (dtb + i) as *const u8;
+            let mut ok = true;
+            for (j, &nb) in needle.iter().enumerate() {
+                if *p.add(j) != nb {
+                    ok = false;
+                    break;
+                }
+            }
+            if ok {
+                return true;
             }
         }
-        if ok {
-            return true;
-        }
+        false
     }
-    false
-}}
+}
 
 /// Detect the QEMU virt machine. The device tree model is
 /// "riscv-virtio,qemu" and the root compatible contains "qemu". Like
@@ -77,24 +81,26 @@ pub unsafe fn is_sedna() -> bool { unsafe {
 /// virt there is no USB host controller by default, so probing the
 /// SG2000 EHCI/OHCI addresses (0x04C00000) would raise a load access
 /// fault on unmapped MMIO.
-pub unsafe fn is_qemu() -> bool { unsafe {
-    let dtb = super::G_DTB;
-    if dtb == 0 {
-        return false;
-    }
-    let needle = b"qemu";
-    for i in 0..0x40000usize {
-        let p = (dtb + i) as *const u8;
-        let mut ok = true;
-        for (j, &nb) in needle.iter().enumerate() {
-            if *p.add(j) != nb {
-                ok = false;
-                break;
+pub unsafe fn is_qemu() -> bool {
+    unsafe {
+        let dtb = super::G_DTB;
+        if dtb == 0 {
+            return false;
+        }
+        let needle = b"qemu";
+        for i in 0..0x40000usize {
+            let p = (dtb + i) as *const u8;
+            let mut ok = true;
+            for (j, &nb) in needle.iter().enumerate() {
+                if *p.add(j) != nb {
+                    ok = false;
+                    break;
+                }
+            }
+            if ok {
+                return true;
             }
         }
-        if ok {
-            return true;
-        }
+        false
     }
-    false
-}}
+}

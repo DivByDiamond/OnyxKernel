@@ -23,14 +23,16 @@ pub struct IpcfsStat {
     pub mode: u32,
 }
 
-pub unsafe fn lookup(name: &[u8]) -> KResult<u32> { unsafe {
-    if name.is_empty() || name == b"" || name == b"." {
-        return Ok(IPCFS_ROOT_INO);
+pub unsafe fn lookup(name: &[u8]) -> KResult<u32> {
+    unsafe {
+        if name.is_empty() || name == b"" || name == b"." {
+            return Ok(IPCFS_ROOT_INO);
+        }
+        let pid = proc::current_pid();
+        let id = ipc::open_by_name(name, pid)?;
+        Ok(id + 2)
     }
-    let pid = proc::current_pid();
-    let id = ipc::open_by_name(name, pid)?;
-    Ok(id + 2)
-}}
+}
 
 pub unsafe fn stat(ino: u32) -> KResult<IpcfsStat> {
     if ino == IPCFS_ROOT_INO {
@@ -55,49 +57,57 @@ pub unsafe fn stat(ino: u32) -> KResult<IpcfsStat> {
 }
 
 /// Read from a channel (non-blocking). `ino` is the channel ID + 2.
-pub unsafe fn read(ino: u32, buf: *mut u8, _offset: u32, len: u32) -> KResult<u32> { unsafe {
-    if ino < 2 {
-        return Err(Errno::Inval);
+pub unsafe fn read(ino: u32, buf: *mut u8, _offset: u32, len: u32) -> KResult<u32> {
+    unsafe {
+        if ino < 2 {
+            return Err(Errno::Inval);
+        }
+        let chan_id = ino - 2;
+        ipc::recv(chan_id, buf, len, None)
     }
-    let chan_id = ino - 2;
-    ipc::recv(chan_id, buf, len, None)
-}}
+}
 
 /// Write to a channel (non-blocking). `ino` is the channel ID + 2.
-pub unsafe fn write(ino: u32, buf: *const u8, _offset: u32, len: u32) -> KResult<u32> { unsafe {
-    if ino < 2 {
-        return Err(Errno::Inval);
+pub unsafe fn write(ino: u32, buf: *const u8, _offset: u32, len: u32) -> KResult<u32> {
+    unsafe {
+        if ino < 2 {
+            return Err(Errno::Inval);
+        }
+        let chan_id = ino - 2;
+        ipc::send(chan_id, buf, len, None)
     }
-    let chan_id = ino - 2;
-    ipc::send(chan_id, buf, len, None)
-}}
+}
 
-pub unsafe fn readdir_entry(idx: u32, name_out: *mut u8, name_len: usize) -> Option<u32> { unsafe {
-    match idx {
-        0 => {
-            let name = b".";
-            copy_name(name, name_out, name_len);
-            Some(IPCFS_ROOT_INO)
-        }
-        1 => {
-            let name = b"..";
-            copy_name(name, name_out, name_len);
-            Some(IPCFS_ROOT_INO)
-        }
-        _ => {
-            let entry_idx = idx - 2;
-            if let Some((name, chan_id)) = ipc::named_by_index(entry_idx) {
+pub unsafe fn readdir_entry(idx: u32, name_out: *mut u8, name_len: usize) -> Option<u32> {
+    unsafe {
+        match idx {
+            0 => {
+                let name = b".";
                 copy_name(name, name_out, name_len);
-                Some(chan_id + 2)
-            } else {
-                None
+                Some(IPCFS_ROOT_INO)
+            }
+            1 => {
+                let name = b"..";
+                copy_name(name, name_out, name_len);
+                Some(IPCFS_ROOT_INO)
+            }
+            _ => {
+                let entry_idx = idx - 2;
+                if let Some((name, chan_id)) = ipc::named_by_index(entry_idx) {
+                    copy_name(name, name_out, name_len);
+                    Some(chan_id + 2)
+                } else {
+                    None
+                }
             }
         }
     }
-}}
+}
 
-unsafe fn copy_name(name: &[u8], out: *mut u8, max_len: usize) { unsafe {
-    let n = name.len().min(max_len.saturating_sub(1));
-    core::ptr::copy_nonoverlapping(name.as_ptr(), out, n);
-    *out.add(n) = 0;
-}}
+unsafe fn copy_name(name: &[u8], out: *mut u8, max_len: usize) {
+    unsafe {
+        let n = name.len().min(max_len.saturating_sub(1));
+        core::ptr::copy_nonoverlapping(name.as_ptr(), out, n);
+        *out.add(n) = 0;
+    }
+}

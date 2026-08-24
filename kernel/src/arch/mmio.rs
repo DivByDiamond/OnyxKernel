@@ -21,13 +21,15 @@ impl<T: MmioReg> Mmio<T> {
         }
     }
     #[inline]
-    pub unsafe fn read(self) -> T { unsafe {
-        read_volatile(self.addr as *const T)
-    }}
+    pub unsafe fn read(self) -> T {
+        unsafe { read_volatile(self.addr as *const T) }
+    }
     #[inline]
-    pub unsafe fn write(self, v: T) { unsafe {
-        write_volatile(self.addr as *mut T, v);
-    }}
+    pub unsafe fn write(self, v: T) {
+        unsafe {
+            write_volatile(self.addr as *mut T, v);
+        }
+    }
     #[inline]
     pub const fn addr(self) -> usize {
         self.addr
