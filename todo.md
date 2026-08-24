@@ -172,53 +172,56 @@
      DHCP xid/chaddr + DNS id
   D. Разное: B9 (+ohci unwrap), ONX-loader vaddr+entry, контракт passwd↔ACL,
      tools → зависимость onyx_core, починка cargo test -p onyx_kernel
+✅ ВОЛНА 1 ВЫПОЛНЕНА (2026-08-24, коммиты f36c989/ef7f4b3/3609a41/3f46a09):
+гейт пройден — kbuild/smode/clippy 0 warnings, onyx_core+onyx_kernel тесты зелёные
+(104), headless smoke PASS, interactive smoke: 0 illegal, respawn login OK, 0 overflow.
 После волны 1 — обязательный гейт: headless + interactive smoke на объединённом коде.
 Отложено: SMP idle/SIE доводка или заморозка (вопрос архитектуры), KDF memory-hardness,
 CI-воркфлоу, dead-code зачистка (~25 pub fn), SAFETY-комментарии (974 unsafe / 9 комментов).
 
 #### Блокеры (детерминированные краши/порча данных):
-- [ ] **B1: halt ядра из ring-2 невалидным указателем** — user_ptr_ok (syscall/handler/dispatch.rs:14)
+- [x] **B1: halt ядра из ring-2 невалидным указателем** — user_ptr_ok (syscall/handler/dispatch.rs:14)
       проверяет только диапазон [USER_BASE, USER_TOP), не маппинг; sys_write разыменовывает
       напрямую под SUM (fs_sys/read_write.rs:19); page fault из S-mode → klog::halt() (srv/trap.rs).
       Репро: write(1, 0x30000000, 1). Фикс: постраничная трансляция через vmm::translate_user*
       перед доступом; фолт → убийство процесса, не halt.
-- [ ] **B2: getdents64 пишет за границу физического фрейма** — буфер транслируется один раз,
+- [x] **B2: getdents64 пишет за границу физического фрейма** — буфер транслируется один раз,
       пишется до count байт (fs_sys3/extra/info.rs:19-60); при buf близко к концу фрейма записи
       уходят в чужие PA (вплоть до page tables). Фикс: перепереводить каждую страницу или
       ограничивать запись концом текущего фрейма.
-- [ ] **B3: mmap переполняется до size=0** — page_align_up(n) = (n+0xFFF)&!0xFFF без checked_add
+- [x] **B3: mmap переполняется до size=0** — page_align_up(n) = (n+0xFFF)&!0xFFF без checked_add
       (fs_sys3/mem/brk.rs:8); при length ∈ [2^64−4095, 2^64−1] → size 0 → Ok(vaddr) без памяти.
       Фикс: n.checked_add(0xFFF).ok_or(Errno::Range)? & !0xFFF.
       Прим.: после включения overflow-checks=true это станет паникой в syscall-пути
       (kdump вместо тихой порчи — лучше, но паника из ring-2 тоже недопустима),
       так что checked_add нужен независимо.
-- [ ] **B4: lost wakeup wait/exit** — wait() ставит state=Waiting ВНЕ proc_list_lock
+- [x] **B4: lost wakeup wait/exit** — wait() ставит state=Waiting ВНЕ proc_list_lock
       (spawn/wait.rs:53), exit проверяет Waiting тоже вне лока (lifecycle/exit.rs:44);
       гонка → родитель спит навечно. Плюс burst-апдейт exit_code+state без лока → устаревший
       статус на слабой модели RISC-V. Фикс: state+wakeup под одним proc_list_lock.
-- [ ] **B5: G_CHANNELS полностью без блокировки** — static mut [Channel; CHAN_MAX]
+- [x] **B5: G_CHANNELS полностью без блокировки** — static mut [Channel; CHAN_MAX]
       (ipc/channel/types.rs:22): lost wakeup recv/send (ringbuf.rs:98-107 vs :73),
       порча ringbuf при двух send'ах с разных harts. Фикс: spinlock на канал.
-- [ ] **B6: TCP входящие сегменты не верифицируются** — матч только по локальному порту
+- [x] **B6: TCP входящие сегменты не верифицируются** — матч только по локальному порту
       (net/tcp/handle.rs:98-101), src/dst IP:port игнорируются, входящий checksum не считается
       → hijack сессии любым хостом L2. После wrap NEXT_PORT — дубликаты портов.
-- [ ] **B7: FAT32 зеркало второй FAT получает нули вместо EOC** — write_fat_entry патчит свой
+- [x] **B7: FAT32 зеркало второй FAT получает нули вместо EOC** — write_fat_entry патчит свой
       буфер, а в buf2 копируется непропатченный сектор (fs/fat32/write.rs:90-101) → FAT#2
       помечает живые кластеры свободными → cross-file corruption после recovery.
-- [ ] **B8: sys_brk shrink освобождает занятую страницу кучи** — unmap от невыровненного addr
+- [x] **B8: sys_brk shrink освобождает занятую страницу кучи** — unmap от невыровненного addr
       (brk.rs:69-71), walk округляет вниз → снимается страница с живыми данными ниже нового brk;
       regrow выдаёт zeroed-страницу → тихая потеря данных. Фикс: page_align_up(addr).
-- [ ] **B9: psf2 парсинг шрифта — 7×unwrap подряд** (font/psf2.rs:10-16) — кривой файл →
+- [x] **B9: psf2 парсинг шрифта — 7×unwrap подряд** (font/psf2.rs:10-16) — кривой файл →
       kernel panic → abort. Фикс: Result<Font, Errno>. Родственное: ohci/control.rs:46,57,124.
 
 #### Конкурентность (SMP частично активен — вторичные harts онлайн, но бесполезны):
-- [ ] **Живая гонка: G_UPTICKS/G_JIFFIES** — RMW на static mut со всех тикающих harts
+- [x] **Живая гонка: G_UPTICKS/G_JIFFIES** — RMW на static mut со всех тикающих harts
       (srv/timer.rs:13-14,107-108) → потерянные инкременты, дрейф uptime_us. Фикс: AtomicU64 fetch_add.
-- [ ] affinity-enqueue в чужую runqueue без лока жертвы (sched.rs:100-104) — тот же класс,
+- [x] affinity-enqueue в чужую runqueue без лока жертвы (sched.rs:100-104) — тот же класс,
       что починен в steal(), но здесь пропущен → разорванный free-list очереди.
-- [ ] неатомарный декремент root_refcount (exit.rs:27-29) → потеря декремента → UAF page tables
+- [x] неатомарный декремент root_refcount (exit.rs:27-29) → потеря декремента → UAF page tables
       либо утечка корневой таблицы. Фикс: fetch_sub(1, AcqRel) + сравнение с 1.
-- [ ] by_pid() обходит G_ALL_PROCS без proc_list_lock (process/current.rs:53-62; вызовы exit.rs:7,43,
+- [x] by_pid() обходит G_ALL_PROCS без proc_list_lock (process/current.rs:53-62; вызовы exit.rs:7,43,
       trap.rs:175) — нарушает собственный контракт globals.rs:30-32.
 - [ ] trap_return безусловно гасит SIE (arch/asm/trap_asm.rs:94-99) → вторичные harts замолкают
       после первого тика; инвариант «SIE=0 в kernel» нигде не зафиксирован (assert/комментарий).
@@ -228,24 +231,24 @@ CI-воркфлоу, dead-code зачистка (~25 pub fn), SAFETY-комме�
       (smp.rs:80-90) — перевести читателя на load(Acquire).
 
 #### Логика / память:
-- [ ] mmap_brk продвигается ДО валидации и не откатывается при ошибке (mmap.rs:53-56 vs :74-80)
+- [x] mmap_brk продвигается ДО валидации и не откатывается при ошибке (mmap.rs:53-56 vs :74-80)
       → одна неудача = вечный ENOMEM для процесса. Фикс: валидация до продвижения.
 - [ ] map_anon rollback учитывает максимум 1024 страниц (vmm/map/mod.rs:58,92-95) → mmap >4 MiB
       при ошибке течёт страницами и бюджетом навсегда. Фикс: Vec или счётчик + обратный unmap.
-- [ ] krealloc при old_size==0 читает new_size байт из невалидного источника
+- [x] krealloc при old_size==0 читает new_size байт из невалидного источника
       (heap/realloc.rs:14-23). Фикс: old_size==0 && p!=null → Err.
 - [ ] G_HEAP.used систематически дрейфует (slab-free не вычитает: alloc.rs:62-64) → wrap статистики.
 - [ ] PMM init: цикл reserved-marking мёртвый (pmm/mod.rs:106-116, end_bit всегда 0) — kernel/BSS
       защищены случайно (underflow idx), а не по задумке. pmm::free принимает невыровненный PA.
-- [ ] FAT32 mount: num_fats захардкожен как 2 (helpers.rs:132), тип ФС (12/16/32) не проверяется
+- [x] FAT32 mount: num_fats захардкожен как 2 (helpers.rs:132), тип ФС (12/16/32) не проверяется
       → FAT16 диск интерпретируется мусорно, возможен free произвольных кластеров.
-- [ ] FAT32 unlink: free_chain ДО tombstone dirent (write.rs:329-334) → I/O error посреди =
+- [x] FAT32 unlink: free_chain ДО tombstone dirent (write.rs:329-334) → I/O error посреди =
       кластеры переиспользуются другим файлом. Поменять порядок. Аналогично create: утечка
       кластера при ошибке поиска слота (write.rs:244 vs :279).
-- [ ] ONX-loader: проверяется только s.vaddr, не vaddr+memsz (onx/load.rs:90-92); entry не
+- [x] ONX-loader: проверяется только s.vaddr, не vaddr+memsz (onx/load.rs:90-92); entry не
       валидируется (:129). Фикс: проверка конца диапазона + entry ∈ [USER_BASE, USER_TOP).
-- [ ] header.rs::to_bytes_v2 паникует при segs.len() > nsegs (поля публичны, core/formats/header.rs:127-137).
-- [ ] TCP: send_len никогда не дренируется (handle.rs:42-46) → после 2048 байт соединение мертво
+- [x] header.rs::to_bytes_v2 паникует при segs.len() > nsegs (поля публичны, core/formats/header.rs:127-137).
+- [x] TCP: send_len никогда не дренируется (handle.rs:42-46) → после 2048 байт соединение мертво
       при виде «Ok»; state 4 не чистится без явного close → 8 удалённых FIN = перманентный DoS
       (MAX_CONNS=8); FIN без проверки seq == rcv_nxt.
 
@@ -253,21 +256,21 @@ CI-воркфлоу, dead-code зачистка (~25 pub fn), SAFETY-комме�
 - [ ] KDF паролей: 10k SHA-256 раундов без memory-hardness; соль молча деградирует до LCG при
       отказе hwrand (auth/crypto/extra.rs:48-63 + drivers/hwrand.rs:44-56) — договор молчания,
       деградацию надо сигналировать вызывающему.
-- [ ] Контрактный разрыв: /bin/passwd исполняется в ring 2, create/rename — ring≤1 only
+- [x] Контрактный разрыв: /bin/passwd исполняется в ring 2, create/rename — ring≤1 only
       (handler/acl.rs:76,81) → смену пароля нельзя выполнить даже root'ом.
       → Решение и статус: один канонический пункт «umask/права OnyxFS» в OC2R-секции
       ниже; фикс контракта — волна 1, агент D.
-- [ ] DHCP/DNS: xid/chaddr не сверяются (net/dhcp/protocol.rs:85-144); DNS id = uptime_us()
+- [x] DHCP/DNS: xid/chaddr не сверяются (net/dhcp/protocol.rs:85-144); DNS id = uptime_us()
       предсказуем (dns.rs:39) → спуфинг ответов в общем L2.
 - [ ] unsafe: 974 вхождения, SAFETY-комментариев 9 (<1%) — проставить SAFETY хотя бы в
       drivers/vmm/trap путях (правило unsafe-safety-comment).
 
 #### Тесты / CI / сборка:
-- [ ] **overflow-checks=true для release ядра** — однострочник в workspace Cargo.toml
+- [x] **overflow-checks=true для release ядра** — однострочник в workspace Cargo.toml
       ([profile.release]). ✅ РЕШЕНИЕ АВТОРА (2026-08-24): цена небольшая, а «тихая порча»
       при переполнении в ядре хуже паники (kdump/reboot). Волна 1, агент A.
       ⚠️ После включения прогнать QEMU smoke — возможны ранее немые overflow в hot path.
-- [ ] cargo test -p onyx_kernel НЕ компилируется (39×E0425 протухшие константы virtio/test.rs)
+- [x] cargo test -p onyx_kernel НЕ компилируется (39×E0425 протухшие константы virtio/test.rs)
       — починить или удалить тавтологию assert_eq!(0x74726976, 0x74726976) (virtio/test.rs:6).
 - [ ] Known-answer тесты SHA256 (init/src/auth/crypto/sha256.rs) — аутентификация сейчас
       без единого автотеста.
