@@ -1,5 +1,7 @@
 use crate::arch::trap_frame::TrapFrame;
 
+use core::ptr;
+
 pub const PROC_RING_KERNEL: u8 = 0;
 pub const PROC_RING_ROOT: u8 = 1;
 pub const PROC_RING_USER: u8 = 2;
@@ -87,4 +89,67 @@ pub struct Proc {
     /// the shell for tab completion and arrow-key history navigation.
     /// Set via ioctl(TIOCSRAW), cleared via ioctl(TIOCRRAW).
     pub raw_stdin: bool,
+    /// Per-process terminal state (termios subset): echo, canonical mode,
+    /// VMIN/VTIME. Managed via TCGETS/TCSETS ioctls; zero-initialized to
+    /// the sane defaults (ECHO|ICANON) on process creation.
+    pub term_echo: bool,
+    pub term_icanon: bool,
+    pub term_vmin: u8,
+    pub term_vtime: u8,
+}
+
+impl Proc {
+    #[expect(dead_code)]
+    const fn new() -> Self {
+        Self {
+            pid: 0,
+            ring: PROC_RING_KERNEL,
+            state: ProcState::Free,
+            parent_pid: 0,
+            exit_code: 0,
+            root_pa: 0,
+            entry: 0,
+            ustack: 0,
+            heap_brk: 0,
+            mmap_brk: 0x3000_0000,
+            cwd: [0; 256],
+            cwd_len: 0,
+            uid: 0,
+            gid: 0,
+            tf: TrapFrame::zero(),
+            kstack: [0; KSTACK_SIZE],
+            pending_signals: 0,
+            signal_mask: 0,
+            signal_handlers: [0; 32],
+            signal_handler_masks: [0; 32],
+            saved_mask: 0,
+            saved_tf: TrapFrame::zero(),
+            in_signal_handler: false,
+            fds: [crate::fs::vfs::VfsFd {
+                ino: 0,
+                size: 0,
+                pos: 0,
+                fs: crate::fs::vfs::Fs::None,
+                used: false,
+                perms: 0,
+                epoch: 0,
+                cloexec: false,
+            }; PROC_MAX_FDS],
+            root_refcount: ptr::null_mut(),
+            all_next: ptr::null_mut(),
+            next: ptr::null_mut(),
+            wait_next: ptr::null_mut(),
+            affinity: -1,
+            on_rq: false,
+            raw_stdin: false,
+            term_echo: true,
+            term_icanon: true,
+            term_vmin: 1,
+            term_vtime: 0,
+            readdir_ino: 0,
+            readdir_idx: 0,
+            readdir_active: false,
+            readdir_fs: crate::fs::vfs::Fs::None,
+        }
+    }
 }
