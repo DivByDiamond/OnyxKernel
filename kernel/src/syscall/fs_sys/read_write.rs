@@ -21,8 +21,16 @@ pub(in super::super) unsafe fn sys_write(tf: &mut TrapFrame, fd: u64, buf: u64, 
                 uart::putc(b'\r');
             }
             uart::putc(b);
+            // Framebuffer console: ANSI interpreter (colors, cursor,
+            // erase, scroll regions). Skipped when no fb is present.
+            if crate::drivers::fb::enabled() {
+                crate::drivers::fb_term::ansi::console_putc(b);
+            }
             written += 1;
             i += 1;
+        }
+        if crate::drivers::fb::enabled() {
+            crate::drivers::fb_term::ansi::console_cursor();
         }
         let _ = tf;
         written
@@ -77,6 +85,13 @@ pub(in super::super) unsafe fn sys_read(tf: &mut TrapFrame, _fd: u64, buf: u64, 
         }
 
         // ── Cooked mode: line editing (echo, backspace, Enter) ───────
+        // Echo reflects the CALLING process's termios (TCSETS), not the
+        // legacy globals.
+        let echo = {
+            let p = proc::current();
+            p.term_echo
+        };
+        let _ = ECHO_ENABLED;
         let mut n: usize = 0;
         let max = (len - 1) as usize;
         while n < max {
@@ -88,25 +103,37 @@ pub(in super::super) unsafe fn sys_read(tf: &mut TrapFrame, _fd: u64, buf: u64, 
                 Some(b) => {
                     if b == b'\r' || b == b'\n' {
                         *dst.add(n) = b'\n';
-                        if ECHO_ENABLED {
+                        if echo {
                             uart::putc(b'\r');
                             uart::putc(b'\n');
+                            if crate::drivers::fb::enabled() {
+                                crate::drivers::fb_term::ansi::console_putc(b'\r');
+                                crate::drivers::fb_term::ansi::console_putc(b'\n');
+                            }
                         }
                         n += 1;
                         break;
                     } else if b == 0x7F || b == 0x08 {
                         if n > 0 {
                             n -= 1;
-                            if ECHO_ENABLED {
+                            if echo {
                                 uart::putc(0x08);
                                 uart::putc(b' ');
                                 uart::putc(0x08);
+                                if crate::drivers::fb::enabled() {
+                                    crate::drivers::fb_term::ansi::console_putc(0x08);
+                                    crate::drivers::fb_term::ansi::console_putc(b' ');
+                                    crate::drivers::fb_term::ansi::console_putc(0x08);
+                                }
                             }
                         }
                     } else {
                         *dst.add(n) = b;
-                        if ECHO_ENABLED {
+                        if echo {
                             uart::putc(b);
+                            if crate::drivers::fb::enabled() {
+                                crate::drivers::fb_term::ansi::console_putc(b);
+                            }
                         }
                         n += 1;
                     }
