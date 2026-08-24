@@ -1,4 +1,3 @@
-
 pub(super) const DHCP_SERVER_PORT: u16 = 67;
 pub(super) const DHCP_CLIENT_PORT: u16 = 68;
 
@@ -6,15 +5,15 @@ const DHCP_OP_BOOTREQUEST: u8 = 1;
 const DHCP_OP_BOOTREPLY: u8 = 2;
 
 const DHCP_MSG_DISCOVER: u8 = 1;
-// TODO(dead-code): DHCP_MSG_OFFER — valid DHCP message type for parsing replies, keep.
-#[allow(dead_code)]
 const DHCP_MSG_OFFER: u8 = 2;
-// TODO(dead-code): DHCP_MSG_REQUEST — sent by discover.rs as literal 3, keep as protocol const.
-#[allow(dead_code)]
 const DHCP_MSG_REQUEST: u8 = 3;
-// TODO(dead-code): DHCP_MSG_ACK — valid DHCP message type for parsing replies, keep.
-#[allow(dead_code)]
 const DHCP_MSG_ACK: u8 = 5;
+
+/// Message types used by discover.rs (kept pub(super) so the protocol
+/// constants live here instead of magic numbers at call sites).
+pub(super) const MSG_OFFER: u8 = DHCP_MSG_OFFER;
+pub(super) const MSG_ACK: u8 = DHCP_MSG_ACK;
+pub(super) const MSG_REQUEST: u8 = DHCP_MSG_REQUEST;
 
 const DHCP_OPT_PAD: u8 = 0;
 const DHCP_OPT_SUBNET_MASK: u8 = 1;
@@ -41,16 +40,10 @@ pub(super) fn make_dhcp_msg(
     pkt[2] = 6;
     pkt[3] = 0;
     pkt[4..8].copy_from_slice(&xid.to_be_bytes());
-    pkt[8..10].copy_from_slice(&[0, 0]);
     pkt[10..12].copy_from_slice(&0x8000u16.to_be_bytes());
-    pkt[12..16].copy_from_slice(&[0; 4]);
-    pkt[16..20].copy_from_slice(&[0; 4]);
-    pkt[20..24].copy_from_slice(&[0; 4]);
-    pkt[24..28].copy_from_slice(&[0; 4]);
     // chaddr (bytes 28..44) is 16 bytes; only the 6-byte MAC goes in the
     // front, the rest stays zero-initialized.
     pkt[28..34].copy_from_slice(mac);
-    pkt[44..236].fill(0);
     pkt[236..240].copy_from_slice(&[0x63, 0x82, 0x53, 0x63]);
     let mut off = 240;
     pkt[off] = DHCP_OPT_MSG_TYPE;
@@ -82,12 +75,26 @@ pub(super) fn make_dhcp_msg(
     pkt
 }
 
-pub(super) fn parse_dhcp_reply(frame: &[u8]) -> Option<(u8, [u8; 4], [u8; 4], [u8; 4], [u8; 4])> {
+/// Parse a BOOTREPLY. Anti-spoofing: the reply's xid AND chaddr must
+/// match the transaction we sent (`expect_xid`, `mac`), otherwise the
+/// frame is from someone who did not see our request and is dropped.
+pub(super) fn parse_dhcp_reply(
+    frame: &[u8],
+    expect_xid: u32,
+    mac: &[u8; 6],
+) -> Option<(u8, [u8; 4], [u8; 4], [u8; 4], [u8; 4])> {
     if frame.len() < DHCP_HEADER_LEN + 1 {
         return None;
     }
     let op = frame[0];
     if op != DHCP_OP_BOOTREPLY {
+        return None;
+    }
+    let rx_xid = u32::from_be_bytes([frame[4], frame[5], frame[6], frame[7]]);
+    if rx_xid != expect_xid {
+        return None;
+    }
+    if &frame[28..34] != mac {
         return None;
     }
     let yiaddr: [u8; 4] = [frame[16], frame[17], frame[18], frame[19]];

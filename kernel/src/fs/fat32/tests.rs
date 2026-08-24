@@ -78,3 +78,24 @@ fn test_fat32_valid_cluster() {
         assert!(!is_valid_cluster(0x0FFFFFF8));
     }
 }
+
+#[test]
+fn test_fat_type_classification() {
+    use super::helpers::fat_type_for_clusters;
+    assert_eq!(fat_type_for_clusters(0), "FAT12");
+    assert_eq!(fat_type_for_clusters(4084), "FAT12");
+    assert_eq!(fat_type_for_clusters(4085), "FAT16");
+    assert_eq!(fat_type_for_clusters(65524), "FAT16");
+    assert_eq!(fat_type_for_clusters(65525), "FAT32");
+    assert_eq!(fat_type_for_clusters(1 << 20), "FAT32");
+}
+
+#[test]
+fn test_fat_entry_patch_preserves_high_nibble() {
+    // Mirrors the patch logic in write::write_fat_entry: the top 4 bits
+    // of an existing entry must survive a rewrite of the low 28 bits.
+    let existing = 0x8000_1234u32; // 0x8 in the high nibble
+    let value = 0x0FFF_FFF8u32; // EOC
+    let patched = (existing & 0xF000_0000) | (value & 0x0FFF_FFFF);
+    assert_eq!(patched, 0x8FFF_FFF8);
+}

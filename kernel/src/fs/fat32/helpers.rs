@@ -1,6 +1,7 @@
 use super::{
     ATTR_DIRECTORY, ATTR_LFN, DIR_ENTRY_SIZE, ENTRIES_PER_SECTOR, FAT32_EOC, G_DATA_LBA, G_DEV,
-    G_FAT_SZ, G_RESVD, G_ROOT_CLUSTER, G_SPC, cluster_to_lba, fat_entry, is_eoc, read_sec,
+    G_FAT_SZ, G_NUM_FATS, G_RESVD, G_ROOT_CLUSTER, G_SPC, cluster_to_lba, fat_entry, is_eoc,
+    read_sec,
 };
 use onyx_core::errno::{Errno, KResult};
 
@@ -12,10 +13,12 @@ pub(crate) unsafe fn read_cluster_sector(
     cluster: u32,
     sector_in_cluster: u32,
     buf: &mut [u8; 512],
-) -> KResult<()> { unsafe {
-    let lba = cluster_to_lba(cluster) + sector_in_cluster as u64;
-    read_sec(lba, buf)
-}}
+) -> KResult<()> {
+    unsafe {
+        let lba = cluster_to_lba(cluster) + sector_in_cluster as u64;
+        read_sec(lba, buf)
+    }
+}
 
 pub(crate) fn fat32_name_8_3(name: &[u8]) -> [u8; 11] {
     let mut out = [0x20u8; 11];
@@ -45,90 +48,131 @@ pub(crate) unsafe fn scan_dir_entries(
     out_size: &mut u32,
     is_dir: &mut bool,
     buf: &mut [u8; 512],
-) -> KResult<()> { unsafe {
-    let mut cluster = dir_cluster;
-    if !is_valid_cluster(cluster) {
-        return Err(Errno::NoEnt);
-    }
-    let mut hop = 0u32;
-    const MAX_HOPS: u32 = 65536;
-    loop {
-        if hop >= MAX_HOPS {
-            return Err(Errno::Io);
-        }
-        hop += 1;
-        for si in 0..G_SPC {
-            read_cluster_sector(cluster, si, buf)?;
-            for ei in 0..ENTRIES_PER_SECTOR {
-                let off = ei * DIR_ENTRY_SIZE;
-                let attr = buf[off + 11];
-                if attr == ATTR_LFN {
-                    continue;
-                }
-                if buf[off] == 0 {
-                    return Err(Errno::NoEnt);
-                }
-                if buf[off] == 0xE5 {
-                    continue;
-                }
-                let mut entry = [0u8; 11];
-                entry.copy_from_slice(&buf[off..off + 11]);
-                if &entry == needle {
-                    let cluster_lo = u16::from_le_bytes([buf[off + 26], buf[off + 27]]);
-                    let cluster_hi = u16::from_le_bytes([buf[off + 20], buf[off + 21]]);
-                    *out_cluster = ((cluster_hi as u32) << 16) | cluster_lo as u32;
-                    *out_size = u32::from_le_bytes([
-                        buf[off + 28],
-                        buf[off + 29],
-                        buf[off + 30],
-                        buf[off + 31],
-                    ]);
-                    *is_dir = (attr & ATTR_DIRECTORY) != 0;
-                    return Ok(());
-                }
-            }
-        }
-        let next = fat_entry(cluster, buf);
-        if is_eoc(next) {
+) -> KResult<()> {
+    unsafe {
+        let mut cluster = dir_cluster;
+        if !is_valid_cluster(cluster) {
             return Err(Errno::NoEnt);
         }
-        if !is_valid_cluster(next) {
-            return Err(Errno::Io);
+        let mut hop = 0u32;
+        const MAX_HOPS: u32 = 65536;
+        loop {
+            if hop >= MAX_HOPS {
+                return Err(Errno::Io);
+            }
+            hop += 1;
+            for si in 0..G_SPC {
+                read_cluster_sector(cluster, si, buf)?;
+                for ei in 0..ENTRIES_PER_SECTOR {
+                    let off = ei * DIR_ENTRY_SIZE;
+                    let attr = buf[off + 11];
+                    if attr == ATTR_LFN {
+                        continue;
+                    }
+                    if buf[off] == 0 {
+                        return Err(Errno::NoEnt);
+                    }
+                    if buf[off] == 0xE5 {
+                        continue;
+                    }
+                    let mut entry = [0u8; 11];
+                    entry.copy_from_slice(&buf[off..off + 11]);
+                    if &entry == needle {
+                        let cluster_lo = u16::from_le_bytes([buf[off + 26], buf[off + 27]]);
+                        let cluster_hi = u16::from_le_bytes([buf[off + 20], buf[off + 21]]);
+                        *out_cluster = ((cluster_hi as u32) << 16) | cluster_lo as u32;
+                        *out_size = u32::from_le_bytes([
+                            buf[off + 28],
+                            buf[off + 29],
+                            buf[off + 30],
+                            buf[off + 31],
+                        ]);
+                        *is_dir = (attr & ATTR_DIRECTORY) != 0;
+                        return Ok(());
+                    }
+                }
+            }
+            let next = fat_entry(cluster, buf);
+            if is_eoc(next) {
+                return Err(Errno::NoEnt);
+            }
+            if !is_valid_cluster(next) {
+                return Err(Errno::Io);
+            }
+            cluster = next;
         }
-        cluster = next;
     }
-}}
+}
 
-pub unsafe fn mount(dev: usize) -> KResult<()> { unsafe {
-    G_DEV = dev;
-    let mut bpb = [0u8; 512];
-    read_sec(0, &mut bpb)?;
-    if bpb[510] != 0x55 || bpb[511] != 0xAA {
-        return Err(Errno::Inval);
+/// Classify a volume by its data-cluster count (Microsoft FAT spec):
+/// < 4085 → FAT12, < 65525 → FAT16, otherwise FAT32. This driver only
+/// implements FAT32, so anything below is rejected at mount time.
+pub(crate) fn fat_type_for_clusters(count_of_clusters: u64) -> &'static str {
+    if count_of_clusters < 4085 {
+        "FAT12"
+    } else if count_of_clusters < 65525 {
+        "FAT16"
+    } else {
+        "FAT32"
     }
-    let bps = u16::from_le_bytes([bpb[11], bpb[12]]) as u32;
-    if bps != 512 {
-        return Err(Errno::Inval);
+}
+
+pub unsafe fn mount(dev: usize) -> KResult<()> {
+    unsafe {
+        G_DEV = dev;
+        let mut bpb = [0u8; 512];
+        read_sec(0, &mut bpb)?;
+        if bpb[510] != 0x55 || bpb[511] != 0xAA {
+            return Err(Errno::Inval);
+        }
+        let bps = u16::from_le_bytes([bpb[11], bpb[12]]) as u32;
+        if bps != 512 {
+            return Err(Errno::Inval);
+        }
+        G_SPC = bpb[13] as u32;
+        if G_SPC == 0 || G_SPC > 128 {
+            return Err(Errno::Inval);
+        }
+        G_RESVD = u16::from_le_bytes([bpb[14], bpb[15]]) as u32;
+        if G_RESVD == 0 {
+            return Err(Errno::Inval);
+        }
+        // BPB_NumFATs: all FAT writes are mirrored across this many
+        // copies (write::fat). The spec uses 1..=2; anything else is
+        // treated as a corrupt BPB rather than mirrored wrongly.
+        G_NUM_FATS = bpb[16] as u32;
+        if !(1..=2).contains(&G_NUM_FATS) {
+            crate::kwrn!("fat32", "mount: BPB_NumFATs out of range, refusing");
+            return Err(Errno::Inval);
+        }
+        G_FAT_SZ = u16::from_le_bytes([bpb[22], bpb[23]]) as u32;
+        if G_FAT_SZ == 0 {
+            G_FAT_SZ = u32::from_le_bytes([bpb[36], bpb[37], bpb[38], bpb[39]]);
+        }
+        if G_FAT_SZ == 0 {
+            return Err(Errno::Inval);
+        }
+        G_ROOT_CLUSTER = u32::from_le_bytes([bpb[44], bpb[45], bpb[46], bpb[47]]);
+        if G_ROOT_CLUSTER < 2 {
+            return Err(Errno::Inval);
+        }
+        // Filesystem-type check: derive the data-cluster count from the
+        // BPB and require the FAT32 range. Mounting FAT12/16 here would
+        // misparse cluster chains and could free arbitrary clusters on
+        // the write paths.
+        let root_entries = u16::from_le_bytes([bpb[17], bpb[18]]) as u64;
+        let root_secs = root_entries.div_ceil(512 / 32);
+        let tot16 = u16::from_le_bytes([bpb[19], bpb[20]]) as u64;
+        let tot32 = u32::from_le_bytes([bpb[32], bpb[33], bpb[34], bpb[35]]) as u64;
+        let total_secs = if tot16 != 0 { tot16 } else { tot32 };
+        let fat_secs = G_NUM_FATS as u64 * G_FAT_SZ as u64;
+        let data_secs = total_secs.saturating_sub(G_RESVD as u64 + fat_secs + root_secs);
+        let count_of_clusters = data_secs / G_SPC as u64;
+        if fat_type_for_clusters(count_of_clusters) != "FAT32" {
+            crate::kwrn!("fat32", "mount: not a FAT32 volume, refusing");
+            return Err(Errno::Inval);
+        }
+        G_DATA_LBA = G_RESVD + G_NUM_FATS * G_FAT_SZ;
+        Ok(())
     }
-    G_SPC = bpb[13] as u32;
-    if G_SPC == 0 || G_SPC > 128 {
-        return Err(Errno::Inval);
-    }
-    G_RESVD = u16::from_le_bytes([bpb[14], bpb[15]]) as u32;
-    if G_RESVD == 0 {
-        return Err(Errno::Inval);
-    }
-    G_FAT_SZ = u16::from_le_bytes([bpb[22], bpb[23]]) as u32;
-    if G_FAT_SZ == 0 {
-        G_FAT_SZ = u32::from_le_bytes([bpb[36], bpb[37], bpb[38], bpb[39]]);
-    }
-    if G_FAT_SZ == 0 {
-        return Err(Errno::Inval);
-    }
-    G_ROOT_CLUSTER = u32::from_le_bytes([bpb[44], bpb[45], bpb[46], bpb[47]]);
-    if G_ROOT_CLUSTER < 2 {
-        return Err(Errno::Inval);
-    }
-    G_DATA_LBA = G_RESVD + 2 * G_FAT_SZ;
-    Ok(())
-}}
+}
