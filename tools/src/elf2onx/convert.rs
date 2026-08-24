@@ -1,59 +1,10 @@
 use super::compress;
+use onyx_core::formats::{
+    ONX_FLAGS_COMPRESSED, ONX_FLAGS_RING1, ONX_MAX_SEGS, OnxHeader, OnxSegment, VMM_R, VMM_W, VMM_X,
+};
 use std::fs::File;
 use std::io::{Read, Write};
 use std::process;
-
-const ONX_MAGIC: u32 = 0x31584E4F;
-const ONX_VERSION_1: u32 = 1;
-const ONX_VERSION_2: u32 = 2;
-const ONX_FLAGS_RING1: u32 = 0x2;
-const ONX_FLAGS_COMPRESSED: u32 = 0x4;
-const V1_FIXED_HDR: usize = 24;
-const V1_SEG_SIZE: usize = 40;
-const V1_HEADER_SIZE: usize = V1_FIXED_HDR + 8 * V1_SEG_SIZE;
-const V2_FIXED_HDR: usize = 32;
-const V2_SEG_SIZE: usize = 48;
-const VMM_R: u32 = 1 << 1;
-const VMM_W: u32 = 1 << 2;
-const VMM_X: u32 = 1 << 3;
-
-#[derive(Clone, Copy)]
-struct OnxSegment {
-    vaddr: u64,
-    filesz: u64,
-    memsz: u64,
-    offset: u32,
-    flags: u32,
-    align: u32,
-    reserved: u32,
-    compressed_size: u32,
-}
-
-impl OnxSegment {
-    fn to_bytes_v1(self) -> [u8; V1_SEG_SIZE] {
-        let mut b = [0u8; V1_SEG_SIZE];
-        b[0..8].copy_from_slice(&self.vaddr.to_le_bytes());
-        b[8..16].copy_from_slice(&self.filesz.to_le_bytes());
-        b[16..24].copy_from_slice(&self.memsz.to_le_bytes());
-        b[24..28].copy_from_slice(&self.offset.to_le_bytes());
-        b[28..32].copy_from_slice(&self.flags.to_le_bytes());
-        b[32..36].copy_from_slice(&self.align.to_le_bytes());
-        b[36..40].copy_from_slice(&self.reserved.to_le_bytes());
-        b
-    }
-    fn to_bytes_v2(self) -> [u8; V2_SEG_SIZE] {
-        let mut b = [0u8; V2_SEG_SIZE];
-        b[0..8].copy_from_slice(&self.vaddr.to_le_bytes());
-        b[8..16].copy_from_slice(&self.filesz.to_le_bytes());
-        b[16..24].copy_from_slice(&self.memsz.to_le_bytes());
-        b[24..28].copy_from_slice(&self.offset.to_le_bytes());
-        b[28..32].copy_from_slice(&self.flags.to_le_bytes());
-        b[32..36].copy_from_slice(&self.align.to_le_bytes());
-        b[36..40].copy_from_slice(&self.reserved.to_le_bytes());
-        b[40..44].copy_from_slice(&self.compressed_size.to_le_bytes());
-        b
-    }
-}
 
 struct LoadInfo {
     seg: OnxSegment,
@@ -98,7 +49,7 @@ pub fn run(input: &str, output: &str, ring1: bool, v2: bool, do_compress: bool) 
     let e_phoff = u64::from_le_bytes(elf_data[32..40].try_into().unwrap()) as usize;
     let e_phentsize = u16::from_le_bytes([elf_data[54], elf_data[55]]) as usize;
     let e_phnum = u16::from_le_bytes([elf_data[56], elf_data[57]]) as usize;
-    let max_segs = if v2 { 256 } else { 8 };
+    let max_segs = if v2 { ONX_MAX_SEGS } else { 8 };
 
     let mut loads: Vec<LoadInfo> = Vec::with_capacity(max_segs);
     for i in 0..e_phnum {
@@ -166,9 +117,9 @@ pub fn run(input: &str, output: &str, ring1: bool, v2: bool, do_compress: bool) 
 
     let nsegs = loads.len() as u32;
     let hdr_size = if v2 {
-        (V2_FIXED_HDR + nsegs as usize * V2_SEG_SIZE) as u32
+        (OnxHeader::V2_HEADER_SIZE + loads.len() * OnxSegment::SIZE_V2) as u32
     } else {
-        V1_HEADER_SIZE as u32
+        OnxHeader::V1_HEADER_SIZE as u32
     };
     let mut data_off = hdr_size;
     for li in &mut loads {
@@ -176,44 +127,43 @@ pub fn run(input: &str, output: &str, ring1: bool, v2: bool, do_compress: bool) 
         data_off = data_off.saturating_add(li.data.len() as u32);
     }
 
+    let mut any_compressed = false;
+    let mut flags = if ring1 { ONX_FLAGS_RING1 } else { 0 };
+    for li in &loads {
+        if li.seg.compressed_size > 0 {
+            any_compressed = true;
+            break;
+        }
+    }
+    if any_compressed {
+        flags |= ONX_FLAGS_COMPRESSED;
+    }
+
+    let header = OnxHeader {
+        magic: onyx_core::formats::ONX_MAGIC,
+        version: if v2 {
+            onyx_core::formats::ONX_VERSION_2
+        } else {
+            onyx_core::formats::ONX_VERSION_1
+        },
+        entry: e_entry,
+        nsegs,
+        flags,
+        segs: loads.iter().map(|li| li.seg).collect(),
+    };
+
     let mut out = File::create(output).unwrap_or_else(|e| {
         eprintln!("create {}: {}", output, e);
         process::exit(1);
     });
-    let mut any_compressed = false;
     if v2 {
-        let mut hdr = [0u8; V2_FIXED_HDR];
-        hdr[0..4].copy_from_slice(&ONX_MAGIC.to_le_bytes());
-        hdr[4..8].copy_from_slice(&ONX_VERSION_2.to_le_bytes());
-        hdr[8..16].copy_from_slice(&e_entry.to_le_bytes());
-        hdr[16..20].copy_from_slice(&nsegs.to_le_bytes());
-        let mut flags = if ring1 { ONX_FLAGS_RING1 } else { 0 };
-        for li in &loads {
-            if li.seg.compressed_size > 0 {
-                any_compressed = true;
-                break;
-            }
-        }
-        if any_compressed {
-            flags |= ONX_FLAGS_COMPRESSED;
-        }
-        hdr[20..24].copy_from_slice(&flags.to_le_bytes());
-        out.write_all(&hdr).unwrap();
-        for li in &loads {
-            out.write_all(&li.seg.to_bytes_v2()).unwrap();
-        }
+        let bytes = header.to_bytes_v2().unwrap_or_else(|e| {
+            eprintln!("serialize header: {}", e.as_str());
+            process::exit(1);
+        });
+        out.write_all(&bytes).unwrap();
     } else {
-        let mut hdr = [0u8; V1_HEADER_SIZE];
-        hdr[0..4].copy_from_slice(&ONX_MAGIC.to_le_bytes());
-        hdr[4..8].copy_from_slice(&ONX_VERSION_1.to_le_bytes());
-        hdr[8..16].copy_from_slice(&e_entry.to_le_bytes());
-        hdr[16..20].copy_from_slice(&nsegs.to_le_bytes());
-        hdr[20..24].copy_from_slice(&if ring1 { ONX_FLAGS_RING1 } else { 0 }.to_le_bytes());
-        for (i, li) in loads.iter().enumerate() {
-            let off = V1_FIXED_HDR + i * V1_SEG_SIZE;
-            hdr[off..off + V1_SEG_SIZE].copy_from_slice(&li.seg.to_bytes_v1());
-        }
-        out.write_all(&hdr).unwrap();
+        out.write_all(&header.to_bytes_v1()).unwrap();
     }
     for li in &loads {
         out.write_all(&li.data).unwrap();

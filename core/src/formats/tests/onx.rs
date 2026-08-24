@@ -41,7 +41,7 @@ fn test_onx_v2_roundtrip() {
             },
         ],
     };
-    let bytes = hdr.to_bytes_v2();
+    let bytes = hdr.to_bytes_v2().unwrap();
     let parsed = OnxHeader::from_bytes(&bytes).unwrap();
     assert_eq!(parsed.version, 2);
     assert_eq!(parsed.nsegs, 3);
@@ -72,4 +72,26 @@ fn test_onx_v1_compat() {
     let parsed = OnxHeader::from_bytes(&bytes).unwrap();
     assert_eq!(parsed.version, 1);
     assert_eq!(parsed.nsegs, 1);
+}
+
+#[test]
+fn test_onx_v2_nsegs_mismatch_is_error() {
+    let hdr = OnxHeader {
+        magic: ONX_MAGIC,
+        version: ONX_VERSION_2,
+        entry: 0x10000,
+        nsegs: 2,
+        flags: 0,
+        segs: alloc::vec![OnxSegment {
+            vaddr: 0x10000,
+            filesz: 10,
+            memsz: 10,
+            offset: 32,
+            flags: VMM_R,
+            align: 4096,
+            reserved: 0,
+            compressed_size: 0,
+        }],
+    };
+    assert!(hdr.to_bytes_v2().is_err());
 }

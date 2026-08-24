@@ -1,76 +1,115 @@
 use super::shared::{G_FONT, PcfFont, uni_map_insert};
 use onyx_core::errno::{Errno, KResult};
 
+const PSF2_MAGIC: u32 = 0x864ab572;
 const PSF2_HAS_UNICODE_TABLE: u32 = 1;
+/// Sanity caps for untrusted header fields: a crafted /font/default.psf must
+/// never hang or corrupt the kernel, just fail the load.
+const MAX_GLYPHS: u32 = 4096;
+const MAX_CHARSIZE: u32 = 256;
+const MAX_DIM: u32 = 256;
 
-pub(super) unsafe fn init_psf2(data: &[u8]) -> KResult<()> { unsafe {
-    if data.len() < 32 {
-        return Err(Errno::Io);
-    }
-    let _version = u32::from_le_bytes(data[4..8].try_into().unwrap());
-    let hdr_size = u32::from_le_bytes(data[8..12].try_into().unwrap()) as usize;
-    let flags = u32::from_le_bytes(data[12..16].try_into().unwrap());
-    let num_glyphs = u32::from_le_bytes(data[16..20].try_into().unwrap());
-    let charsize = u32::from_le_bytes(data[20..24].try_into().unwrap());
-    let height = u32::from_le_bytes(data[24..28].try_into().unwrap());
-    let width = u32::from_le_bytes(data[28..32].try_into().unwrap());
-    let glyph_bytes = (num_glyphs as usize) * (charsize as usize);
-    let end = hdr_size + glyph_bytes;
-    if data.len() < end {
-        return Err(Errno::Io);
-    }
-    let (unicode_ptr, unicode_len) = if data.len() > end {
-        (data.as_ptr().add(end), data.len() - end)
-    } else {
-        (core::ptr::null(), 0)
-    };
-    G_FONT = Some(PcfFont {
-        width,
-        height,
-        charsize,
-        num_glyphs,
-        glyphs: data.as_ptr().add(hdr_size),
-        unicode: unicode_ptr,
-        unicode_len,
-    });
-    if flags & PSF2_HAS_UNICODE_TABLE != 0 {
-        parse_psf2_unicode_table(data, hdr_size, num_glyphs, charsize);
-    }
-    Ok(())
-}}
+fn read_u32(data: &[u8], off: usize) -> KResult<u32> {
+    data.get(off..off + 4)
+        .and_then(|b| <[u8; 4]>::try_from(b).ok())
+        .map(u32::from_le_bytes)
+        .ok_or(Errno::Io)
+}
 
-unsafe fn parse_psf2_unicode_table(data: &[u8], hdr_size: usize, num_glyphs: u32, charsize: u32) { unsafe {
-    let glyph_bytes = (num_glyphs as usize) * (charsize as usize);
-    let table_start = hdr_size + glyph_bytes;
-    if table_start >= data.len() {
-        return;
+pub(super) unsafe fn init_psf2(data: &[u8]) -> KResult<()> {
+    unsafe {
+        if data.len() < 32 {
+            return Err(Errno::Io);
+        }
+        let magic = read_u32(data, 0)?;
+        if magic != PSF2_MAGIC {
+            return Err(Errno::NoEnt);
+        }
+        // _version = read_u32(data, 4)?; — unused
+        let hdr_size = read_u32(data, 8)? as usize;
+        let flags = read_u32(data, 12)?;
+        let num_glyphs = read_u32(data, 16)?;
+        let charsize = read_u32(data, 20)?;
+        let height = read_u32(data, 24)?;
+        let width = read_u32(data, 28)?;
+
+        if hdr_size < 32 || hdr_size > data.len() {
+            return Err(Errno::Inval);
+        }
+        if num_glyphs == 0 || num_glyphs > MAX_GLYPHS {
+            return Err(Errno::Inval);
+        }
+        if charsize == 0
+            || charsize > MAX_CHARSIZE
+            || width == 0
+            || width > MAX_DIM
+            || height == 0
+            || height > MAX_DIM
+        {
+            return Err(Errno::Inval);
+        }
+        let glyph_bytes = (num_glyphs as usize)
+            .checked_mul(charsize as usize)
+            .ok_or(Errno::Inval)?;
+        let end = hdr_size.checked_add(glyph_bytes).ok_or(Errno::Inval)?;
+        if data.len() < end {
+            return Err(Errno::Io);
+        }
+        let (unicode_ptr, unicode_len) = if data.len() > end {
+            (data.as_ptr().add(end), data.len() - end)
+        } else {
+            (core::ptr::null(), 0)
+        };
+        G_FONT = Some(PcfFont {
+            width,
+            height,
+            charsize,
+            num_glyphs,
+            glyphs: data.as_ptr().add(hdr_size),
+            unicode: unicode_ptr,
+            unicode_len,
+        });
+        if flags & PSF2_HAS_UNICODE_TABLE != 0 {
+            parse_psf2_unicode_table(data, hdr_size, num_glyphs, charsize);
+        }
+        Ok(())
     }
-    let table = &data[table_start..];
-    let mut glyph_idx = 0u32;
-    let mut i = 0usize;
-    while i < table.len() && glyph_idx < num_glyphs {
-        let b = table[i];
-        if b == 0xFF {
-            glyph_idx += 1;
-            i += 1;
-            continue;
+}
+
+unsafe fn parse_psf2_unicode_table(data: &[u8], hdr_size: usize, num_glyphs: u32, charsize: u32) {
+    unsafe {
+        let glyph_bytes = (num_glyphs as usize) * (charsize as usize);
+        let table_start = hdr_size + glyph_bytes;
+        if table_start >= data.len() {
+            return;
         }
-        if b == 0xFE {
-            i += 1;
-            continue;
-        }
-        let cp = decode_utf8(table, &mut i);
-        if cp != 0 && cp >= 256 {
-            uni_map_insert(cp, glyph_idx);
-        }
-        while i < table.len() && table[i] != 0xFF && table[i] != 0xFE && table[i] != 0 {
-            i += 1;
-        }
-        if i < table.len() && table[i] == 0 {
-            i += 1;
+        let table = &data[table_start..];
+        let mut glyph_idx = 0u32;
+        let mut i = 0usize;
+        while i < table.len() && glyph_idx < num_glyphs {
+            let b = table[i];
+            if b == 0xFF {
+                glyph_idx += 1;
+                i += 1;
+                continue;
+            }
+            if b == 0xFE {
+                i += 1;
+                continue;
+            }
+            let cp = decode_utf8(table, &mut i);
+            if cp != 0 && cp >= 256 {
+                uni_map_insert(cp, glyph_idx);
+            }
+            while i < table.len() && table[i] != 0xFF && table[i] != 0xFE && table[i] != 0 {
+                i += 1;
+            }
+            if i < table.len() && table[i] == 0 {
+                i += 1;
+            }
         }
     }
-}}
+}
 
 unsafe fn decode_utf8(data: &[u8], pos: &mut usize) -> u32 {
     if *pos >= data.len() {

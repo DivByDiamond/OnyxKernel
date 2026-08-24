@@ -1,3 +1,4 @@
+use crate::errno::{Errno, KResult};
 use crate::parser::{le32, le64};
 use alloc::vec::Vec;
 
@@ -123,8 +124,13 @@ impl OnxHeader {
         b
     }
 
-    pub fn to_bytes_v2(&self) -> Vec<u8> {
-        let total = Self::V2_HEADER_SIZE + self.nsegs as usize * OnxSegment::SIZE_V2;
+    /// Serialise the v2 header. Returns `Errno::Inval` when `nsegs` does not
+    /// match the actual number of segments (public fields — never panic).
+    pub fn to_bytes_v2(&self) -> KResult<Vec<u8>> {
+        if self.nsegs as usize != self.segs.len() || self.segs.len() > ONX_MAX_SEGS {
+            return Err(Errno::Inval);
+        }
+        let total = Self::V2_HEADER_SIZE + self.segs.len() * OnxSegment::SIZE_V2;
         let mut b = alloc::vec![0u8; total];
         b[0..4].copy_from_slice(&self.magic.to_le_bytes());
         b[4..8].copy_from_slice(&2u32.to_le_bytes()); // version 2
@@ -136,6 +142,6 @@ impl OnxHeader {
             let off = Self::V2_HEADER_SIZE + i * OnxSegment::SIZE_V2;
             b[off..off + OnxSegment::SIZE_V2].copy_from_slice(&s.to_bytes_v2());
         }
-        b
+        Ok(b)
     }
 }

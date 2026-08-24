@@ -8,8 +8,9 @@ use std::fs::File;
 use std::io::Write;
 use std::process;
 
-const ONYFS_BLOCK_SIZE: usize = 4096;
-const SNAPSHOT_BLOCKS_EACH: u32 = 64;
+use onyx_core::formats::{ONYFS_BLOCK_SIZE, ONYFS_SNAPSHOT_BLOCKS_EACH, OnyfsInode};
+
+// Image-layout policy (mkimage-only, not part of the on-disk format):
 const MAX_SNAPSHOTS: u32 = 4;
 const JOURNAL_BLOCKS: u32 = 32;
 // Free blocks left unallocated in the data bitmap so the filesystem can
@@ -32,7 +33,7 @@ fn main() {
         arg_idx += 1;
     }
 
-    let inode_size = if v1 { 64 } else { 128 };
+    let inode_size = if v1 { 64 } else { OnyfsInode::SIZE };
     let inodes_per_block = ONYFS_BLOCK_SIZE / inode_size;
 
     let mut dirs: Vec<tree::DirNode> = Vec::new();
@@ -127,7 +128,7 @@ fn main() {
     }
 
     let snapshot_blocks = if !v1 {
-        MAX_SNAPSHOTS * SNAPSHOT_BLOCKS_EACH
+        MAX_SNAPSHOTS * ONYFS_SNAPSHOT_BLOCKS_EACH
     } else {
         0
     };
