@@ -1,6 +1,6 @@
 //! Trap dispatch.
 use crate::arch::regs::*;
-use crate::arch::trap_frame::TrapFrame;
+use crate::arch::trap_frame::{TrapFrame, reg_truncate, reg_widen};
 use crate::drivers::plic;
 use crate::proc;
 use crate::srv::timer;
@@ -102,7 +102,7 @@ pub unsafe fn handle(tf: &mut TrapFrame) {
                     // advance sepc by 4, we corrupt the restored state — the
                     // signal handler's return address and a0 would be lost.
                     // Special-case sigreturn: skip the post-handle fixups.
-                    let is_sigreturn = tf.a7 == SYS_sigreturn;
+                    let is_sigreturn = reg_widen(tf.a7) == SYS_sigreturn;
                     // SYS_exit must never return to userspace: when the handler
                     // returns, the process is already torn down (address space
                     // destroyed, state = Exited), so "advancing" sepc past the
@@ -110,10 +110,10 @@ pub unsafe fn handle(tf: &mut TrapFrame) {
                     // into dead code. Skip the fixups; the post-trap check at
                     // the bottom of this function sees state == Exited and
                     // context-switches away instead of ever returning here.
-                    let is_exit = tf.a7 == crate::syscall::abi::SYS_exit;
+                    let is_exit = reg_widen(tf.a7) == crate::syscall::abi::SYS_exit;
                     let ret = handler::handle(tf);
                     if !is_sigreturn && !is_exit {
-                        tf.a0 = ret as u64;
+                        tf.a0 = reg_truncate(ret as u64);
                         tf.sepc = tf.sepc.wrapping_add(4);
                     }
                 }

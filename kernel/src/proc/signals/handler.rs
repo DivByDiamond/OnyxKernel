@@ -1,4 +1,4 @@
-use crate::arch::trap_frame::TrapFrame;
+use crate::arch::trap_frame::{TrapFrame, reg_truncate, reg_widen};
 use core::sync::atomic::Ordering;
 
 use super::SIG_KILL;
@@ -79,9 +79,9 @@ pub unsafe fn signal_check(tf: &mut TrapFrame) {
         (*cur).signal_mask |= (*cur).signal_handler_masks[signum as usize];
         (*cur).signal_mask &= !protected_mask();
 
-        tf.sepc = handler;
-        tf.a0 = signum as u64;
-        let new_sp = tf.sp.wrapping_sub(256) & !15u64;
-        tf.sp = new_sp;
+        tf.sepc = reg_truncate(handler);
+        tf.a0 = reg_truncate(signum as u64);
+        let new_sp = reg_widen(tf.sp).wrapping_sub(256) & !15;
+        tf.sp = reg_truncate(new_sp);
     }
 }

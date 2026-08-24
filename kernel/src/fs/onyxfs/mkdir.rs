@@ -22,7 +22,7 @@ pub unsafe fn mkdir(dir_ino: u32, name: &[u8]) -> KResult<u32> {
             return Err(Errno::Inval);
         }
         let new_ino = alloc_inode()?;
-        let now = timer::G_JIFFIES;
+        let now = timer::jiffies();
         let mut inode = OnyfsInode {
             mode: ONYFS_DT_DIR,
             size: 0,

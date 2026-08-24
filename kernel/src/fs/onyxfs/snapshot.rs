@@ -127,7 +127,7 @@ pub unsafe fn snapshot_create(name: &[u8]) -> KResult<u32> {
         name_buf[..n].copy_from_slice(&name[..n]);
         let meta = SnapshotMeta {
             id: new_id,
-            timestamp: timer::G_JIFFIES,
+            timestamp: timer::jiffies(),
             root_inode_snapshot: (*sb_ptr).root_inode,
             block_count: n_blocks as u32,
             name: name_buf,

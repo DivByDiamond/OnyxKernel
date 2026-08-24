@@ -1,5 +1,16 @@
-use core::hint::spin_loop;
-use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use core::sync::atomic::{AtomicU32, Ordering};
+
+// Boot-protocol word width: the OnyxBoot SMP mailbox and the G_RELEASE
+// spin flag hold one machine word. rv32imac lacks 64-bit atomics (no
+// A-extension 64-bit AMOs), so the protocol degrades to AtomicU32 there.
+#[cfg(target_pointer_width = "64")]
+type MailboxAtomic = core::sync::atomic::AtomicU64;
+#[cfg(target_pointer_width = "32")]
+type MailboxAtomic = core::sync::atomic::AtomicU32;
+#[cfg(target_pointer_width = "64")]
+type MailboxVal = u64;
+#[cfg(target_pointer_width = "32")]
+type MailboxVal = u32;
 
 pub const MAX_HARTS: usize = 8;
 pub const SEC_STACK_SIZE: usize = 4096;
@@ -11,8 +22,12 @@ pub static mut G_SEC_STACKS: [u8; MAX_HARTS * SEC_STACK_SIZE] = [0; MAX_HARTS * 
 // secondary hart bring-up doesn't race on the increment.
 static G_ONLINE_HARTS: AtomicU32 = AtomicU32::new(1);
 
+#[cfg(target_pointer_width = "64")]
 #[unsafe(no_mangle)]
 pub static mut G_RELEASE: u64 = 0;
+#[cfg(target_pointer_width = "32")]
+#[unsafe(no_mangle)]
+pub static mut G_RELEASE: u32 = 0;
 
 #[unsafe(no_mangle)]
 pub static mut G_KERNEL_ROOT_PA: u64 = 0;
@@ -45,34 +60,6 @@ pub unsafe fn set_cpu_online(hart: usize, v: bool) {
     }
 }
 
-pub struct SpinLock {
-    locked: AtomicBool,
-}
-
-impl Default for SpinLock {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl SpinLock {
-    pub const fn new() -> Self {
-        SpinLock {
-            locked: AtomicBool::new(false),
-        }
-    }
-    pub fn lock(&self) {
-        while self.locked.swap(true, Ordering::Acquire) {
-            while self.locked.load(Ordering::Relaxed) {
-                spin_loop();
-            }
-        }
-    }
-    pub fn unlock(&self) {
-        self.locked.store(false, Ordering::Release);
-    }
-}
-
 /// Fixed SMP release mailbox, shared with the bootloader.
 ///
 /// OnyxBoot parks secondary harts polling this physical address (see
@@ -85,10 +72,10 @@ impl SpinLock {
 pub const SMP_MAILBOX_PA: usize = 0x8010_0000;
 
 #[inline]
-fn mailbox() -> &'static core::sync::atomic::AtomicU64 {
+fn mailbox() -> &'static MailboxAtomic {
     // SAFETY: 0x80100000 is a naturally-aligned DRAM word reserved by the
     // boot protocol (see SMP_MAILBOX_PA); it stays mapped and valid forever.
-    unsafe { core::sync::atomic::AtomicU64::from_ptr(SMP_MAILBOX_PA as *mut u64) }
+    unsafe { MailboxAtomic::from_ptr(SMP_MAILBOX_PA as *mut MailboxVal) }
 }
 
 pub unsafe fn release_secondary_harts() {
@@ -100,13 +87,12 @@ pub unsafe fn release_secondary_harts() {
     //   2. G_RELEASE flag: firmwares that hand EVERY hart to the kernel
     //      entry (-bios none / OpenSBI-style) leave them spinning inside
     //      `secondary_entry`; setting the flag releases those.
-    let entry = secondary_continue as *const () as usize as u64;
+    let entry = secondary_continue as *const () as usize as MailboxVal;
     mailbox().store(entry, Ordering::SeqCst);
-    // SAFETY: G_RELEASE is a naturally-aligned u64 static that outlives the
-    // program; see the matching pattern in `mailbox()` above.
+    // SAFETY: G_RELEASE is a naturally-aligned machine-word static that
+    // outlives the program; see the matching pattern in `mailbox()` above.
     unsafe {
-        core::sync::atomic::AtomicU64::from_ptr(core::ptr::addr_of_mut!(G_RELEASE))
-            .store(1, Ordering::SeqCst);
+        MailboxAtomic::from_ptr(core::ptr::addr_of_mut!(G_RELEASE)).store(1, Ordering::SeqCst);
     }
 }
 
@@ -121,7 +107,7 @@ pub unsafe extern "Rust" fn secondary_entry() -> ! {
             // store in release_secondary_harts... which now also publishes
             // `secondary_continue` into the mailbox for OnyxBoot-parked
             // harts; setting the flag here wakes those waiters too.
-            if core::sync::atomic::AtomicU64::from_ptr(core::ptr::addr_of_mut!(G_RELEASE))
+            if MailboxAtomic::from_ptr(core::ptr::addr_of_mut!(G_RELEASE))
                 .load(core::sync::atomic::Ordering::Acquire)
                 != 0
             {
@@ -145,15 +131,17 @@ pub unsafe extern "Rust" fn secondary_continue() -> ! {
         let sp = &raw const G_SEC_STACKS as *const u8 as usize + (hartid + 1) * SEC_STACK_SIZE;
         let entry = secondary_kmain as *const () as usize;
         let root_pa = core::ptr::read_volatile(&raw const G_KERNEL_ROOT_PA);
-        let satp = if root_pa != 0 {
-            #[cfg(target_pointer_width = "64")]
-            {
-                (8u64 << 60) | (root_pa >> 12)
-            }
-            #[cfg(target_pointer_width = "32")]
-            {
-                (crate::arch::bits::SATP_MODE_SV32 as u64) | ((root_pa >> 12) & 0x3FFFFF)
-            }
+        // Register-width typed so `in(reg)` operands match the target's
+        // integer register class (u64 on rv64, u32 on rv32).
+        #[cfg(target_pointer_width = "64")]
+        let satp: usize = if root_pa != 0 {
+            (8usize << 60) | ((root_pa >> 12) as usize)
+        } else {
+            0
+        };
+        #[cfg(target_pointer_width = "32")]
+        let satp: usize = if root_pa != 0 {
+            (crate::arch::bits::SATP_MODE_SV32 as usize) | (((root_pa >> 12) & 0x3FF_FFFF) as usize)
         } else {
             0
         };

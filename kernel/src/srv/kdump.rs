@@ -17,16 +17,19 @@ unsafe fn backtrace(w: &mut impl Write) {
     // two word reads per frame target stack slots per the `# Safety`
     // contract, and the asm only reads s0.
     unsafe {
-        let mut fp: u64;
+        let mut fp: usize;
         // SAFETY: reads the current frame pointer register s0 via a pure move;
         // no memory access, no clobbers beyond the declared `out(reg)` output.
         core::arch::asm!("mv {}, s0", out(reg) fp);
+        // Saved-ra / saved-fp slots sit just below the frame pointer at
+        // native word size (8 bytes on rv64, 4 on rv32).
+        const WORD: usize = core::mem::size_of::<usize>();
         for i in 0..MAX_BT_DEPTH {
             if fp == 0 || fp & 0xf != 0 {
                 break;
             }
-            let ra = *(fp as *const u64).sub(1);
-            let old_fp = *(fp as *const u64).sub(2);
+            let ra = *((fp - WORD) as *const usize);
+            let old_fp = *((fp - 2 * WORD) as *const usize);
             let args: &[Arg] = &[Arg::from(i), Arg::from(ra)];
             vformat(w, "  [%d] ra=%p\n", args);
             if ra == 0 {
@@ -52,7 +55,7 @@ pub unsafe fn kdump() {
             let mut w = crate::srv::klog::PanicWriter;
             w.write_str("\n--- KDUMP ---\n");
 
-            let hartid: u64;
+            let hartid: usize;
             // SAFETY: reads `tp`, which holds this hart's id per the kernel
             // ABI; a pure register move with no clobbers.
             core::arch::asm!("mv {}, tp", out(reg) hartid);
