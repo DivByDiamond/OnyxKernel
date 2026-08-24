@@ -3,6 +3,7 @@ use onyx_core::errno::Errno;
 
 use crate::fs::devfs;
 use crate::fs::vfs;
+use crate::mm::vmm;
 use crate::proc;
 use crate::syscall::abi::{TCGETS, TCSETS};
 use crate::syscall::handler::user_ptr_ok;
@@ -19,120 +20,130 @@ const C_CC_VMIN: usize = 6;
 const C_CC_VTIME: usize = 5;
 const TERMIOS_SIZE: usize = 60;
 
-pub unsafe fn sys_ioctl(fd: u64, request: u64, arg: u64) -> i64 { unsafe {
-    let token = fd;
-    if let Ok(idx) = vfs::fd_check(token) {
-        let f = vfs::fd_get(idx);
-        if f.fs == vfs::Fs::Devfs {
-            return match devfs::ioctl(f.ino, request, arg) {
-                Ok(v) => v,
-                Err(e) => e.as_i64(),
-            };
+/// Copyout of a fixed-size kernel buffer to user memory (EFAULT-safe).
+unsafe fn put_user(buf_va: u64, src: *const u8, len: usize) -> i64 {
+    unsafe {
+        if !user_ptr_ok(buf_va, len as u64) {
+            return Errno::Fault.as_i64();
+        }
+        match vmm::copy_to_user(proc::current().root_pa, buf_va, src, len) {
+            Ok(()) => 0,
+            Err(e) => e.as_i64(),
         }
     }
+}
 
-    match request {
-        TCGETS => {
-            if arg == 0 {
-                return 0;
-            }
-            if !user_ptr_ok(arg, TERMIOS_SIZE as u64) {
-                return Errno::Inval.as_i64();
-            }
-            let pa = crate::mm::vmm::translate(proc::current().root_pa, arg);
-            if pa == 0 {
-                return Errno::Inval.as_i64();
-            }
-            let buf = pa as *mut u8;
-            ptr::write_bytes(buf, 0, TERMIOS_SIZE);
+/// Copyin of a fixed-size user buffer into kernel memory (EFAULT-safe).
+unsafe fn get_user(dst: *mut u8, buf_va: u64, len: usize) -> i64 {
+    unsafe {
+        if !user_ptr_ok(buf_va, len as u64) {
+            return Errno::Fault.as_i64();
+        }
+        match vmm::copy_from_user(proc::current().root_pa, dst, buf_va, len) {
+            Ok(()) => 0,
+            Err(e) => e.as_i64(),
+        }
+    }
+}
 
-            let mut lflag = 0u32;
-            if ECHO_ENABLED {
-                lflag |= ECHO;
+pub unsafe fn sys_ioctl(fd: u64, request: u64, arg: u64) -> i64 {
+    unsafe {
+        let token = fd;
+        if let Ok(idx) = vfs::fd_check(token) {
+            let f = vfs::fd_get(idx);
+            if f.fs == vfs::Fs::Devfs {
+                // FB_IOCTL_GET_INFO writes a 5-u32 struct through `arg` inside
+                // devfs — validate the mapping here so a bad pointer yields
+                // EFAULT instead of an S-mode fault.
+                if f.ino == devfs::DEVFS_FB0_INO
+                    && request == devfs::FB_IOCTL_GET_INFO
+                    && vmm::check_user_range(proc::current().root_pa, arg, 20, true).is_err()
+                {
+                    return Errno::Fault.as_i64();
+                }
+                return match devfs::ioctl(f.ino, request, arg) {
+                    Ok(v) => v,
+                    Err(e) => e.as_i64(),
+                };
             }
-            if ICANON_ENABLED {
-                lflag |= ICANON;
-            }
+        }
 
-            ptr::write(buf.add(C_CFLAG) as *mut u32, B9600);
-            ptr::write(buf.add(C_LFLAG) as *mut u32, lflag);
-            ptr::write(buf.add(C_CC + C_CC_VMIN), 1u8);
-            ptr::write(buf.add(C_CC + C_CC_VTIME), 0u8);
-            0
-        }
-        TCSETS => {
-            if arg == 0 {
-                return 0;
+        match request {
+            TCGETS => {
+                if arg == 0 {
+                    return 0;
+                }
+                let mut buf = [0u8; TERMIOS_SIZE];
+
+                let mut lflag = 0u32;
+                if ECHO_ENABLED {
+                    lflag |= ECHO;
+                }
+                if ICANON_ENABLED {
+                    lflag |= ICANON;
+                }
+
+                let buf = buf.as_mut_ptr();
+                ptr::write(buf.add(C_CFLAG) as *mut u32, B9600);
+                ptr::write(buf.add(C_LFLAG) as *mut u32, lflag);
+                ptr::write(buf.add(C_CC + C_CC_VMIN), 1u8);
+                ptr::write(buf.add(C_CC + C_CC_VTIME), 0u8);
+                put_user(arg, buf, TERMIOS_SIZE)
             }
-            if !user_ptr_ok(arg, TERMIOS_SIZE as u64) {
-                return Errno::Inval.as_i64();
-            }
-            let pa = crate::mm::vmm::translate(proc::current().root_pa, arg);
-            if pa == 0 {
-                return Errno::Inval.as_i64();
-            }
-            let buf = pa as *const u8;
-            let lflag = ptr::read(buf.add(C_LFLAG) as *const u32);
-            ECHO_ENABLED = (lflag & ECHO) != 0;
-            ICANON_ENABLED = (lflag & ICANON) != 0;
-            0
-        }
-        0x5421 => {
-            if fd != 0 {
-                return Errno::Inval.as_i64();
-            }
-            proc::current().raw_stdin = true;
-            0
-        }
-        0x5422 => {
-            if fd != 0 {
-                return Errno::Inval.as_i64();
-            }
-            proc::current().raw_stdin = false;
-            0
-        }
-        0x5423 => {
-            if proc::current().raw_stdin {
-                1
-            } else {
+            TCSETS => {
+                if arg == 0 {
+                    return 0;
+                }
+                let mut buf = [0u8; TERMIOS_SIZE];
+                if get_user(buf.as_mut_ptr(), arg, TERMIOS_SIZE) != 0 {
+                    return Errno::Fault.as_i64();
+                }
+                let lflag = ptr::read(buf.as_ptr().add(C_LFLAG) as *const u32);
+                ECHO_ENABLED = (lflag & ECHO) != 0;
+                ICANON_ENABLED = (lflag & ICANON) != 0;
                 0
             }
+            0x5421 => {
+                if fd != 0 {
+                    return Errno::Inval.as_i64();
+                }
+                proc::current().raw_stdin = true;
+                0
+            }
+            0x5422 => {
+                if fd != 0 {
+                    return Errno::Inval.as_i64();
+                }
+                proc::current().raw_stdin = false;
+                0
+            }
+            0x5423 => {
+                if proc::current().raw_stdin {
+                    1
+                } else {
+                    0
+                }
+            }
+            0x5413 => {
+                if arg == 0 {
+                    return 0;
+                }
+                let mut ws = [0u16; 4];
+                ws[0] = 24;
+                ws[1] = 80;
+                put_user(arg, ws.as_ptr().cast::<u8>(), 8)
+            }
+            0x541B => {
+                if arg == 0 {
+                    return 0;
+                }
+                let zero = 0u32;
+                put_user(arg, core::ptr::addr_of!(zero).cast::<u8>(), 4)
+            }
+            _ => Errno::NoSys.as_i64(),
         }
-        0x5413 => {
-            if arg == 0 {
-                return 0;
-            }
-            if !user_ptr_ok(arg, 8) {
-                return Errno::Inval.as_i64();
-            }
-            let pa = crate::mm::vmm::translate(proc::current().root_pa, arg);
-            if pa == 0 {
-                return Errno::Inval.as_i64();
-            }
-            let ws = pa as *mut u16;
-            *ws = 24;
-            *ws.add(1) = 80;
-            *ws.add(2) = 0;
-            *ws.add(3) = 0;
-            0
-        }
-        0x541B => {
-            if arg == 0 {
-                return 0;
-            }
-            if !user_ptr_ok(arg, 4) {
-                return Errno::Inval.as_i64();
-            }
-            let pa = crate::mm::vmm::translate(proc::current().root_pa, arg);
-            if pa == 0 {
-                return Errno::Inval.as_i64();
-            }
-            *(pa as *mut u32) = 0;
-            0
-        }
-        _ => Errno::NoSys.as_i64(),
     }
-}}
+}
 
 pub unsafe fn sys_isatty(fd: u64) -> i64 {
     let _ = fd;

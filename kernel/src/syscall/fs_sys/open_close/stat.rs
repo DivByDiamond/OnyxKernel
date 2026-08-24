@@ -1,5 +1,4 @@
 use crate::fs::vfs;
-use crate::mm::vmm;
 use crate::syscall::handler::user_ptr_ok;
 use onyx_core::errno::Errno;
 
@@ -58,103 +57,113 @@ unsafe fn fill_user_stat(
     mtime: u64,
     atime: u64,
     ctime: u64,
-) { unsafe {
-    if !user_ptr_ok(out_va, core::mem::size_of::<UserStat>() as u64) {
-        return;
+) -> onyx_core::errno::KResult<()> {
+    unsafe {
+        if !user_ptr_ok(out_va, core::mem::size_of::<UserStat>() as u64) {
+            return Err(Errno::Fault);
+        }
+        let ifmt = if mode & 0o170000 == 0o040000 {
+            0o040000
+        } else {
+            0o100000
+        };
+        let st_mode: u32 = ifmt | 0o755;
+        let stat = UserStat {
+            st_dev: 0,
+            st_ino: ino as u64,
+            st_mode,
+            st_nlink: 1,
+            st_uid: uid,
+            st_gid: gid,
+            __pad0: 0,
+            st_rdev: 0,
+            st_size: size as i64,
+            st_blksize: 512,
+            st_blocks: size.div_ceil(512) as i64,
+            st_atime: atime as i64,
+            st_atime_nsec: 0,
+            st_mtime: mtime as i64,
+            st_mtime_nsec: 0,
+            st_ctime: ctime as i64,
+            st_ctime_nsec: 0,
+            __unused: [0; 3],
+        };
+        crate::mm::vmm::copy_to_user(
+            crate::proc::current().root_pa,
+            out_va,
+            core::ptr::addr_of!(stat).cast::<u8>(),
+            core::mem::size_of::<UserStat>(),
+        )
     }
-    let pa = vmm::translate(crate::proc::current().root_pa, out_va);
-    if pa == 0 {
-        return;
-    }
-    let dst = pa as *mut UserStat;
-    let ifmt = if mode & 0o170000 == 0o040000 {
-        0o040000
-    } else {
-        0o100000
-    };
-    let st_mode: u32 = ifmt | 0o755;
-    let stat = UserStat {
-        st_dev: 0,
-        st_ino: ino as u64,
-        st_mode,
-        st_nlink: 1,
-        st_uid: uid,
-        st_gid: gid,
-        __pad0: 0,
-        st_rdev: 0,
-        st_size: size as i64,
-        st_blksize: 512,
-        st_blocks: size.div_ceil(512) as i64,
-        st_atime: atime as i64,
-        st_atime_nsec: 0,
-        st_mtime: mtime as i64,
-        st_mtime_nsec: 0,
-        st_ctime: ctime as i64,
-        st_ctime_nsec: 0,
-        __unused: [0; 3],
-    };
-    core::ptr::write_volatile(dst, stat);
-}}
+}
 
 #[inline(never)]
-pub unsafe fn sys_stat(path: u64, st_buf: u64) -> i64 { unsafe {
-    let mut path_buf = [0u8; 256];
-    let path_len = match crate::syscall::handler::parse_user_path(path, &mut path_buf) {
-        Some(l) => l,
-        None => return Errno::Inval.as_i64(),
-    };
-    let path_bytes = &path_buf[..path_len];
-    if !user_ptr_ok(st_buf, core::mem::size_of::<UserStat>() as u64) {
-        return Errno::Inval.as_i64();
-    }
-    let token = match vfs::open(path_bytes, vfs::PERM_READ) {
-        Ok(t) => t,
-        Err(e) => return e.as_i64(),
-    };
-    let mut size = 0u32;
-    let res_stat = vfs::stat(token, &mut size);
-    let _ = vfs::close(token);
-    match res_stat {
-        Ok(()) => {
-            let mut st = crate::fs::onyxfs::OnyfsStat::default();
-            let (mtime, atime, ctime, ino, mode, uid, gid) =
-                match crate::fs::onyxfs::lookup(path_bytes, &mut st) {
-                    Ok(_) => (
-                        st.mtime, st.atime, st.ctime, st.ino, st.mode, st.uid, st.gid,
-                    ),
-                    Err(_) => {
-                        let now = crate::srv::timer::uptime_us() / 1_000_000;
-                        (now, now, now, 0u32, 0u32, 0u32, 0u32)
-                    }
-                };
-            fill_user_stat(
-                st_buf,
-                ino,
-                size as u64,
-                mode,
-                uid,
-                gid,
-                mtime,
-                atime,
-                ctime,
-            );
-            0
+pub unsafe fn sys_stat(path: u64, st_buf: u64) -> i64 {
+    unsafe {
+        let mut path_buf = [0u8; 256];
+        let path_len = match crate::syscall::handler::parse_user_path(path, &mut path_buf) {
+            Some(l) => l,
+            None => return Errno::Inval.as_i64(),
+        };
+        let path_bytes = &path_buf[..path_len];
+        if !user_ptr_ok(st_buf, core::mem::size_of::<UserStat>() as u64) {
+            return Errno::Inval.as_i64();
         }
-        Err(e) => e.as_i64(),
+        let token = match vfs::open(path_bytes, vfs::PERM_READ) {
+            Ok(t) => t,
+            Err(e) => return e.as_i64(),
+        };
+        let mut size = 0u32;
+        let res_stat = vfs::stat(token, &mut size);
+        let _ = vfs::close(token);
+        match res_stat {
+            Ok(()) => {
+                let mut st = crate::fs::onyxfs::OnyfsStat::default();
+                let (mtime, atime, ctime, ino, mode, uid, gid) =
+                    match crate::fs::onyxfs::lookup(path_bytes, &mut st) {
+                        Ok(_) => (
+                            st.mtime, st.atime, st.ctime, st.ino, st.mode, st.uid, st.gid,
+                        ),
+                        Err(_) => {
+                            let now = crate::srv::timer::uptime_us() / 1_000_000;
+                            (now, now, now, 0u32, 0u32, 0u32, 0u32)
+                        }
+                    };
+                match fill_user_stat(
+                    st_buf,
+                    ino,
+                    size as u64,
+                    mode,
+                    uid,
+                    gid,
+                    mtime,
+                    atime,
+                    ctime,
+                ) {
+                    Ok(()) => 0,
+                    Err(e) => e.as_i64(),
+                }
+            }
+            Err(e) => e.as_i64(),
+        }
     }
-}}
+}
 
-pub unsafe fn sys_fstat(token: u64, st_buf: u64) -> i64 { unsafe {
-    if !user_ptr_ok(st_buf, core::mem::size_of::<UserStat>() as u64) {
-        return Errno::Inval.as_i64();
-    }
-    let mut size = 0u32;
-    match vfs::stat(token, &mut size) {
-        Ok(()) => {
-            let now = crate::srv::timer::uptime_us() / 1_000_000;
-            fill_user_stat(st_buf, 0, size as u64, 0, 0, 0, now, now, now);
-            0
+pub unsafe fn sys_fstat(token: u64, st_buf: u64) -> i64 {
+    unsafe {
+        if !user_ptr_ok(st_buf, core::mem::size_of::<UserStat>() as u64) {
+            return Errno::Inval.as_i64();
         }
-        Err(e) => e.as_i64(),
+        let mut size = 0u32;
+        match vfs::stat(token, &mut size) {
+            Ok(()) => {
+                let now = crate::srv::timer::uptime_us() / 1_000_000;
+                match fill_user_stat(st_buf, 0, size as u64, 0, 0, 0, now, now, now) {
+                    Ok(()) => 0,
+                    Err(e) => e.as_i64(),
+                }
+            }
+            Err(e) => e.as_i64(),
+        }
     }
-}}
+}
