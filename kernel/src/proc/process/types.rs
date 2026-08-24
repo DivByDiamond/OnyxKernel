@@ -76,6 +76,13 @@ pub struct Proc {
     /// the shell for tab completion and arrow-key history navigation.
     /// Set via ioctl(TIOCSRAW), cleared via ioctl(TIOCRRAW).
     pub raw_stdin: bool,
+    /// Per-process terminal state (termios subset): echo, canonical mode,
+    /// VMIN/VTIME. Managed via TCGETS/TCSETS ioctls; zero-initialized to
+    /// the sane defaults (ECHO|ICANON) on process creation.
+    pub term_echo: bool,
+    pub term_icanon: bool,
+    pub term_vmin: u8,
+    pub term_vtime: u8,
 }
 
 impl Proc {
@@ -122,6 +129,10 @@ impl Proc {
             affinity: -1,
             on_rq: false,
             raw_stdin: false,
+            term_echo: true,
+            term_icanon: true,
+            term_vmin: 1,
+            term_vtime: 0,
             readdir_ino: 0,
             readdir_idx: 0,
             readdir_active: false,
