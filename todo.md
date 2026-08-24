@@ -172,6 +172,11 @@
      DHCP xid/chaddr + DNS id
   D. Разное: B9 (+ohci unwrap), ONX-loader vaddr+entry, контракт passwd↔ACL,
      tools → зависимость onyx_core, починка cargo test -p onyx_kernel
+✅ ВОЛНА 2 ВЫПОЛНЕНА (2026-08-24): боевой SMP (mailbox в OnyxBoot + per-hart bootstrap,
+-smp 2 доказан), CI-workflow, dead-code зачистка, SAFETY-комментарии mm/trap/sync (100%),
+крипто (KAT SHA256, $5$ shadow с миграцией, entropy-warning); сторонний Onyx-Vim запущен —
+по пути исправлены: mkimage indirect (>40KB файлы обрезались), FPU для user (sstatus.FS),
+sys_read cooked off-by-one, smode-under-OnyxBoot silent death → kpanic.
 ✅ ВОЛНА 1 ВЫПОЛНЕНА (2026-08-24, коммиты f36c989/ef7f4b3/3609a41/3f46a09):
 гейт пройден — kbuild/smode/clippy 0 warnings, onyx_core+onyx_kernel тесты зелёные
 (104), headless smoke PASS, interactive smoke: 0 illegal, respawn login OK, 0 overflow.
