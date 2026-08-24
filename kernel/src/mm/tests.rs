@@ -55,16 +55,27 @@ fn test_vmm_translate_empty() {
 
 #[test]
 fn test_vmm_translate_leaf() {
+    // PTE entries only encode 4 KiB-aligned next-table addresses, so the
+    // fake tables must themselves be page-aligned.
+    #[repr(align(4096))]
+    struct Page([u64; 512]);
     unsafe {
-        let mut pt = [0u64; 512];
+        let mut l2 = Page([0u64; 512]);
+        let mut l1 = Page([0u64; 512]);
+        let mut l0 = Page([0u64; 512]);
         let vaddr = 0x1000u64;
         let paddr = 0x8000_0000u64;
-        let l0_idx = (vaddr >> 12) & 0x1FF;
-        pt[l0_idx as usize] = crate::arch::regs::PTE_V
+        let next_table_pte = |t: &Page| {
+            crate::arch::regs::PTE_V
+                | ((t.0.as_ptr() as u64 >> 12) << crate::arch::regs::PTE_PPN_SHIFT)
+        };
+        l2.0[(vaddr >> 30) as usize & 0x1FF] = next_table_pte(&l1);
+        l1.0[(vaddr >> 21) as usize & 0x1FF] = next_table_pte(&l0);
+        l0.0[(vaddr >> 12) as usize & 0x1FF] = crate::arch::regs::PTE_V
             | crate::arch::regs::PTE_R
             | crate::arch::regs::PTE_W
             | (paddr >> 12 << crate::arch::regs::PTE_PPN_SHIFT);
-        let result = crate::mm::vmm::translate(pt.as_ptr() as u64, vaddr);
+        let result = crate::mm::vmm::translate(l2.0.as_ptr() as u64, vaddr);
         assert_eq!(result, paddr);
     }
 }

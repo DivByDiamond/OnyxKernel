@@ -1,19 +1,23 @@
-use super::runqueue::{G_RQ, dequeue, enqueue, rq_lock, rq_unlock};
-use crate::arch::trap_frame::TrapFrame;
-use crate::proc::process::{
-    G_HART_IDLE_TF, G_NEED_RESCHED, KSTACK_SIZE, MAX_HARTS, Proc, ProcState, current_for_hart,
-    hart_id, set_current_for_hart,
-};
-use core::ptr;
-use core::sync::atomic::Ordering;
+use core::{ptr, sync::atomic::Ordering};
 
-pub unsafe fn sched_tick() { unsafe {
-    let hartid = hart_id();
-    let cur = current_for_hart(hartid);
-    if !cur.is_null() && !matches!((*cur).state, ProcState::Free) {
-        G_NEED_RESCHED[hartid].store(true, Ordering::Release);
+use super::runqueue::{G_RQ, dequeue, enqueue, rq_lock, rq_unlock};
+use crate::{
+    arch::trap_frame::TrapFrame,
+    proc::process::{
+        G_HART_IDLE_TF, G_NEED_RESCHED, KSTACK_SIZE, MAX_HARTS, Proc, ProcState, current_for_hart,
+        hart_id, set_current_for_hart,
+    },
+};
+
+pub unsafe fn sched_tick() {
+    unsafe {
+        let hartid = hart_id();
+        let cur = current_for_hart(hartid);
+        if !cur.is_null() && !matches!((*cur).state, ProcState::Free) {
+            G_NEED_RESCHED[hartid].store(true, Ordering::Release);
+        }
     }
-}}
+}
 
 pub unsafe fn set_need_resched(hartid: usize, v: bool) {
     if hartid < MAX_HARTS {
@@ -21,145 +25,158 @@ pub unsafe fn set_need_resched(hartid: usize, v: bool) {
     }
 }
 
-pub unsafe fn steal(hartid: usize) -> *mut Proc { unsafe {
-    let n = MAX_HARTS;
-    for i in 1..n {
-        let victim = (hartid + i) % n;
-        if victim == hartid {
-            continue;
-        }
-        // Bug #11 fix: hold the victim's rq_lock across dequeue AND any
-        // re-enqueue caused by an affinity mismatch. Previously the lock
-        // was released immediately after dequeue and the subsequent
-        // `enqueue(victim, p)` for an affinity-mismatched process mutated
-        // the victim's runqueue without any lock, racing with the victim
-        // hart's own scheduler and producing orphaned/duplicated entries.
-        if (*G_RQ.as_mut_ptr())[victim]
-            .lock
-            .swap(true, Ordering::Acquire)
-        {
-            continue;
-        }
-        let p = dequeue(victim);
-        if !p.is_null() {
-            let affinity = (*p).affinity;
-            if affinity >= 0 && (affinity as usize) != hartid {
-                // Put it back on the victim's queue (lock still held).
-                enqueue(victim, p);
-                (*G_RQ.as_mut_ptr())[victim]
-                    .lock
-                    .store(false, Ordering::Release);
+pub unsafe fn steal(hartid: usize) -> *mut Proc {
+    unsafe {
+        let n = MAX_HARTS;
+        for i in 1..n {
+            let victim = (hartid + i) % n;
+            if victim == hartid {
                 continue;
             }
-            // Got a stealable process — release the lock and return it.
-            (*G_RQ.as_mut_ptr())[victim]
-                .lock
-                .store(false, Ordering::Release);
-            return p;
+            // Bug #11 fix: hold the victim's rq_lock across dequeue AND any
+            // re-enqueue caused by an affinity mismatch. Previously the lock
+            // was released immediately after dequeue and the subsequent
+            // `enqueue(victim, p)` for an affinity-mismatched process mutated
+            // the victim's runqueue without any lock, racing with the victim
+            // hart's own scheduler and producing orphaned/duplicated entries.
+            if !(*G_RQ.as_mut_ptr())[victim].lock.try_lock() {
+                continue;
+            }
+            let p = dequeue(victim);
+            if !p.is_null() {
+                let affinity = (*p).affinity;
+                if affinity >= 0 && (affinity as usize) != hartid {
+                    // Put it back on the victim's queue (lock still held).
+                    enqueue(victim, p);
+                    (*G_RQ.as_mut_ptr())[victim].lock.unlock();
+                    continue;
+                }
+                // Got a stealable process — release the lock and return it.
+                (*G_RQ.as_mut_ptr())[victim].lock.unlock();
+                return p;
+            }
+            // Nothing to steal from this victim — release the lock.
+            (*G_RQ.as_mut_ptr())[victim].lock.unlock();
         }
-        // Nothing to steal from this victim — release the lock.
-        (*G_RQ.as_mut_ptr())[victim]
-            .lock
-            .store(false, Ordering::Release);
+        core::ptr::null_mut()
     }
-    core::ptr::null_mut()
-}}
+}
 
-pub unsafe fn sched_yield(tf: &mut TrapFrame) { unsafe {
-    let hartid = hart_id();
-    let current = current_for_hart(hartid);
+pub unsafe fn sched_yield(tf: &mut TrapFrame) {
+    unsafe {
+        let hartid = hart_id();
+        let current = current_for_hart(hartid);
 
-    rq_lock(hartid);
-
-    if current.is_null() {
-        G_HART_IDLE_TF[hartid] = *tf;
-    } else {
-        (*current).tf = *tf;
-        if matches!((*current).state, ProcState::Running) {
-            (*current).state = ProcState::Ready;
-            enqueue(hartid, current);
-        }
-    }
-
-    let mut next = dequeue(hartid);
-
-    // Bug (proc MINOR #6): if dequeue returns the same process we just
-    // enqueued (the only runnable process on this hart), don't bother
-    // doing a context switch to ourselves — that's wasted work (save
-    // trap frame, switch stack, restore the same trap frame). Just
-    // promote it back to Running and return. This is a very common
-    // case when a single process is running on a hart.
-    if next == current && !next.is_null() {
-        (*next).state = ProcState::Running;
-        rq_unlock(hartid);
-        G_NEED_RESCHED[hartid].store(false, Ordering::Release);
-        return;
-    }
-
-    if !next.is_null() {
-        let affinity = (*next).affinity;
-        if affinity >= 0 && (affinity as usize) != hartid {
-            enqueue(affinity as usize, next);
-            next = dequeue(hartid);
-        }
-    }
-
-    if next.is_null() {
-        rq_unlock(hartid);
-        let stolen = steal(hartid);
-        if !stolen.is_null() {
-            (*stolen).state = ProcState::Running;
-            set_current_for_hart(hartid, stolen);
-            G_NEED_RESCHED[hartid].store(false, Ordering::Release);
-            let kstack_top = (*stolen).kstack.as_ptr().add(KSTACK_SIZE) as usize;
-            let dst = (kstack_top - core::mem::size_of::<TrapFrame>()) as *mut TrapFrame;
-            ptr::write_volatile(dst, (*stolen).tf);
-            crate::arch::asm::sched_switch(dst as usize);
-        }
         rq_lock(hartid);
-        next = dequeue(hartid);
-    }
 
-    if next.is_null() {
         if current.is_null() {
+            G_HART_IDLE_TF[hartid] = *tf;
+        } else {
+            (*current).tf = *tf;
+            if matches!((*current).state, ProcState::Running) {
+                (*current).state = ProcState::Ready;
+                enqueue(hartid, current);
+            }
+        }
+
+        let mut next = dequeue(hartid);
+
+        // Bug (proc MINOR #6): if dequeue returns the same process we just
+        // enqueued (the only runnable process on this hart), don't bother
+        // doing a context switch to ourselves — that's wasted work (save
+        // trap frame, switch stack, restore the same trap frame). Just
+        // promote it back to Running and return. This is a very common
+        // case when a single process is running on a hart.
+        if next == current && !next.is_null() {
+            (*next).state = ProcState::Running;
             rq_unlock(hartid);
             G_NEED_RESCHED[hartid].store(false, Ordering::Release);
             return;
         }
-        if matches!((*current).state, ProcState::Exited) {
-            // Switch this hart to its idle context instead of halting the
-            // machine. Previously, hart 0 would `klog::halt()` here, which
-            // took the whole system down on the first process exit. Now all
-            // harts behave uniformly: drop the exited process as current and
-            // resume the idle trap frame saved on entry to sched_yield.
-            set_current_for_hart(hartid, ptr::null_mut());
+
+        if !next.is_null() {
+            let affinity = (*next).affinity;
+            let target = if affinity >= 0 && (affinity as usize) < MAX_HARTS {
+                affinity as usize
+            } else {
+                hartid
+            };
+            if target != hartid {
+                // Audit fix: enqueueing into a REMOTE runqueue without holding
+                // that queue's rq_lock was the same bug class as Bug #11 (fixed
+                // in steal()). Mirror steal()'s pattern here: try-lock the remote
+                // queue and only migrate while it is held. If the lock is busy we
+                // put the process back on our own queue — a later tick/steal will
+                // retry the migration — instead of mutating the remote queue
+                // unlocked.
+                if (*G_RQ.as_mut_ptr())[target].lock.try_lock() {
+                    enqueue(target, next);
+                    (*G_RQ.as_mut_ptr())[target].lock.unlock();
+                    next = dequeue(hartid);
+                } else {
+                    enqueue(hartid, next);
+                    next = dequeue(hartid);
+                }
+            }
+        }
+
+        if next.is_null() {
+            rq_unlock(hartid);
+            let stolen = steal(hartid);
+            if !stolen.is_null() {
+                (*stolen).state = ProcState::Running;
+                set_current_for_hart(hartid, stolen);
+                G_NEED_RESCHED[hartid].store(false, Ordering::Release);
+                let kstack_top = (*stolen).kstack.as_ptr().add(KSTACK_SIZE) as usize;
+                let dst = (kstack_top - core::mem::size_of::<TrapFrame>()) as *mut TrapFrame;
+                ptr::write_volatile(dst, (*stolen).tf);
+                crate::arch::asm::sched_switch(dst as usize);
+            }
+            rq_lock(hartid);
+            next = dequeue(hartid);
+        }
+
+        if next.is_null() {
+            if current.is_null() {
+                rq_unlock(hartid);
+                G_NEED_RESCHED[hartid].store(false, Ordering::Release);
+                return;
+            }
+            if matches!((*current).state, ProcState::Exited) {
+                // Switch this hart to its idle context instead of halting the
+                // machine. Previously, hart 0 would `klog::halt()` here, which
+                // took the whole system down on the first process exit. Now all
+                // harts behave uniformly: drop the exited process as current and
+                // resume the idle trap frame saved on entry to sched_yield.
+                set_current_for_hart(hartid, ptr::null_mut());
+                rq_unlock(hartid);
+                G_NEED_RESCHED[hartid].store(false, Ordering::Release);
+                let stack_top = crate::arch::smp::G_SEC_STACKS.as_ptr() as usize
+                    + (hartid + 1) * crate::arch::smp::SEC_STACK_SIZE;
+                let dst = (stack_top - core::mem::size_of::<TrapFrame>()) as *mut TrapFrame;
+                ptr::write_volatile(dst, G_HART_IDLE_TF[hartid]);
+                crate::arch::asm::sched_switch(dst as usize);
+            }
+            // Only flip a preempted Running/Ready process back to Running. A
+            // process that is Waiting (on a child, pipe, etc.) or otherwise
+            // blocked must NOT be scheduled here — restoring Running would
+            // defeat wait()/waitpid() and run the process prematurely.
+            if matches!((*current).state, ProcState::Ready) {
+                (*current).state = ProcState::Running;
+            }
             rq_unlock(hartid);
             G_NEED_RESCHED[hartid].store(false, Ordering::Release);
-            let stack_top = crate::arch::smp::G_SEC_STACKS.as_ptr() as usize
-                + (hartid + 1) * crate::arch::smp::SEC_STACK_SIZE;
-            let dst = (stack_top - core::mem::size_of::<TrapFrame>()) as *mut TrapFrame;
-            ptr::write_volatile(dst, G_HART_IDLE_TF[hartid]);
-            crate::arch::asm::sched_switch(dst as usize);
+            return;
         }
-        // Only flip a preempted Running/Ready process back to Running. A
-        // process that is Waiting (on a child, pipe, etc.) or otherwise
-        // blocked must NOT be scheduled here — restoring Running would
-        // defeat wait()/waitpid() and run the process prematurely.
-        if matches!((*current).state, ProcState::Ready) {
-            (*current).state = ProcState::Running;
-        }
+
+        (*next).state = ProcState::Running;
+        set_current_for_hart(hartid, next);
         rq_unlock(hartid);
         G_NEED_RESCHED[hartid].store(false, Ordering::Release);
-        return;
+
+        let next_kstack_top = (*next).kstack.as_ptr().add(KSTACK_SIZE) as usize;
+        let dst = (next_kstack_top - core::mem::size_of::<TrapFrame>()) as *mut TrapFrame;
+        ptr::write_volatile(dst, (*next).tf);
+        crate::arch::asm::sched_switch(dst as usize);
     }
-
-    (*next).state = ProcState::Running;
-    set_current_for_hart(hartid, next);
-    rq_unlock(hartid);
-    G_NEED_RESCHED[hartid].store(false, Ordering::Release);
-
-    let next_kstack_top = (*next).kstack.as_ptr().add(KSTACK_SIZE) as usize;
-    let dst = (next_kstack_top - core::mem::size_of::<TrapFrame>()) as *mut TrapFrame;
-    ptr::write_volatile(dst, (*next).tf);
-    crate::arch::asm::sched_switch(dst as usize);
-}}
+}

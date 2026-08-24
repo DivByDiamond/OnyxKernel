@@ -1,166 +1,176 @@
 use crate::arch::regs::*;
 use core::ptr;
 
-pub unsafe fn translate(root_pa: u64, vaddr: u64) -> u64 { unsafe {
-    if root_pa == 0 {
-        crate::kerr!(
-            "translate",
-            "root_pa=0 vaddr=%p",
-            onyx_core::fmt::Arg::from(vaddr)
-        );
-        return 0;
-    }
-    let mut pa = root_pa;
-    for level in (0..=2).rev() {
-        let idx = match level {
-            2 => sv39_l2_idx(vaddr),
-            1 => sv39_l1_idx(vaddr),
-            0 => sv39_l0_idx(vaddr),
-            _ => return 0,
-        };
-        let pte = ptr::read_volatile((pa as usize + idx * 8) as *const u64);
-        if pte & PTE_V == 0 {
+pub unsafe fn translate(root_pa: u64, vaddr: u64) -> u64 {
+    unsafe {
+        if root_pa == 0 {
+            crate::kerr!(
+                "translate",
+                "root_pa=0 vaddr=%p",
+                onyx_core::fmt::Arg::from(vaddr)
+            );
             return 0;
         }
-        if pte & PTE_LEAF != 0 {
-            let leaf_ppn = (pte & PTE_PPN_MASK) >> PTE_PPN_SHIFT;
-            let off = match level {
-                2 => vaddr & ((1u64 << 30) - 1),
-                1 => vaddr & ((1u64 << 21) - 1),
-                0 => vaddr & ((1u64 << 12) - 1),
+        let mut pa = root_pa;
+        for level in (0..=2).rev() {
+            let idx = match level {
+                2 => sv39_l2_idx(vaddr),
+                1 => sv39_l1_idx(vaddr),
+                0 => sv39_l0_idx(vaddr),
                 _ => return 0,
             };
-            return (leaf_ppn << 12) + off;
-        }
-        pa = (pte & PTE_PPN_MASK) >> PTE_PPN_SHIFT << 12;
-    }
-    0
-}}
-
-pub unsafe fn translate_user(root_pa: u64, vaddr: u64) -> u64 { unsafe {
-    if root_pa == 0 {
-        return 0;
-    }
-    let mut pa = root_pa;
-    for level in (0..=2).rev() {
-        let idx = match level {
-            2 => sv39_l2_idx(vaddr),
-            1 => sv39_l1_idx(vaddr),
-            0 => sv39_l0_idx(vaddr),
-            _ => return 0,
-        };
-        let pte = ptr::read_volatile((pa as usize + idx * 8) as *const u64);
-        if pte & PTE_V == 0 {
-            return 0;
-        }
-        if pte & PTE_LEAF != 0 {
-            if pte & PTE_U == 0 {
+            let pte = ptr::read_volatile((pa as usize + idx * 8) as *const u64);
+            if pte & PTE_V == 0 {
                 return 0;
             }
-            let leaf_ppn = (pte & PTE_PPN_MASK) >> PTE_PPN_SHIFT;
-            let off = match level {
-                2 => vaddr & ((1u64 << 30) - 1),
-                1 => vaddr & ((1u64 << 21) - 1),
-                0 => vaddr & ((1u64 << 12) - 1),
+            if pte & PTE_LEAF != 0 {
+                let leaf_ppn = (pte & PTE_PPN_MASK) >> PTE_PPN_SHIFT;
+                let off = match level {
+                    2 => vaddr & ((1u64 << 30) - 1),
+                    1 => vaddr & ((1u64 << 21) - 1),
+                    0 => vaddr & ((1u64 << 12) - 1),
+                    _ => return 0,
+                };
+                return (leaf_ppn << 12) + off;
+            }
+            pa = (pte & PTE_PPN_MASK) >> PTE_PPN_SHIFT << 12;
+        }
+        0
+    }
+}
+
+pub unsafe fn translate_user(root_pa: u64, vaddr: u64) -> u64 {
+    unsafe {
+        if root_pa == 0 {
+            return 0;
+        }
+        let mut pa = root_pa;
+        for level in (0..=2).rev() {
+            let idx = match level {
+                2 => sv39_l2_idx(vaddr),
+                1 => sv39_l1_idx(vaddr),
+                0 => sv39_l0_idx(vaddr),
                 _ => return 0,
             };
-            return (leaf_ppn << 12) + off;
-        }
-        pa = (pte & PTE_PPN_MASK) >> PTE_PPN_SHIFT << 12;
-    }
-    0
-}}
-
-pub unsafe fn translate_user_write(root_pa: u64, vaddr: u64) -> u64 { unsafe {
-    if root_pa == 0 {
-        return 0;
-    }
-    let mut pa = root_pa;
-    for level in (0..=2).rev() {
-        let idx = match level {
-            2 => sv39_l2_idx(vaddr),
-            1 => sv39_l1_idx(vaddr),
-            0 => sv39_l0_idx(vaddr),
-            _ => return 0,
-        };
-        let pte = ptr::read_volatile((pa as usize + idx * 8) as *const u64);
-        if pte & PTE_V == 0 {
-            return 0;
-        }
-        if pte & PTE_LEAF != 0 {
-            if pte & (PTE_U | PTE_W) != (PTE_U | PTE_W) {
+            let pte = ptr::read_volatile((pa as usize + idx * 8) as *const u64);
+            if pte & PTE_V == 0 {
                 return 0;
             }
-            let leaf_ppn = (pte & PTE_PPN_MASK) >> PTE_PPN_SHIFT;
-            let off = match level {
-                2 => vaddr & ((1u64 << 30) - 1),
-                1 => vaddr & ((1u64 << 21) - 1),
-                0 => vaddr & ((1u64 << 12) - 1),
+            if pte & PTE_LEAF != 0 {
+                if pte & PTE_U == 0 {
+                    return 0;
+                }
+                let leaf_ppn = (pte & PTE_PPN_MASK) >> PTE_PPN_SHIFT;
+                let off = match level {
+                    2 => vaddr & ((1u64 << 30) - 1),
+                    1 => vaddr & ((1u64 << 21) - 1),
+                    0 => vaddr & ((1u64 << 12) - 1),
+                    _ => return 0,
+                };
+                return (leaf_ppn << 12) + off;
+            }
+            pa = (pte & PTE_PPN_MASK) >> PTE_PPN_SHIFT << 12;
+        }
+        0
+    }
+}
+
+pub unsafe fn translate_user_write(root_pa: u64, vaddr: u64) -> u64 {
+    unsafe {
+        if root_pa == 0 {
+            return 0;
+        }
+        let mut pa = root_pa;
+        for level in (0..=2).rev() {
+            let idx = match level {
+                2 => sv39_l2_idx(vaddr),
+                1 => sv39_l1_idx(vaddr),
+                0 => sv39_l0_idx(vaddr),
                 _ => return 0,
             };
-            return (leaf_ppn << 12) + off;
-        }
-        pa = (pte & PTE_PPN_MASK) >> PTE_PPN_SHIFT << 12;
-    }
-    0
-}}
-
-pub unsafe fn pte_user_flags(root_pa: u64, vaddr: u64) -> u64 { unsafe {
-    if root_pa == 0 {
-        return 0;
-    }
-    let mut pa = root_pa;
-    for level in (0..=2).rev() {
-        let idx = match level {
-            2 => sv39_l2_idx(vaddr),
-            1 => sv39_l1_idx(vaddr),
-            0 => sv39_l0_idx(vaddr),
-            _ => return 0,
-        };
-        let pte = ptr::read_volatile((pa as usize + idx * 8) as *const u64);
-        if pte & PTE_V == 0 {
-            return 0;
-        }
-        if pte & PTE_LEAF != 0 {
-            if pte & PTE_U == 0 {
+            let pte = ptr::read_volatile((pa as usize + idx * 8) as *const u64);
+            if pte & PTE_V == 0 {
                 return 0;
             }
-            return pte & PTE_FLAGS_MASK;
+            if pte & PTE_LEAF != 0 {
+                if pte & (PTE_U | PTE_W) != (PTE_U | PTE_W) {
+                    return 0;
+                }
+                let leaf_ppn = (pte & PTE_PPN_MASK) >> PTE_PPN_SHIFT;
+                let off = match level {
+                    2 => vaddr & ((1u64 << 30) - 1),
+                    1 => vaddr & ((1u64 << 21) - 1),
+                    0 => vaddr & ((1u64 << 12) - 1),
+                    _ => return 0,
+                };
+                return (leaf_ppn << 12) + off;
+            }
+            pa = (pte & PTE_PPN_MASK) >> PTE_PPN_SHIFT << 12;
         }
-        pa = (pte & PTE_PPN_MASK) >> PTE_PPN_SHIFT << 12;
+        0
     }
-    0
-}}
+}
+
+pub unsafe fn pte_user_flags(root_pa: u64, vaddr: u64) -> u64 {
+    unsafe {
+        if root_pa == 0 {
+            return 0;
+        }
+        let mut pa = root_pa;
+        for level in (0..=2).rev() {
+            let idx = match level {
+                2 => sv39_l2_idx(vaddr),
+                1 => sv39_l1_idx(vaddr),
+                0 => sv39_l0_idx(vaddr),
+                _ => return 0,
+            };
+            let pte = ptr::read_volatile((pa as usize + idx * 8) as *const u64);
+            if pte & PTE_V == 0 {
+                return 0;
+            }
+            if pte & PTE_LEAF != 0 {
+                if pte & PTE_U == 0 {
+                    return 0;
+                }
+                return pte & PTE_FLAGS_MASK;
+            }
+            pa = (pte & PTE_PPN_MASK) >> PTE_PPN_SHIFT << 12;
+        }
+        0
+    }
+}
 
 /// OR `add_flags` into an existing level-0 user PTE. Returns `false` if the
 /// page is not mapped as a user leaf at level 0 (caller must then fall back
 /// to a fresh mapping or report an error).
-pub unsafe fn update_user_pte(root_pa: u64, vaddr: u64, add_flags: u64) -> bool { unsafe {
-    if root_pa == 0 {
-        return false;
-    }
-    let mut pa = root_pa;
-    for level in (0..=2).rev() {
-        let idx = match level {
-            2 => sv39_l2_idx(vaddr),
-            1 => sv39_l1_idx(vaddr),
-            0 => sv39_l0_idx(vaddr),
-            _ => return false,
-        };
-        let pte_ptr = (pa as usize + idx * 8) as *mut u64;
-        let pte = ptr::read_volatile(pte_ptr);
-        if pte & PTE_V == 0 {
+pub unsafe fn update_user_pte(root_pa: u64, vaddr: u64, add_flags: u64) -> bool {
+    unsafe {
+        if root_pa == 0 {
             return false;
         }
-        if pte & PTE_LEAF != 0 {
-            if pte & PTE_U == 0 || level != 0 {
+        let mut pa = root_pa;
+        for level in (0..=2).rev() {
+            let idx = match level {
+                2 => sv39_l2_idx(vaddr),
+                1 => sv39_l1_idx(vaddr),
+                0 => sv39_l0_idx(vaddr),
+                _ => return false,
+            };
+            let pte_ptr = (pa as usize + idx * 8) as *mut u64;
+            let pte = ptr::read_volatile(pte_ptr);
+            if pte & PTE_V == 0 {
                 return false;
             }
-            ptr::write_volatile(pte_ptr, pte | add_flags);
-            crate::arch::csr::sfence_vma(vaddr, 0);
-            return true;
+            if pte & PTE_LEAF != 0 {
+                if pte & PTE_U == 0 || level != 0 {
+                    return false;
+                }
+                ptr::write_volatile(pte_ptr, pte | add_flags);
+                crate::arch::csr::sfence_vma(vaddr, 0);
+                return true;
+            }
+            pa = (pte & PTE_PPN_MASK) >> PTE_PPN_SHIFT << 12;
         }
-        pa = (pte & PTE_PPN_MASK) >> PTE_PPN_SHIFT << 12;
+        false
     }
-    false
-}}
+}

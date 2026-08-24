@@ -4,10 +4,9 @@
 //! static, the `init` entry point, and the `free_pages` counter. Bitmap
 //! operations (alloc/free) live in `bitmap.rs`; SLAB operations live in
 //! `slab.rs`.
-use crate::arch::__kernel_end;
-use core::hint::spin_loop;
 use core::ptr;
-use core::sync::atomic::{AtomicBool, Ordering};
+
+use crate::{arch::__kernel_end, sync::SpinLock};
 
 pub const PAGE_SIZE: usize = 4096;
 pub const KERNEL_HEAP_RESERVE: usize = 4 * 1024 * 1024;
@@ -42,91 +41,89 @@ pub(super) static mut G_PMM: Pmm = Pmm {
 /// Callers must use `pmm_lock` / `pmm_unlock` around any sequence that reads
 /// and mutates `G_PMM` fields, the bitmap, or the slab free-lists. Internal
 /// `_unlocked` variants exist for call sites that already hold the lock.
-pub(super) static G_PMM_LOCK: AtomicBool = AtomicBool::new(false);
+pub(super) static G_PMM_LOCK: SpinLock = SpinLock::new();
 
 #[inline]
 pub(super) unsafe fn pmm_lock() {
-    while G_PMM_LOCK.swap(true, Ordering::Acquire) {
-        while G_PMM_LOCK.load(Ordering::Relaxed) {
-            spin_loop();
-        }
-    }
+    G_PMM_LOCK.lock();
 }
 
 #[inline]
 pub(super) unsafe fn pmm_unlock() {
-    G_PMM_LOCK.store(false, Ordering::Release);
+    G_PMM_LOCK.unlock();
 }
 
-pub unsafe fn init(dram_base: u64, dram_size: u64) { unsafe {
-    let kernel_end_pa = &__kernel_end as *const u8 as usize;
-    let heap_end_pa = kernel_end_pa + KERNEL_HEAP_RESERVE;
-    let managed_base = core::cmp::max(heap_end_pa, dram_base as usize);
-    let managed_base = (managed_base + PAGE_SIZE - 1) & !(PAGE_SIZE - 1);
-    let managed_end = (dram_base + dram_size) as usize;
-    let managed_size = managed_end.saturating_sub(managed_base);
-    let pages = managed_size / PAGE_SIZE;
-    let bitmap_bytes = pages.div_ceil(8);
-    let bitmap_pages = bitmap_bytes.div_ceil(PAGE_SIZE);
-    let bitmap = managed_base as *mut u8;
-    ptr::write_bytes(bitmap, 0, bitmap_bytes);
-    let data_base = managed_base + bitmap_pages * PAGE_SIZE;
-    let data_pages = pages.saturating_sub(bitmap_pages);
-    let p = &raw mut G_PMM;
-    *p = Pmm {
-        base: data_base,
-        total_pages: data_pages,
-        free_pages: data_pages,
-        bitmap,
-        bitmap_bytes,
-        slab_heads: [ptr::null_mut(); SLAB_SIZES.len()],
-    };
-    for i in 0..bitmap_pages {
-        bitmap::bm_set(i);
-    }
-    // Bug (mm SERIOUS #12): also mark every page in the [data_base, data_base +
-    // data_pages) range that overlaps the bitmap pages themselves. The bitmap
-    // lives at `managed_base .. managed_base + bitmap_pages*PAGE_SIZE`, which
-    // is INSIDE the [data_base, data_base+data_pages) range we hand out to
-    // callers. Without marking those bitmap-occupied pages as used in the
-    // bitmap itself, pmm::alloc() could hand out a page that overlaps the
-    // bitmap buffer — silently corrupting the allocator state.
-    //
-    // We mark the bitmap pages by their absolute bit index. The bitmap's
-    // data_base offset is `bitmap_pages * PAGE_SIZE` from `base` (the
-    // physical address of bit 0). So bit i in the bitmap corresponds to
-    // physical address `base + i*PAGE_SIZE`, and bitmap pages occupy bits
-    // `(managed_base - base) / PAGE_SIZE ..` for bitmap_pages entries.
-    //
-    // In the current layout `managed_base == data_base` (we place the
-    // bitmap at the very start of the managed region), so the loop above
-    // already marks the right bits. We additionally mark any page that
-    // falls between the original kernel_end and managed_base — those are
-    // reserved for kernel BSS / heap and must never be handed out.
-    let kernel_end_pa = &__kernel_end as *const u8 as usize;
-    let reserved_end = managed_base; // everything below managed_base is reserved
-    if kernel_end_pa < reserved_end {
-        let start_bit = (kernel_end_pa.saturating_sub((*p).base)) / PAGE_SIZE;
-        let end_bit = (reserved_end.saturating_sub((*p).base)) / PAGE_SIZE;
-        for i in start_bit..end_bit {
-            if i < (*p).total_pages && !bitmap::bm_get(i) {
-                bitmap::bm_set(i);
+pub unsafe fn init(dram_base: u64, dram_size: u64) {
+    unsafe {
+        let kernel_end_pa = &__kernel_end as *const u8 as usize;
+        let heap_end_pa = kernel_end_pa + KERNEL_HEAP_RESERVE;
+        let managed_base = core::cmp::max(heap_end_pa, dram_base as usize);
+        let managed_base = (managed_base + PAGE_SIZE - 1) & !(PAGE_SIZE - 1);
+        let managed_end = (dram_base + dram_size) as usize;
+        let managed_size = managed_end.saturating_sub(managed_base);
+        let pages = managed_size / PAGE_SIZE;
+        let bitmap_bytes = pages.div_ceil(8);
+        let bitmap_pages = bitmap_bytes.div_ceil(PAGE_SIZE);
+        let bitmap = managed_base as *mut u8;
+        ptr::write_bytes(bitmap, 0, bitmap_bytes);
+        let data_base = managed_base + bitmap_pages * PAGE_SIZE;
+        let data_pages = pages.saturating_sub(bitmap_pages);
+        let p = &raw mut G_PMM;
+        *p = Pmm {
+            base: data_base,
+            total_pages: data_pages,
+            free_pages: data_pages,
+            bitmap,
+            bitmap_bytes,
+            slab_heads: [ptr::null_mut(); SLAB_SIZES.len()],
+        };
+        for i in 0..bitmap_pages {
+            bitmap::bm_set(i);
+        }
+        // Bug (mm SERIOUS #12): also mark every page in the [data_base, data_base +
+        // data_pages) range that overlaps the bitmap pages themselves. The bitmap
+        // lives at `managed_base .. managed_base + bitmap_pages*PAGE_SIZE`, which
+        // is INSIDE the [data_base, data_base+data_pages) range we hand out to
+        // callers. Without marking those bitmap-occupied pages as used in the
+        // bitmap itself, pmm::alloc() could hand out a page that overlaps the
+        // bitmap buffer — silently corrupting the allocator state.
+        //
+        // We mark the bitmap pages by their absolute bit index. The bitmap's
+        // data_base offset is `bitmap_pages * PAGE_SIZE` from `base` (the
+        // physical address of bit 0). So bit i in the bitmap corresponds to
+        // physical address `base + i*PAGE_SIZE`, and bitmap pages occupy bits
+        // `(managed_base - base) / PAGE_SIZE ..` for bitmap_pages entries.
+        //
+        // In the current layout `managed_base == data_base` (we place the
+        // bitmap at the very start of the managed region), so the loop above
+        // already marks the right bits. We additionally mark any page that
+        // falls between the original kernel_end and managed_base — those are
+        // reserved for kernel BSS / heap and must never be handed out.
+        let kernel_end_pa = &__kernel_end as *const u8 as usize;
+        let reserved_end = managed_base; // everything below managed_base is reserved
+        if kernel_end_pa < reserved_end {
+            let start_bit = (kernel_end_pa.saturating_sub((*p).base)) / PAGE_SIZE;
+            let end_bit = (reserved_end.saturating_sub((*p).base)) / PAGE_SIZE;
+            for i in start_bit..end_bit {
+                if i < (*p).total_pages && !bitmap::bm_get(i) {
+                    bitmap::bm_set(i);
+                }
             }
         }
+        crate::srv::klog::emit(
+            crate::srv::klog::Level::Inf,
+            "pmm",
+            "dram 0x%x + 0x%x, managed base=0x%x pages=%d free=%d",
+            &[
+                onyx_core::fmt::Arg::from(dram_base),
+                onyx_core::fmt::Arg::from(dram_size),
+                onyx_core::fmt::Arg::from(data_base as u64),
+                onyx_core::fmt::Arg::from(data_pages),
+                onyx_core::fmt::Arg::from(data_pages),
+            ],
+        );
     }
-    crate::srv::klog::emit(
-        crate::srv::klog::Level::Inf,
-        "pmm",
-        "dram 0x%x + 0x%x, managed base=0x%x pages=%d free=%d",
-        &[
-            onyx_core::fmt::Arg::from(dram_base),
-            onyx_core::fmt::Arg::from(dram_size),
-            onyx_core::fmt::Arg::from(data_base as u64),
-            onyx_core::fmt::Arg::from(data_pages),
-            onyx_core::fmt::Arg::from(data_pages),
-        ],
-    );
-}}
+}
 
 pub fn free_pages() -> usize {
     unsafe { (G_PMM).free_pages }

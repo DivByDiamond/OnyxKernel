@@ -1,26 +1,34 @@
 //! Bitmap-based page allocator — `bm_get`/`bm_set`/`bm_clr` primitives plus
 //! the public `alloc`/`alloc_n`/`free`/`alloc_zero` entry points.
-use super::{G_PMM, PAGE_SIZE};
 use core::ptr;
+
 use onyx_core::errno::{Errno, KResult};
 
-pub(super) unsafe fn bm_get(bit: usize) -> bool { unsafe {
-    let p = &raw const G_PMM;
-    let bmp = (*p).bitmap;
-    *bmp.add(bit / 8) & (1 << (bit % 8)) != 0
-}}
-pub(super) unsafe fn bm_set(bit: usize) { unsafe {
-    let p = &raw const G_PMM;
-    let bmp = (*p).bitmap;
-    *bmp.add(bit / 8) |= 1 << (bit % 8);
-    G_PMM.free_pages -= 1;
-}}
-pub(super) unsafe fn bm_clr(bit: usize) { unsafe {
-    let p = &raw const G_PMM;
-    let bmp = (*p).bitmap;
-    *bmp.add(bit / 8) &= !(1 << (bit % 8));
-    G_PMM.free_pages += 1;
-}}
+use super::{G_PMM, PAGE_SIZE};
+
+pub(super) unsafe fn bm_get(bit: usize) -> bool {
+    unsafe {
+        let p = &raw const G_PMM;
+        let bmp = (*p).bitmap;
+        *bmp.add(bit / 8) & (1 << (bit % 8)) != 0
+    }
+}
+pub(super) unsafe fn bm_set(bit: usize) {
+    unsafe {
+        let p = &raw const G_PMM;
+        let bmp = (*p).bitmap;
+        *bmp.add(bit / 8) |= 1 << (bit % 8);
+        G_PMM.free_pages -= 1;
+    }
+}
+pub(super) unsafe fn bm_clr(bit: usize) {
+    unsafe {
+        let p = &raw const G_PMM;
+        let bmp = (*p).bitmap;
+        *bmp.add(bit / 8) &= !(1 << (bit % 8));
+        G_PMM.free_pages += 1;
+    }
+}
 fn pa_to_idx(pa: usize) -> usize {
     unsafe {
         let p = &raw const G_PMM;
@@ -34,89 +42,102 @@ fn idx_to_pa(idx: usize) -> usize {
     }
 }
 
-pub unsafe fn alloc() -> KResult<u64> { unsafe {
-    super::pmm_lock();
-    let r = alloc_unlocked();
-    super::pmm_unlock();
-    r
-}}
+pub unsafe fn alloc() -> KResult<u64> {
+    unsafe {
+        super::pmm_lock();
+        let r = alloc_unlocked();
+        super::pmm_unlock();
+        r
+    }
+}
 
 /// Internal alloc without locking. Caller MUST hold `pmm_lock()`.
-pub(super) unsafe fn alloc_unlocked() -> KResult<u64> { unsafe {
-    let p = &raw const G_PMM;
-    let n = (*p).total_pages;
-    let mut i = 0;
-    while i < n {
-        if !bm_get(i) {
-            bm_set(i);
-            let pa = idx_to_pa(i);
-            ptr::write_bytes(pa as *mut u8, 0, PAGE_SIZE);
-            return Ok(pa as u64);
-        }
-        i += 1;
-    }
-    Err(Errno::NoMem)
-}}
-
-pub unsafe fn alloc_n(n: usize) -> KResult<u64> { unsafe {
-    super::pmm_lock();
-    let r = alloc_n_unlocked(n);
-    super::pmm_unlock();
-    r
-}}
-
-/// Internal alloc_n without locking. Caller MUST hold `pmm_lock()`.
-pub(super) unsafe fn alloc_n_unlocked(n: usize) -> KResult<u64> { unsafe {
-    if n == 0 {
-        return Err(Errno::Inval);
-    }
-    let p = &raw const G_PMM;
-    let total = (*p).total_pages;
-    let mut run = 0usize;
-    let mut start = 0usize;
-    let mut i = 0;
-    while i < total {
-        if !bm_get(i) {
-            if run == 0 {
-                start = i;
-            }
-            run += 1;
-            if run == n {
-                for k in start..start + n {
-                    bm_set(k);
-                }
-                let pa = idx_to_pa(start);
-                // Bug (mm MINOR #1): zero every page in the run. The
-                // previous code returned uninitialized physical memory —
-                // callers (e.g. large alloc_zero requests) expected zeroed
-                // pages and would read stale kernel data.
-                ptr::write_bytes(pa as *mut u8, 0, n * PAGE_SIZE);
+pub(super) unsafe fn alloc_unlocked() -> KResult<u64> {
+    unsafe {
+        let p = &raw const G_PMM;
+        let n = (*p).total_pages;
+        let mut i = 0;
+        while i < n {
+            if !bm_get(i) {
+                bm_set(i);
+                let pa = idx_to_pa(i);
+                ptr::write_bytes(pa as *mut u8, 0, PAGE_SIZE);
                 return Ok(pa as u64);
             }
-        } else {
-            run = 0;
+            i += 1;
         }
-        i += 1;
+        Err(Errno::NoMem)
     }
-    Err(Errno::NoMem)
-}}
+}
 
-pub unsafe fn free(pa: u64) { unsafe {
-    super::pmm_lock();
-    free_unlocked(pa);
-    super::pmm_unlock();
-}}
+pub unsafe fn alloc_n(n: usize) -> KResult<u64> {
+    unsafe {
+        super::pmm_lock();
+        let r = alloc_n_unlocked(n);
+        super::pmm_unlock();
+        r
+    }
+}
+
+/// Internal alloc_n without locking. Caller MUST hold `pmm_lock()`.
+pub(super) unsafe fn alloc_n_unlocked(n: usize) -> KResult<u64> {
+    unsafe {
+        if n == 0 {
+            return Err(Errno::Inval);
+        }
+        let p = &raw const G_PMM;
+        let total = (*p).total_pages;
+        let mut run = 0usize;
+        let mut start = 0usize;
+        let mut i = 0;
+        while i < total {
+            if !bm_get(i) {
+                if run == 0 {
+                    start = i;
+                }
+                run += 1;
+                if run == n {
+                    for k in start..start + n {
+                        bm_set(k);
+                    }
+                    let pa = idx_to_pa(start);
+                    // Bug (mm MINOR #1): zero every page in the run. The
+                    // previous code returned uninitialized physical memory —
+                    // callers (e.g. large alloc_zero requests) expected zeroed
+                    // pages and would read stale kernel data.
+                    ptr::write_bytes(pa as *mut u8, 0, n * PAGE_SIZE);
+                    return Ok(pa as u64);
+                }
+            } else {
+                run = 0;
+            }
+            i += 1;
+        }
+        Err(Errno::NoMem)
+    }
+}
+
+pub unsafe fn free(pa: u64) {
+    unsafe {
+        super::pmm_lock();
+        free_unlocked(pa);
+        super::pmm_unlock();
+    }
+}
 
 /// Internal free without locking. Caller MUST hold `pmm_lock()`.
-pub(super) unsafe fn free_unlocked(pa: u64) { unsafe {
-    let idx = pa_to_idx(pa as usize);
-    if idx < G_PMM.total_pages
-        && bm_get(idx) {
+pub(super) unsafe fn free_unlocked(pa: u64) {
+    unsafe {
+        let idx = pa_to_idx(pa as usize);
+        if idx < G_PMM.total_pages && bm_get(idx) {
             bm_clr(idx);
         }
-}}
+    }
+}
 
-pub unsafe fn alloc_zero() -> KResult<u64> { unsafe {
-    // alloc() already acquires pmm_lock; no extra locking needed here.
-    alloc()
-}}
+pub unsafe fn alloc_zero() -> KResult<u64> {
+    unsafe {
+        // alloc() already acquires pmm_lock; no extra locking needed here.
+        alloc()
+    }
+}

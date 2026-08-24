@@ -1,7 +1,7 @@
-use super::globals::G_ALL_PROCS;
-use super::globals::G_HART_CURRENT;
-use super::globals::hart_id;
-use super::types::{PROC_RING_KERNEL, Proc, ProcState};
+use super::{
+    globals::{G_ALL_PROCS, G_HART_CURRENT, hart_id},
+    types::{PROC_RING_KERNEL, Proc, ProcState},
+};
 
 pub fn current_pid() -> u32 {
     unsafe {
@@ -30,18 +30,22 @@ pub fn current_opt() -> Option<&'static mut Proc> {
     }
 }
 
-pub unsafe fn current() -> &'static mut Proc { unsafe {
-    let p = G_HART_CURRENT[hart_id()];
-    &mut *p
-}}
+pub unsafe fn current() -> &'static mut Proc {
+    unsafe {
+        let p = G_HART_CURRENT[hart_id()];
+        &mut *p
+    }
+}
 
-pub unsafe fn set_cwd(path: &[u8]) { unsafe {
-    let p = current();
-    let n = path.len().min(255);
-    p.cwd[..n].copy_from_slice(&path[..n]);
-    p.cwd[n] = 0;
-    p.cwd_len = n as u16;
-}}
+pub unsafe fn set_cwd(path: &[u8]) {
+    unsafe {
+        let p = current();
+        let n = path.len().min(255);
+        p.cwd[..n].copy_from_slice(&path[..n]);
+        p.cwd[n] = 0;
+        p.cwd_len = n as u16;
+    }
+}
 
 pub fn cwd() -> &'static [u8] {
     unsafe {
@@ -50,16 +54,39 @@ pub fn cwd() -> &'static [u8] {
     }
 }
 
-pub unsafe fn by_pid(pid: u32) -> Option<&'static mut Proc> { unsafe {
-    let mut cur = G_ALL_PROCS;
-    while !cur.is_null() {
-        if (*cur).pid == pid && !matches!((*cur).state, ProcState::Free) {
-            return Some(&mut *cur);
-        }
-        cur = (*cur).all_next;
+/// Find a live (non-`Free`) process by pid.
+///
+/// Takes `proc_list_lock` internally, so it is safe to call from any context
+/// that does NOT already hold that lock (audited: all syscall/trap/signal
+/// call sites qualify). The returned reference is only protected during the
+/// traversal — mutate the fields per each caller's own locking discipline as
+/// before.
+///
+/// Callers already holding `proc_list_lock` must use [`by_pid_unlocked`].
+pub unsafe fn by_pid(pid: u32) -> Option<&'static mut Proc> {
+    unsafe {
+        super::globals::proc_list_lock();
+        let found = by_pid_unlocked(pid);
+        super::globals::proc_list_unlock();
+        found
     }
-    None
-}}
+}
+
+/// Unlocked variant of [`by_pid`] for contexts that already hold
+/// `proc_list_lock` (e.g. the exit path's burst state update). Calling this
+/// without the lock held is a data-race bug against concurrent list mutation.
+pub unsafe fn by_pid_unlocked(pid: u32) -> Option<&'static mut Proc> {
+    unsafe {
+        let mut cur = G_ALL_PROCS;
+        while !cur.is_null() {
+            if (*cur).pid == pid && !matches!((*cur).state, ProcState::Free) {
+                return Some(&mut *cur);
+            }
+            cur = (*cur).all_next;
+        }
+        None
+    }
+}
 
 pub fn dump_all<W: onyx_core::fmt::Write>(w: &mut W) {
     unsafe {

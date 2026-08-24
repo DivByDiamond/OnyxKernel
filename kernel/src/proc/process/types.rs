@@ -1,5 +1,6 @@
-use crate::arch::trap_frame::TrapFrame;
 use core::ptr;
+
+use crate::arch::trap_frame::TrapFrame;
 
 pub const PROC_RING_KERNEL: u8 = 0;
 pub const PROC_RING_ROOT: u8 = 1;

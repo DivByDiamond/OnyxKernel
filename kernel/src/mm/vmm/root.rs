@@ -13,91 +13,99 @@ use onyx_core::errno::KResult;
 
 pub(super) static mut G_KERNEL_ROOT_PA: u64 = 0;
 
-pub unsafe fn new_root() -> KResult<u64> { unsafe {
-    pmm::alloc_zero()
-}}
+pub unsafe fn new_root() -> KResult<u64> {
+    unsafe { pmm::alloc_zero() }
+}
 
-pub unsafe fn install_root(root_pa: u64) { unsafe {
-    #[cfg(target_pointer_width = "64")]
-    {
-        csr::write_satp(crate::arch::regs::SATP_MODE_SV39 | (root_pa >> 12));
+pub unsafe fn install_root(root_pa: u64) {
+    unsafe {
+        #[cfg(target_pointer_width = "64")]
+        {
+            csr::write_satp(crate::arch::regs::SATP_MODE_SV39 | (root_pa >> 12));
+        }
+        #[cfg(target_pointer_width = "32")]
+        {
+            let satp = crate::arch::bits::SATP_MODE_SV32 | ((root_pa >> 12) & 0x3FFFFF) as u32;
+            csr::write_satp(satp as u64);
+        }
+        csr::sfence_vma_all();
     }
-    #[cfg(target_pointer_width = "32")]
-    {
-        let satp = crate::arch::bits::SATP_MODE_SV32 | ((root_pa >> 12) & 0x3FFFFF) as u32;
-        csr::write_satp(satp as u64);
-    }
-    csr::sfence_vma_all();
-}}
+}
 
-pub unsafe fn init() -> KResult<u64> { unsafe {
-    let root_pa = new_root()?;
-    crate::arch::smp::G_KERNEL_ROOT_PA = root_pa;
-    let root = root_pa as *mut u64;
-    let leaf_flags = PTE_V | PTE_R | PTE_W | PTE_X | PTE_A | PTE_D;
-    #[cfg(target_pointer_width = "64")]
-    {
-        for i in 0..3u64 {
-            let pa = i << 30;
+pub unsafe fn init() -> KResult<u64> {
+    unsafe {
+        let root_pa = new_root()?;
+        crate::arch::smp::G_KERNEL_ROOT_PA = root_pa;
+        let root = root_pa as *mut u64;
+        let leaf_flags = PTE_V | PTE_R | PTE_W | PTE_X | PTE_A | PTE_D;
+        #[cfg(target_pointer_width = "64")]
+        {
+            for i in 0..3u64 {
+                let pa = i << 30;
+                ptr::write_volatile(
+                    root.add(i as usize),
+                    PTE_V | leaf_flags | (pa >> 12 << PTE_PPN_SHIFT),
+                );
+            }
+        }
+        #[cfg(target_pointer_width = "32")]
+        {
             ptr::write_volatile(
-                root.add(i as usize),
-                PTE_V | leaf_flags | (pa >> 12 << PTE_PPN_SHIFT),
+                root.add(0),
+                PTE_V | leaf_flags | (0u64 >> 12 << PTE_PPN_SHIFT),
             );
         }
+        let p = &raw mut G_KERNEL_ROOT_PA;
+        *p = root_pa;
+        install_root(root_pa);
+        Ok(root_pa)
     }
-    #[cfg(target_pointer_width = "32")]
-    {
-        ptr::write_volatile(
-            root.add(0),
-            PTE_V | leaf_flags | (0u64 >> 12 << PTE_PPN_SHIFT),
-        );
-    }
-    let p = &raw mut G_KERNEL_ROOT_PA;
-    *p = root_pa;
-    install_root(root_pa);
-    Ok(root_pa)
-}}
+}
 
 pub fn kernel_root() -> u64 {
     unsafe { G_KERNEL_ROOT_PA }
 }
 
-pub unsafe fn destroy_root(root_pa: u64) { unsafe {
-    super::lock::vmm_lock();
-    let root = root_pa as *mut u64;
-    #[cfg(target_pointer_width = "64")]
-    free_subtree(root, 2);
-    #[cfg(target_pointer_width = "32")]
-    free_subtree(root, 1);
-    super::lock::vmm_unlock();
-    pmm::free(root_pa);
-    csr::sfence_vma_all();
-}}
+pub unsafe fn destroy_root(root_pa: u64) {
+    unsafe {
+        super::lock::vmm_lock();
+        let root = root_pa as *mut u64;
+        #[cfg(target_pointer_width = "64")]
+        free_subtree(root, 2);
+        #[cfg(target_pointer_width = "32")]
+        free_subtree(root, 1);
+        super::lock::vmm_unlock();
+        pmm::free(root_pa);
+        csr::sfence_vma_all();
+    }
+}
 
-unsafe fn free_subtree(table: *mut u64, level: u32) { unsafe {
-    #[cfg(target_pointer_width = "64")]
-    let entries = SV39_PTES_PER_TABLE;
-    #[cfg(target_pointer_width = "32")]
-    let entries = crate::arch::bits::PTES_PER_TABLE;
-    for i in 0..entries {
-        let pte = ptr::read_volatile(table.add(i));
-        if pte & PTE_V == 0 {
-            continue;
-        }
-        let is_leaf = pte & PTE_LEAF != 0;
-        let child_pa = (pte & PTE_PPN_MASK) >> PTE_PPN_SHIFT << 12;
-        if is_leaf {
-            if pmm::is_managed(child_pa) {
-                // Only PTE_U leaves are user pages accounted by
-                // proc::limits; kernel-identity placeholders are not.
-                if pte & PTE_U != 0 {
-                    crate::proc::limits::user_pages_release(1);
+unsafe fn free_subtree(table: *mut u64, level: u32) {
+    unsafe {
+        #[cfg(target_pointer_width = "64")]
+        let entries = SV39_PTES_PER_TABLE;
+        #[cfg(target_pointer_width = "32")]
+        let entries = crate::arch::bits::PTES_PER_TABLE;
+        for i in 0..entries {
+            let pte = ptr::read_volatile(table.add(i));
+            if pte & PTE_V == 0 {
+                continue;
+            }
+            let is_leaf = pte & PTE_LEAF != 0;
+            let child_pa = (pte & PTE_PPN_MASK) >> PTE_PPN_SHIFT << 12;
+            if is_leaf {
+                if pmm::is_managed(child_pa) {
+                    // Only PTE_U leaves are user pages accounted by
+                    // proc::limits; kernel-identity placeholders are not.
+                    if pte & PTE_U != 0 {
+                        crate::proc::limits::user_pages_release(1);
+                    }
+                    pmm::free(child_pa);
                 }
+            } else if level > 0 {
+                free_subtree(child_pa as *mut u64, level - 1);
                 pmm::free(child_pa);
             }
-        } else if level > 0 {
-            free_subtree(child_pa as *mut u64, level - 1);
-            pmm::free(child_pa);
         }
     }
-}}
+}
