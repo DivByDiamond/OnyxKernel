@@ -14,7 +14,7 @@
 - [x] `cargo kbuild --features smode` — S-mode сборка, 0 warnings
 - [x] `cargo clippy -p onyx_kernel --release --target riscv64gc-unknown-none-elf` — 0 warnings
 - [x] `cargo fmt --check` — весь workspace отформатирован
-- [ ] `cargo kbuild32` — riscv32imac (~200 ошибок: AtomicU64, u32/u64 касты) — **в работе**
+- [x] `cargo kbuild32` — riscv32imac собирается, CI-джоба переведена в строгую (d0afb9a)
 - [x] `cargo tbuild` — host tools (mkimage, elf2onx, psfgen)
 
 ## 2. Сборка образа OnyxOS
@@ -62,8 +62,8 @@
 - [x] **OnyxBoot (M-mode→S-drop)** — основной путь, все смоки выше на нём
 - [x] **SMP mailbox**: `-smp 2` → hart1 печатает вход в idle loop, ворк-стил жив;
       регрессия `-smp 1` отсутствует
-- [ ] **OpenSBI/fw_jump (S-mode)** — путь OC2R-бандла: ядро стартует, первый символ
-      баннера есть, дальше тишина — **В РАБОТЕ (блокер бандла)**
+- [x] **OpenSBI/fw_jump (S-mode)** — OC2R-путь: root cause был legacy virtio-mmio без
+      GuestPageSize; фикс 8936890, fw_jump доводит до логина 3/3
 - [x] S-mode ядро под M-mode OnyxBoot → честный kpanic с подсказкой (не тихая смерть на pc=0)
 - [x] `rdcycle` из S-mode/U-mode легален (mcounteren/scounteren включены)
 - [x] FP для U-mode включён (sstatus.FS=Initial) — hard-float бинарники не падают
@@ -119,9 +119,9 @@
 
 - [x] Ресурсы обновлены: onyx-kernel.bin (**smode** build!), onyxfs.img (ONY2 @0, vim внутри)
 - [x] compileJava проходит
-- [ ] **Ядро стартует под модовым fw_jump.bin** — блокер, в работе
-- [ ] Пуш oc2r (коммит готов локально)
-- [ ] Полный игровой цикл: give flash → вставить → загрузка → login → vim → save
+- [x] **Ядро стартует под модовым fw_jump.bin** — фикс вошёл в бандл (oc2r 646dbbd)
+- [x] Пуш oc2r (work → origin/work)
+- [ ] Полный игровой цикл: give flash → вставить → загрузка → login → vim → save (нужна игра)
 
 ## 13. CI/CD (все репозитории)
 
