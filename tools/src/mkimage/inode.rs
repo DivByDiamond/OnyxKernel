@@ -1,9 +1,8 @@
-const ONYFS_BLOCK_SIZE: usize = 4096;
-const ONYFS_DIRECT_BLKS: usize = 10;
+use onyx_core::formats::{
+    ONYFS_BLOCK_SIZE, ONYFS_DIRECT_BLKS, ONYFS_DT_DIR, ONYFS_DT_REG, OnyfsInode,
+};
+
 const V1_INODE_SIZE: usize = 64;
-const V2_INODE_SIZE: usize = 128;
-const ONYFS_DT_REG: u32 = 0o100755;
-const ONYFS_DT_DIR: u32 = 0o040755;
 
 use super::tree::{DirNode, Entry};
 
@@ -21,7 +20,7 @@ fn write_v2(img: &mut [u8], inode_off: usize, mode: u32, size: u64, blocks: &[u3
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_nanos() as u64;
-    let mut buf = [0u8; V2_INODE_SIZE];
+    let mut buf = [0u8; OnyfsInode::SIZE];
     buf[0..4].copy_from_slice(&mode.to_le_bytes());
     buf[8..16].copy_from_slice(&size.to_le_bytes());
     for (i, &blk) in blocks.iter().enumerate().take(ONYFS_DIRECT_BLKS) {
@@ -33,7 +32,7 @@ fn write_v2(img: &mut [u8], inode_off: usize, mode: u32, size: u64, blocks: &[u3
     buf[104..112].copy_from_slice(&now_ns.to_le_bytes());
     buf[112..120].copy_from_slice(&now_ns.to_le_bytes());
     buf[120..128].copy_from_slice(&now_ns.to_le_bytes());
-    img[inode_off..inode_off + V2_INODE_SIZE].copy_from_slice(&buf);
+    img[inode_off..inode_off + OnyfsInode::SIZE].copy_from_slice(&buf);
 }
 
 pub fn write_bitmaps(img: &mut [u8], inode_count: u32, data_block_count: u32) {
@@ -55,7 +54,7 @@ pub fn write_table(
     inode_table_start: u32,
     v1: bool,
 ) {
-    let inode_size = if v1 { V1_INODE_SIZE } else { V2_INODE_SIZE };
+    let inode_size = if v1 { V1_INODE_SIZE } else { OnyfsInode::SIZE };
     let base = inode_table_start as usize * ONYFS_BLOCK_SIZE;
     let mut data_blk = data_blocks_start;
     for d in dirs {

@@ -23,6 +23,9 @@ pub enum Errno {
     /// EAGAIN — resource exhaustion (e.g. process-count limit hit by
     /// fork/spawn); caller should retry later, like POSIX fork(2).
     Again = -19,
+    /// EFAULT — bad user-space pointer: unmapped page or missing PTE_U in
+    /// a buffer passed to a syscall. Returned instead of faulting in S-mode.
+    Fault = -20,
 }
 
 impl Errno {
@@ -53,6 +56,7 @@ impl Errno {
             Self::NotEmpty => "ENOTEMPTY",
             Self::Loop => "ELOOP",
             Self::Again => "EAGAIN",
+            Self::Fault => "EFAULT",
         }
     }
 }
@@ -114,6 +118,7 @@ mod tests {
             (Errno::NotEmpty, -17, "ENOTEMPTY"),
             (Errno::Loop, -18, "ELOOP"),
             (Errno::Again, -19, "EAGAIN"),
+            (Errno::Fault, -20, "EFAULT"),
         ];
         for (e, code, name) in variants {
             assert_eq!(e.as_i64(), code, "{} code mismatch", name);

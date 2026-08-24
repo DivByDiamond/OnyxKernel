@@ -1,7 +1,6 @@
-const ONYFS_BLOCK_SIZE: usize = 4096;
-const ONYFS_NAME_MAX: usize = 32;
+use onyx_core::formats::{ONYFS_BLOCK_SIZE, ONYFS_NAME_MAX, OnyfsDirent};
+
 const V1_DIRENT_SIZE: usize = 36;
-const V2_DIRENT_SIZE: usize = 40;
 
 use super::tree::{DirNode, Entry};
 
@@ -28,7 +27,11 @@ pub fn write_blocks(
     data_blocks_start: u32,
     v1: bool,
 ) {
-    let dirent_size = if v1 { V1_DIRENT_SIZE } else { V2_DIRENT_SIZE };
+    let dirent_size = if v1 {
+        V1_DIRENT_SIZE
+    } else {
+        OnyfsDirent::SIZE
+    };
     let mut data_blk = data_blocks_start;
     for d in dirs {
         let dir_off = data_blk as usize * ONYFS_BLOCK_SIZE;

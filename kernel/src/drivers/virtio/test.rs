@@ -1,24 +1,23 @@
 #[cfg(test)]
 mod tests {
-    use super::*;
-
-    #[test]
-    fn test_magic_value() {
-        assert_eq!(0x7472_6976, 0x7472_6976);
-    }
+    use crate::drivers::virtio::*;
 
     #[test]
     fn test_register_offsets() {
         assert_eq!(R_MAGIC_VALUE, 0x00);
         assert_eq!(R_VERSION, 0x04);
         assert_eq!(R_DEVICE_ID, 0x08);
+        // Modern virtio-mmio: feature words selected via *_SEL, data at
+        // 0x10/0x20 (0x14 is write-only and reads back 0).
         assert_eq!(R_HOST_FEATURES, 0x10);
-        assert_eq!(R_GUEST_FEATURES, 0x14);
+        assert_ne!(R_HOST_FEATURES, R_HOST_FEATURES_SEL);
+        assert_eq!(R_GUEST_FEATURES, 0x20);
         assert_eq!(R_QUEUE_SEL, 0x30);
         assert_eq!(R_QUEUE_NUM_MAX, 0x34);
         assert_eq!(R_QUEUE_NUM, 0x38);
         assert_eq!(R_QUEUE_ALIGN, 0x3C);
         assert_eq!(R_QUEUE_PFN, 0x40);
+        assert_eq!(R_QUEUE_READY, 0x44);
         assert_eq!(R_QUEUE_NOTIFY, 0x50);
         assert_eq!(R_STATUS, 0x70);
         assert_eq!(R_QUEUE_DESC_LOW, 0x80);
@@ -27,7 +26,6 @@ mod tests {
         assert_eq!(R_QUEUE_AVAIL_HIGH, 0x94);
         assert_eq!(R_QUEUE_USED_LOW, 0xA0);
         assert_eq!(R_QUEUE_USED_HIGH, 0xA4);
-        assert_eq!(R_QUEUE_READY, 0x44);
     }
 
     #[test]
@@ -59,7 +57,7 @@ mod tests {
 
     #[test]
     fn test_virtio_limits() {
-        assert_eq!(VIRTIO_MAX_DEVS, 4);
+        assert_eq!(VIRTIO_MAX_DEVS, 8);
         assert_eq!(VIRTIO_BLK_SECTOR, 512);
         assert_eq!(VIRTQ_SIZE, 256);
     }
@@ -71,12 +69,29 @@ mod tests {
     }
 
     #[test]
+    fn test_queue_ring_layout() {
+        // avail: flags(2) + idx(2) + ring(2*VIRTQ_SIZE) + used_event(2)
+        assert_eq!(core::mem::size_of::<VqAvail>(), 6 + 2 * VIRTQ_SIZE);
+        // used: flags(2) + idx(2) + ring(8*VIRTQ_SIZE) + avail_event(2),
+        // aligned to 4 → padded to a multiple of 4.
+        assert_eq!(
+            core::mem::size_of::<VqUsed>(),
+            (6 + 8 * VIRTQ_SIZE + 3) & !3
+        );
+        assert_eq!(core::mem::size_of::<VqUsedElem>(), 8);
+    }
+
+    #[test]
     fn test_blkreq_size() {
         assert_eq!(core::mem::size_of::<BlkReq>(), 529);
     }
 
+    #[cfg(target_pointer_width = "64")]
     #[test]
     fn test_virtioblkdev_size() {
+        // usize(8) + bool(1)+pad(3) + u32(4) + 3 ptrs(24) + u16(2)+pad(6) + ptr(8)
+        // repr(Rust) may reorder fields; on 64-bit hosts the optimal layout
+        // packs to 48 bytes.
         assert_eq!(core::mem::size_of::<VirtioBlkDev>(), 48);
     }
 
@@ -88,7 +103,7 @@ mod tests {
     #[test]
     fn test_dev_out_of_range() {
         unsafe {
-            let d = dev(0);
+            let d = dev(usize::MAX);
             assert!(d.is_null());
         }
     }

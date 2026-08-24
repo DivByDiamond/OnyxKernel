@@ -1,5 +1,8 @@
-const ONYFS_MAGIC_V2: u32 = 0x32594E4F;
-const ONYFS_MAGIC_V1: u32 = 0x31594E4F;
+use onyx_core::formats::{
+    ONYFS_BLOCK_SIZE, ONYFS_FEAT_JOURNAL, ONYFS_FEAT_SNAPSHOTS, ONYFS_FEAT_TIMESTAMPS, ONYFS_MAGIC,
+    ONYFS_MAGIC_V1, ONYFS_VERSION,
+};
+
 const V2_SUPERBLOCK_SIZE: usize = 128;
 
 pub fn write_v1(
@@ -12,7 +15,7 @@ pub fn write_v1(
     let sb = [
         ONYFS_MAGIC_V1.to_le_bytes(),
         1u32.to_le_bytes(),
-        4096u32.to_le_bytes(),
+        (ONYFS_BLOCK_SIZE as u32).to_le_bytes(),
         total_blocks.to_le_bytes(),
         inode_count.to_le_bytes(),
         inode_table_start.to_le_bytes(),
@@ -38,11 +41,11 @@ pub fn write_v2(
     journal_start: u32,
     journal_size: u32,
 ) {
-    let feature_flags: u32 = 0x1 | 0x2 | 0x8;
+    let feature_flags: u32 = ONYFS_FEAT_TIMESTAMPS | ONYFS_FEAT_SNAPSHOTS | ONYFS_FEAT_JOURNAL;
     let mut sb = [0u8; V2_SUPERBLOCK_SIZE];
-    sb[0..4].copy_from_slice(&ONYFS_MAGIC_V2.to_le_bytes());
-    sb[4..8].copy_from_slice(&2u32.to_le_bytes());
-    sb[8..12].copy_from_slice(&4096u32.to_le_bytes());
+    sb[0..4].copy_from_slice(&ONYFS_MAGIC.to_le_bytes());
+    sb[4..8].copy_from_slice(&ONYFS_VERSION.to_le_bytes());
+    sb[8..12].copy_from_slice(&(ONYFS_BLOCK_SIZE as u32).to_le_bytes());
     sb[12..16].copy_from_slice(&total_blocks.to_le_bytes());
     sb[16..20].copy_from_slice(&inode_count.to_le_bytes());
     sb[20..24].copy_from_slice(&inode_table_start.to_le_bytes());

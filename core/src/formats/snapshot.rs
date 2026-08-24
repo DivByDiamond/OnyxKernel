@@ -1,4 +1,10 @@
 use crate::parser::{le32, le64};
+
+/// Number of 4096-byte blocks reserved per snapshot in the snapshot area
+/// (1 metadata block + data). Shared by the kernel OnyxFS driver and mkimage
+/// so both agree on the on-disk layout.
+pub const ONYFS_SNAPSHOT_BLOCKS_EACH: u32 = 64;
+
 /// Snapshot metadata — stored in snapshot area.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SnapshotMeta {

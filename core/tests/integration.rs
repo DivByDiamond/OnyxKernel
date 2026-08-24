@@ -50,7 +50,7 @@ fn test_onx_v2_roundtrip() {
         flags: ONX_FLAGS_RING1,
         segs: alloc::vec![seg],
     };
-    let bytes = hdr.to_bytes_v2();
+    let bytes = hdr.to_bytes_v2().unwrap();
     let parsed = OnxHeader::from_bytes(&bytes).unwrap();
     assert_eq!(parsed.entry, 0x10000);
     assert_eq!(parsed.version, 2);
