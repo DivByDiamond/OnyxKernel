@@ -1,4 +1,4 @@
-use onyx_core::formats::{ONYFS_BLOCK_SIZE, ONYFS_NAME_MAX, OnyfsDirent};
+use onyx_core::formats::{ONYFS_BLOCK_SIZE, ONYFS_DIRECT_BLKS, ONYFS_NAME_MAX, OnyfsDirent};
 
 const V1_DIRENT_SIZE: usize = 36;
 
@@ -62,12 +62,29 @@ pub fn write_blocks(
     }
     for f in files {
         let nblks = f.data.len().div_ceil(ONYFS_BLOCK_SIZE);
-        for i in 0..nblks {
+        // Block sequence must mirror inode::write_table EXACTLY:
+        // [direct data blocks][indirect table block][tail data blocks].
+        let head = if !v1 {
+            nblks.min(ONYFS_DIRECT_BLKS)
+        } else {
+            nblks
+        };
+        for i in 0..head {
             let blk_off = data_blk as usize * ONYFS_BLOCK_SIZE;
             data_blk += 1;
             let start = i * ONYFS_BLOCK_SIZE;
             let end = (start + ONYFS_BLOCK_SIZE).min(f.data.len());
             img[blk_off..blk_off + end - start].copy_from_slice(&f.data[start..end]);
+        }
+        if head < nblks {
+            data_blk += 1; // single-indirect table block (filled by write_table)
+            for i in head..nblks {
+                let blk_off = data_blk as usize * ONYFS_BLOCK_SIZE;
+                data_blk += 1;
+                let start = i * ONYFS_BLOCK_SIZE;
+                let end = (start + ONYFS_BLOCK_SIZE).min(f.data.len());
+                img[blk_off..blk_off + end - start].copy_from_slice(&f.data[start..end]);
+            }
         }
     }
 }

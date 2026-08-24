@@ -15,7 +15,15 @@ fn write_v1(img: &mut [u8], inode_off: usize, mode: u32, size: u32, blocks: &[u3
     }
 }
 
-fn write_v2(img: &mut [u8], inode_off: usize, mode: u32, size: u64, blocks: &[u32], is_dir: bool) {
+fn write_v2(
+    img: &mut [u8],
+    inode_off: usize,
+    mode: u32,
+    size: u64,
+    blocks: &[u32],
+    is_dir: bool,
+    indirect_blk: u32,
+) {
     let now_ns = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
@@ -27,6 +35,8 @@ fn write_v2(img: &mut [u8], inode_off: usize, mode: u32, size: u64, blocks: &[u3
         let off = 16 + i * 4;
         buf[off..off + 4].copy_from_slice(&blk.to_le_bytes());
     }
+    // Single-indirect pointer (inode offset 96, see OnyfsInode::from_bytes).
+    buf[96..100].copy_from_slice(&indirect_blk.to_le_bytes());
     let nlink: u32 = if is_dir { 2 } else { 1 };
     buf[64..68].copy_from_slice(&nlink.to_le_bytes());
     buf[104..112].copy_from_slice(&now_ns.to_le_bytes());
@@ -62,7 +72,7 @@ pub fn write_table(
         if v1 {
             write_v1(img, off, ONYFS_DT_DIR, 0, &[data_blk]);
         } else {
-            write_v2(img, off, ONYFS_DT_DIR, 0, &[data_blk], true);
+            write_v2(img, off, ONYFS_DT_DIR, 0, &[data_blk], true, 0);
         }
         data_blk += 1;
     }
@@ -73,11 +83,28 @@ pub fn write_table(
             blocks[i as usize] = data_blk;
             data_blk += 1;
         }
+        // Files larger than the direct-block window need a single-indirect
+        // table block. It must be allocated HERE, in the same sequence as
+        // dirent::write_blocks consumes blocks, so both passes agree.
+        // The kernel read path (fs/onyxfs/read.rs) already walks it.
+        let mut indirect_blk = 0u32;
+        if !v1 && nblks > ONYFS_DIRECT_BLKS as u32 {
+            indirect_blk = data_blk;
+            data_blk += 1;
+            let ind_off = indirect_blk as usize * ONYFS_BLOCK_SIZE;
+            for i in (ONYFS_DIRECT_BLKS as u32)..nblks {
+                let entry = i - ONYFS_DIRECT_BLKS as u32;
+                let blk_num = data_blk + (i - ONYFS_DIRECT_BLKS as u32);
+                let eoff = ind_off + entry as usize * 4;
+                img[eoff..eoff + 4].copy_from_slice(&blk_num.to_le_bytes());
+            }
+            data_blk += nblks - ONYFS_DIRECT_BLKS as u32;
+        }
         let off = base + (f.inode as usize - 1) * inode_size;
         if v1 {
             write_v1(img, off, ONYFS_DT_REG, f.data.len() as u32, &blocks);
         } else {
-            write_v2(img, off, ONYFS_DT_REG, f.data.len() as u64, &blocks, false);
+            write_v2(img, off, ONYFS_DT_REG, f.data.len() as u64, &blocks, false, indirect_blk);
         }
     }
 }
