@@ -12,6 +12,7 @@ mod tests {
         assert_eq!(R_HOST_FEATURES, 0x10);
         assert_ne!(R_HOST_FEATURES, R_HOST_FEATURES_SEL);
         assert_eq!(R_GUEST_FEATURES, 0x20);
+        assert_eq!(R_GUEST_PAGE_SIZE, 0x28);
         assert_eq!(R_QUEUE_SEL, 0x30);
         assert_eq!(R_QUEUE_NUM_MAX, 0x34);
         assert_eq!(R_QUEUE_NUM, 0x38);

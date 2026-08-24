@@ -18,6 +18,13 @@ pub const R_GUEST_FEATURES_SEL: u32 = 0x24;
 pub const R_QUEUE_SEL: u32 = 0x30;
 pub const R_QUEUE_NUM_MAX: u32 = 0x34;
 pub const R_QUEUE_NUM: u32 = 0x38;
+// Legacy-only: guest page size whose base-2 log becomes the shift QEMU-style
+// devices apply to QUEUE_PFN. MUST be programmed before QUEUE_PFN on a freshly
+// reset device — after power-on/reset the shift defaults to 0, so a PFN of
+// e.g. 0x80673 would be taken literally as desc addr 0x80673 instead of
+// 0x80673000 (observed under OpenSBI fw_jump where no bootloader pre-programs
+// this register; OnyxBoot masked the bug by writing 4096 itself).
+pub const R_GUEST_PAGE_SIZE: u32 = 0x28;
 pub const R_QUEUE_ALIGN: u32 = 0x3C;
 pub const R_QUEUE_PFN: u32 = 0x40;
 pub const R_QUEUE_READY: u32 = 0x44;

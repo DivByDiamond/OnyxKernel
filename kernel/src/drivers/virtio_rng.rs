@@ -4,11 +4,11 @@
 //! `-device virtio-rng-device`. The driver reuses the existing virtio
 //! MMIO constants and provides a single `read()` entry point.
 use crate::drivers::virtio::{
-    R_DEVICE_ID, R_GUEST_FEATURES, R_HOST_FEATURES, R_MAGIC_VALUE, R_QUEUE_ALIGN,
-    R_QUEUE_AVAIL_HIGH, R_QUEUE_AVAIL_LOW, R_QUEUE_DESC_HIGH, R_QUEUE_DESC_LOW, R_QUEUE_NUM,
-    R_QUEUE_PFN, R_QUEUE_READY, R_QUEUE_SEL, R_QUEUE_USED_HIGH, R_QUEUE_USED_LOW, R_STATUS,
-    R_VERSION, VIRTIO_S_ACK, VIRTIO_S_DRIVER, VIRTIO_S_DRIVER_OK, VIRTIO_S_FEATURES_OK, VIRTQ_SIZE,
-    VQ_DESC_F_WRITE, VqAvail, VqDesc, VqUsed, reg_r, reg_w,
+    R_DEVICE_ID, R_GUEST_FEATURES, R_GUEST_PAGE_SIZE, R_HOST_FEATURES, R_MAGIC_VALUE,
+    R_QUEUE_ALIGN, R_QUEUE_AVAIL_HIGH, R_QUEUE_AVAIL_LOW, R_QUEUE_DESC_HIGH, R_QUEUE_DESC_LOW,
+    R_QUEUE_NUM, R_QUEUE_PFN, R_QUEUE_READY, R_QUEUE_SEL, R_QUEUE_USED_HIGH, R_QUEUE_USED_LOW,
+    R_STATUS, R_VERSION, VIRTIO_S_ACK, VIRTIO_S_DRIVER, VIRTIO_S_DRIVER_OK, VIRTIO_S_FEATURES_OK,
+    VIRTQ_SIZE, VQ_DESC_F_WRITE, VqAvail, VqDesc, VqUsed, reg_r, reg_w,
 };
 use crate::mm::pmm;
 use core::ptr;
@@ -123,6 +123,7 @@ unsafe fn setup_queue(idx: usize) -> KResult<()> {
             dev.desc = pa as *mut VqDesc;
             dev.avail = (pa + 4096) as *mut VqAvail;
             dev.used = (pa + 8192) as *mut VqUsed;
+            reg_w(dev.base, R_GUEST_PAGE_SIZE, 4096);
             reg_w(dev.base, R_QUEUE_ALIGN, 4096);
             reg_w(dev.base, R_QUEUE_PFN, (pa / 4096) as u32);
         }
