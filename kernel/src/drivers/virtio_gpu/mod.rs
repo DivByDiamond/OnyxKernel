@@ -68,9 +68,11 @@ pub(crate) static mut G_GPU: VirtioGpuDev = VirtioGpuDev {
     height: 0,
 };
 
-pub unsafe fn probe(base: usize) -> bool { unsafe {
-    reg_r(base, R_MAGIC_VALUE) == 0x7472_6976 && reg_r(base, R_DEVICE_ID) == VIRTIO_ID_GPU
-}}
+pub unsafe fn probe(base: usize) -> bool {
+    unsafe {
+        reg_r(base, R_MAGIC_VALUE) == 0x7472_6976 && reg_r(base, R_DEVICE_ID) == VIRTIO_ID_GPU
+    }
+}
 
 unsafe fn hdr(t: u32) -> GpuCtrlHdr {
     GpuCtrlHdr {
@@ -82,89 +84,91 @@ unsafe fn hdr(t: u32) -> GpuCtrlHdr {
     }
 }
 
-pub unsafe fn init(base: usize, width: u32, height: u32) -> KResult<()> { unsafe {
-    if G_GPU.base != 0 {
-        return Err(Errno::Busy);
-    }
-    let modern = reg_r(base, R_VERSION) >= 2;
-    G_GPU.base = base;
-    G_GPU.modern = modern;
-    G_GPU.width = width;
-    G_GPU.height = height;
-    G_GPU.last_used = 0;
-    reg_w(base, R_STATUS, 0);
-    reg_w(base, R_STATUS, VIRTIO_S_ACK | VIRTIO_S_DRIVER);
-    reg_w(
-        base,
-        R_GUEST_FEATURES,
-        reg_r(base, R_HOST_FEATURES) & 0x1FFF_FFFF,
-    );
-    if modern {
+pub unsafe fn init(base: usize, width: u32, height: u32) -> KResult<()> {
+    unsafe {
+        if G_GPU.base != 0 {
+            return Err(Errno::Busy);
+        }
+        let modern = reg_r(base, R_VERSION) >= 2;
+        G_GPU.base = base;
+        G_GPU.modern = modern;
+        G_GPU.width = width;
+        G_GPU.height = height;
+        G_GPU.last_used = 0;
+        reg_w(base, R_STATUS, 0);
+        reg_w(base, R_STATUS, VIRTIO_S_ACK | VIRTIO_S_DRIVER);
+        reg_w(
+            base,
+            R_GUEST_FEATURES,
+            reg_r(base, R_HOST_FEATURES) & 0x1FFF_FFFF,
+        );
+        if modern {
+            reg_w(
+                base,
+                R_STATUS,
+                VIRTIO_S_ACK | VIRTIO_S_DRIVER | VIRTIO_S_FEATURES_OK,
+            );
+            if reg_r(base, R_STATUS) & VIRTIO_S_FEATURES_OK == 0 {
+                return Err(Errno::Inval);
+            }
+        }
+        xfer::setup_queue(
+            &raw mut G_GPU.desc,
+            &raw mut G_GPU.avail,
+            &raw mut G_GPU.used,
+            base,
+        )?;
         reg_w(
             base,
             R_STATUS,
-            VIRTIO_S_ACK | VIRTIO_S_DRIVER | VIRTIO_S_FEATURES_OK,
+            VIRTIO_S_ACK | VIRTIO_S_DRIVER | VIRTIO_S_DRIVER_OK,
         );
-        if reg_r(base, R_STATUS) & VIRTIO_S_FEATURES_OK == 0 {
-            return Err(Errno::Inval);
-        }
+        let fb_pages = (width as usize * height as usize * 4).div_ceil(4096);
+        let fb_pa = pmm::alloc_n(fb_pages)? as *mut u8;
+        G_GPU.fb = fb_pa;
+        let rid = 1u32;
+        xfer::cmd_create2d(
+            G_GPU.desc,
+            G_GPU.avail,
+            G_GPU.used,
+            &raw mut G_GPU.last_used,
+            base,
+            rid,
+            width,
+            height,
+        )?;
+        xfer::cmd_attach(
+            G_GPU.desc,
+            G_GPU.avail,
+            G_GPU.used,
+            &raw mut G_GPU.last_used,
+            base,
+            rid,
+            fb_pa as u32,
+            width * height * 4,
+        )?;
+        xfer::cmd_scanout(
+            G_GPU.desc,
+            G_GPU.avail,
+            G_GPU.used,
+            &raw mut G_GPU.last_used,
+            base,
+            rid,
+            width,
+            height,
+        )?;
+        xfer::send_cmd(
+            G_GPU.desc,
+            G_GPU.avail,
+            G_GPU.used,
+            &raw mut G_GPU.last_used,
+            base,
+            &hdr(C_FLUSH_RESOURCE) as *const _ as *mut u8,
+            24,
+        )?;
+        Ok(())
     }
-    xfer::setup_queue(
-        &raw mut G_GPU.desc,
-        &raw mut G_GPU.avail,
-        &raw mut G_GPU.used,
-        base,
-    )?;
-    reg_w(
-        base,
-        R_STATUS,
-        VIRTIO_S_ACK | VIRTIO_S_DRIVER | VIRTIO_S_DRIVER_OK,
-    );
-    let fb_pages = (width as usize * height as usize * 4).div_ceil(4096);
-    let fb_pa = pmm::alloc_n(fb_pages)? as *mut u8;
-    G_GPU.fb = fb_pa;
-    let rid = 1u32;
-    xfer::cmd_create2d(
-        G_GPU.desc,
-        G_GPU.avail,
-        G_GPU.used,
-        &raw mut G_GPU.last_used,
-        base,
-        rid,
-        width,
-        height,
-    )?;
-    xfer::cmd_attach(
-        G_GPU.desc,
-        G_GPU.avail,
-        G_GPU.used,
-        &raw mut G_GPU.last_used,
-        base,
-        rid,
-        fb_pa as u32,
-        width * height * 4,
-    )?;
-    xfer::cmd_scanout(
-        G_GPU.desc,
-        G_GPU.avail,
-        G_GPU.used,
-        &raw mut G_GPU.last_used,
-        base,
-        rid,
-        width,
-        height,
-    )?;
-    xfer::send_cmd(
-        G_GPU.desc,
-        G_GPU.avail,
-        G_GPU.used,
-        &raw mut G_GPU.last_used,
-        base,
-        &hdr(C_FLUSH_RESOURCE) as *const _ as *mut u8,
-        24,
-    )?;
-    Ok(())
-}}
+}
 
 pub fn fb_addr() -> *mut u8 {
     unsafe { G_GPU.fb }

@@ -47,107 +47,115 @@ pub fn present() -> bool {
     unsafe { G_NET.base != 0 && !G_NET.desc.is_null() }
 }
 
-pub unsafe fn probe(base: usize) -> bool { unsafe {
-    if reg_r(base, R_MAGIC_VALUE) != 0x7472_6976 {
-        return false;
+pub unsafe fn probe(base: usize) -> bool {
+    unsafe {
+        if reg_r(base, R_MAGIC_VALUE) != 0x7472_6976 {
+            return false;
+        }
+        reg_r(base, R_DEVICE_ID) == VIRTIO_ID_NET
     }
-    reg_r(base, R_DEVICE_ID) == VIRTIO_ID_NET
-}}
+}
 
-pub unsafe fn init(base: usize) -> KResult<()> { unsafe {
-    if G_NET.base != 0 {
-        return Err(Errno::Busy);
-    }
-    let version = reg_r(base, R_VERSION);
-    let modern = version >= 2;
-    reg_w(base, R_STATUS, 0);
-    reg_w(base, R_STATUS, VIRTIO_S_ACK | VIRTIO_S_DRIVER);
-    // Read the full 64-bit feature word via the features_sel registers and
-    // negotiate VIRTIO_F_VERSION_1 (bit 32) explicitly: sedna's virtio
-    // emulation clears FEATURES_OK unless that bit is present in the guest
-    // features, which would fail the device (and leave G_NET half-initialized
-    // in older code, faulting on a NULL descriptor queue later).
-    reg_w(base, R_HOST_FEATURES_SEL, 1);
-    let host_feat_hi = reg_r(base, R_HOST_FEATURES);
-    reg_w(base, R_HOST_FEATURES_SEL, 0);
-    let host_feat_lo = reg_r(base, R_HOST_FEATURES);
-    let guest_hi = host_feat_hi | VIRTIO_F_VERSION_1;
-    reg_w(base, R_GUEST_FEATURES_SEL, 0);
-    reg_w(base, R_GUEST_FEATURES, host_feat_lo & 0x1FFF_FFFF);
-    reg_w(base, R_GUEST_FEATURES_SEL, 1);
-    reg_w(base, R_GUEST_FEATURES, guest_hi);
-    reg_w(base, R_GUEST_FEATURES_SEL, 0);
-    if modern {
+pub unsafe fn init(base: usize) -> KResult<()> {
+    unsafe {
+        if G_NET.base != 0 {
+            return Err(Errno::Busy);
+        }
+        let version = reg_r(base, R_VERSION);
+        let modern = version >= 2;
+        reg_w(base, R_STATUS, 0);
+        reg_w(base, R_STATUS, VIRTIO_S_ACK | VIRTIO_S_DRIVER);
+        // Read the full 64-bit feature word via the features_sel registers and
+        // negotiate VIRTIO_F_VERSION_1 (bit 32) explicitly: sedna's virtio
+        // emulation clears FEATURES_OK unless that bit is present in the guest
+        // features, which would fail the device (and leave G_NET half-initialized
+        // in older code, faulting on a NULL descriptor queue later).
+        reg_w(base, R_HOST_FEATURES_SEL, 1);
+        let host_feat_hi = reg_r(base, R_HOST_FEATURES);
+        reg_w(base, R_HOST_FEATURES_SEL, 0);
+        let host_feat_lo = reg_r(base, R_HOST_FEATURES);
+        let guest_hi = host_feat_hi | VIRTIO_F_VERSION_1;
+        reg_w(base, R_GUEST_FEATURES_SEL, 0);
+        reg_w(base, R_GUEST_FEATURES, host_feat_lo & 0x1FFF_FFFF);
+        reg_w(base, R_GUEST_FEATURES_SEL, 1);
+        reg_w(base, R_GUEST_FEATURES, guest_hi);
+        reg_w(base, R_GUEST_FEATURES_SEL, 0);
+        if modern {
+            reg_w(
+                base,
+                R_STATUS,
+                VIRTIO_S_ACK | VIRTIO_S_DRIVER | VIRTIO_S_FEATURES_OK,
+            );
+            if reg_r(base, R_STATUS) & VIRTIO_S_FEATURES_OK == 0 {
+                // sedna's virtio emulation never sets FEATURES_OK, yet it still
+                // accepts DRIVER_OK — don't fail the whole device over it.
+                crate::kwrn!("virtio-net", "device did not set FEATURES_OK, continuing");
+            }
+        }
+        // MAC address lives at device-specific config offset 0x100 in legacy MMIO.
+        for i in 0..6 {
+            G_NET.mac[i] = Mmio::<u8>::at(base + 0x100 + i).read();
+        }
+        // Only expose the device to the network stack once the queues are fully
+        // set up — G_NET.base non-zero is the "ready" signal used by present().
+        setup_rx_queue(base)?;
+        G_NET.base = base;
+        G_NET.modern = modern;
         reg_w(
             base,
             R_STATUS,
-            VIRTIO_S_ACK | VIRTIO_S_DRIVER | VIRTIO_S_FEATURES_OK,
+            VIRTIO_S_ACK | VIRTIO_S_DRIVER | VIRTIO_S_DRIVER_OK,
         );
-        if reg_r(base, R_STATUS) & VIRTIO_S_FEATURES_OK == 0 {
-            // sedna's virtio emulation never sets FEATURES_OK, yet it still
-            // accepts DRIVER_OK — don't fail the whole device over it.
-            crate::kwrn!("virtio-net", "device did not set FEATURES_OK, continuing");
+        Ok(())
+    }
+}
+
+unsafe fn setup_rx_queue(base: usize) -> KResult<()> {
+    unsafe {
+        reg_w(base, R_QUEUE_SEL, 0);
+        reg_w(base, R_QUEUE_NUM, VIRTQ_SIZE as u32);
+        let desc_pa = pmm::alloc_zero()? as usize;
+        let avail_pa = pmm::alloc_zero()? as usize;
+        let used_pa = pmm::alloc_zero()? as usize;
+        G_NET.desc = desc_pa as *mut VqDesc;
+        G_NET.avail = avail_pa as *mut VqAvail;
+        G_NET.used = used_pa as *mut VqUsed;
+        reg_w(base, R_QUEUE_DESC_LOW, desc_pa as u32);
+        reg_w(base, R_QUEUE_DESC_HIGH, ((desc_pa as u64) >> 32) as u32);
+        reg_w(base, R_QUEUE_AVAIL_LOW, avail_pa as u32);
+        reg_w(base, R_QUEUE_AVAIL_HIGH, ((avail_pa as u64) >> 32) as u32);
+        reg_w(base, R_QUEUE_USED_LOW, used_pa as u32);
+        reg_w(base, R_QUEUE_USED_HIGH, ((used_pa as u64) >> 32) as u32);
+        reg_w(base, R_QUEUE_READY, 1);
+        for i in 0..RX_DESCS {
+            let buf_pa = pmm::alloc_zero()? as *mut u8;
+            G_NET.rx_bufs[i] = buf_pa;
+            (*G_NET.desc.add(i)) = VqDesc {
+                addr: buf_pa as u64,
+                len: (HDR_LEN + NET_MTU) as u32,
+                flags: VQ_DESC_F_WRITE,
+                next: 0,
+            };
+            push_avail(i);
         }
+        Ok(())
     }
-    // MAC address lives at device-specific config offset 0x100 in legacy MMIO.
-    for i in 0..6 {
-        G_NET.mac[i] = Mmio::<u8>::at(base + 0x100 + i).read();
-    }
-    // Only expose the device to the network stack once the queues are fully
-    // set up — G_NET.base non-zero is the "ready" signal used by present().
-    setup_rx_queue(base)?;
-    G_NET.base = base;
-    G_NET.modern = modern;
-    reg_w(
-        base,
-        R_STATUS,
-        VIRTIO_S_ACK | VIRTIO_S_DRIVER | VIRTIO_S_DRIVER_OK,
-    );
-    Ok(())
-}}
+}
 
-unsafe fn setup_rx_queue(base: usize) -> KResult<()> { unsafe {
-    reg_w(base, R_QUEUE_SEL, 0);
-    reg_w(base, R_QUEUE_NUM, VIRTQ_SIZE as u32);
-    let desc_pa = pmm::alloc_zero()? as usize;
-    let avail_pa = pmm::alloc_zero()? as usize;
-    let used_pa = pmm::alloc_zero()? as usize;
-    G_NET.desc = desc_pa as *mut VqDesc;
-    G_NET.avail = avail_pa as *mut VqAvail;
-    G_NET.used = used_pa as *mut VqUsed;
-    reg_w(base, R_QUEUE_DESC_LOW, desc_pa as u32);
-    reg_w(base, R_QUEUE_DESC_HIGH, ((desc_pa as u64) >> 32) as u32);
-    reg_w(base, R_QUEUE_AVAIL_LOW, avail_pa as u32);
-    reg_w(base, R_QUEUE_AVAIL_HIGH, ((avail_pa as u64) >> 32) as u32);
-    reg_w(base, R_QUEUE_USED_LOW, used_pa as u32);
-    reg_w(base, R_QUEUE_USED_HIGH, ((used_pa as u64) >> 32) as u32);
-    reg_w(base, R_QUEUE_READY, 1);
-    for i in 0..RX_DESCS {
-        let buf_pa = pmm::alloc_zero()? as *mut u8;
-        G_NET.rx_bufs[i] = buf_pa;
-        (*G_NET.desc.add(i)) = VqDesc {
-            addr: buf_pa as u64,
-            len: (HDR_LEN + NET_MTU) as u32,
-            flags: VQ_DESC_F_WRITE,
-            next: 0,
-        };
-        push_avail(i);
+pub(crate) unsafe fn push_avail(idx: usize) {
+    unsafe {
+        if G_NET.avail.is_null() {
+            return;
+        }
+        let i = ptr::read_volatile(ptr::addr_of!((*G_NET.avail).idx));
+        ptr::write_volatile(
+            ptr::addr_of_mut!((*G_NET.avail).ring[(i as usize) % VIRTQ_SIZE]),
+            idx as u16,
+        );
+        core::sync::atomic::fence(core::sync::atomic::Ordering::SeqCst);
+        ptr::write_volatile(ptr::addr_of_mut!((*G_NET.avail).idx), i.wrapping_add(1));
     }
-    Ok(())
-}}
-
-pub(crate) unsafe fn push_avail(idx: usize) { unsafe {
-    if G_NET.avail.is_null() {
-        return;
-    }
-    let i = ptr::read_volatile(ptr::addr_of!((*G_NET.avail).idx));
-    ptr::write_volatile(
-        ptr::addr_of_mut!((*G_NET.avail).ring[(i as usize) % VIRTQ_SIZE]),
-        idx as u16,
-    );
-    core::sync::atomic::fence(core::sync::atomic::Ordering::SeqCst);
-    ptr::write_volatile(ptr::addr_of_mut!((*G_NET.avail).idx), i.wrapping_add(1));
-}}
+}
 
 pub fn mac() -> [u8; 6] {
     unsafe { G_NET.mac }

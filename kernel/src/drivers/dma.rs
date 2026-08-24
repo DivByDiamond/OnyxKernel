@@ -34,24 +34,28 @@ static mut G_BASE: usize = DMA_BASE;
 static mut G_CHANNELS: [Channel; N_CHANNELS] = [Channel { in_use: false }; N_CHANNELS];
 
 #[inline]
-unsafe fn reg(chan: usize, off: u32) -> usize { unsafe {
-    G_BASE + chan * 0x20 + off as usize
-}}
+unsafe fn reg(chan: usize, off: u32) -> usize {
+    unsafe { G_BASE + chan * 0x20 + off as usize }
+}
 
 #[inline]
-unsafe fn rd(chan: usize, off: u32) -> u32 { unsafe {
-    Mmio::<u32>::at(reg(chan, off)).read()
-}}
+unsafe fn rd(chan: usize, off: u32) -> u32 {
+    unsafe { Mmio::<u32>::at(reg(chan, off)).read() }
+}
 
 #[inline]
-unsafe fn wr(chan: usize, off: u32, v: u32) { unsafe {
-    Mmio::<u32>::at(reg(chan, off)).write(v);
-}}
+unsafe fn wr(chan: usize, off: u32, v: u32) {
+    unsafe {
+        Mmio::<u32>::at(reg(chan, off)).write(v);
+    }
+}
 
-pub unsafe fn init(base: usize) { unsafe {
-    G_BASE = base;
-    G_CHANNELS = [Channel { in_use: false }; N_CHANNELS];
-}}
+pub unsafe fn init(base: usize) {
+    unsafe {
+        G_BASE = base;
+        G_CHANNELS = [Channel { in_use: false }; N_CHANNELS];
+    }
+}
 
 /// Allocate a free DMA channel. Returns the channel index.
 pub fn alloc() -> KResult<usize> {

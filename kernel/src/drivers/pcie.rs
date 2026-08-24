@@ -35,84 +35,92 @@ static mut G_DEVS: [PciDev; MAX_RESULTS] = [PciDev {
 static mut G_N: usize = 0;
 
 #[inline]
-unsafe fn cfg_rd(bus: u8, dev: u8, func: u8, off: u32) -> u32 { unsafe {
-    let addr = ECAM_BASE
-        + ((bus as usize) << 20)
-        + ((dev as usize) << 15)
-        + ((func as usize) << 12)
-        + (off as usize);
-    Mmio::<u32>::at(addr).read()
-}}
+unsafe fn cfg_rd(bus: u8, dev: u8, func: u8, off: u32) -> u32 {
+    unsafe {
+        let addr = ECAM_BASE
+            + ((bus as usize) << 20)
+            + ((dev as usize) << 15)
+            + ((func as usize) << 12)
+            + (off as usize);
+        Mmio::<u32>::at(addr).read()
+    }
+}
 
 #[inline]
-unsafe fn cfg_wr(bus: u8, dev: u8, func: u8, off: u32, v: u32) { unsafe {
-    let addr = ECAM_BASE
-        + ((bus as usize) << 20)
-        + ((dev as usize) << 15)
-        + ((func as usize) << 12)
-        + (off as usize);
-    Mmio::<u32>::at(addr).write(v);
-}}
+unsafe fn cfg_wr(bus: u8, dev: u8, func: u8, off: u32, v: u32) {
+    unsafe {
+        let addr = ECAM_BASE
+            + ((bus as usize) << 20)
+            + ((dev as usize) << 15)
+            + ((func as usize) << 12)
+            + (off as usize);
+        Mmio::<u32>::at(addr).write(v);
+    }
+}
 
-unsafe fn read_bar(bus: u8, dev: u8, func: u8, bar_idx: u32) -> u64 { unsafe {
-    let off = 0x10 + bar_idx * 4;
-    let lo = cfg_rd(bus, dev, func, off);
-    if lo == 0 || lo == 0xFFFF_FFFF {
-        return 0;
+unsafe fn read_bar(bus: u8, dev: u8, func: u8, bar_idx: u32) -> u64 {
+    unsafe {
+        let off = 0x10 + bar_idx * 4;
+        let lo = cfg_rd(bus, dev, func, off);
+        if lo == 0 || lo == 0xFFFF_FFFF {
+            return 0;
+        }
+        // Memory BAR: bit 0 = 0. 64-bit: bits[2:1] == 2.
+        if lo & 1 == 0 && (lo & 0x6) == 0x4 {
+            let hi = cfg_rd(bus, dev, func, off + 4);
+            ((lo & 0xFFFF_FFF0) as u64) | ((hi as u64) << 32)
+        } else if lo & 1 == 0 {
+            (lo & 0xFFFF_FFF0) as u64
+        } else {
+            // I/O BAR — caller can decide what to do.
+            (lo & 0xFFFC) as u64
+        }
     }
-    // Memory BAR: bit 0 = 0. 64-bit: bits[2:1] == 2.
-    if lo & 1 == 0 && (lo & 0x6) == 0x4 {
-        let hi = cfg_rd(bus, dev, func, off + 4);
-        ((lo & 0xFFFF_FFF0) as u64) | ((hi as u64) << 32)
-    } else if lo & 1 == 0 {
-        (lo & 0xFFFF_FFF0) as u64
-    } else {
-        // I/O BAR — caller can decide what to do.
-        (lo & 0xFFFC) as u64
-    }
-}}
+}
 
 /// Scan buses 0..MAX_BUSES and collect up to MAX_RESULTS devices.
 /// Returns the number found. Each device's BAR0 is also read.
-pub unsafe fn scan() -> usize { unsafe {
-    G_N = 0;
-    for bus in 0..MAX_BUSES {
-        for dev in 0..MAX_DEVS {
-            let v = cfg_rd(bus, dev, 0, 0x00);
-            let vendor = (v & 0xFFFF) as u16;
-            if vendor == 0 || vendor == 0xFFFF {
-                continue;
-            }
-            for func in 0..MAX_FUNCS {
-                if func > 0 {
-                    let vt = cfg_rd(bus, dev, func, 0x00);
-                    if (vt & 0xFFFF) == 0xFFFF {
-                        continue;
+pub unsafe fn scan() -> usize {
+    unsafe {
+        G_N = 0;
+        for bus in 0..MAX_BUSES {
+            for dev in 0..MAX_DEVS {
+                let v = cfg_rd(bus, dev, 0, 0x00);
+                let vendor = (v & 0xFFFF) as u16;
+                if vendor == 0 || vendor == 0xFFFF {
+                    continue;
+                }
+                for func in 0..MAX_FUNCS {
+                    if func > 0 {
+                        let vt = cfg_rd(bus, dev, func, 0x00);
+                        if (vt & 0xFFFF) == 0xFFFF {
+                            continue;
+                        }
                     }
-                }
-                let class_raw = cfg_rd(bus, dev, func, 0x08) >> 16;
-                let bar0 = read_bar(bus, dev, func, 0);
-                if G_N < MAX_RESULTS {
-                    G_DEVS[G_N] = PciDev {
-                        bus,
-                        dev,
-                        func,
-                        vendor,
-                        device: (v >> 16) as u16,
-                        class: class_raw as u16,
-                        bar0,
-                    };
-                    G_N += 1;
-                }
-                // Skip remaining functions if not multi-function.
-                if func == 0 && cfg_rd(bus, dev, 0, 0x0E) & 0x80 == 0 {
-                    break;
+                    let class_raw = cfg_rd(bus, dev, func, 0x08) >> 16;
+                    let bar0 = read_bar(bus, dev, func, 0);
+                    if G_N < MAX_RESULTS {
+                        G_DEVS[G_N] = PciDev {
+                            bus,
+                            dev,
+                            func,
+                            vendor,
+                            device: (v >> 16) as u16,
+                            class: class_raw as u16,
+                            bar0,
+                        };
+                        G_N += 1;
+                    }
+                    // Skip remaining functions if not multi-function.
+                    if func == 0 && cfg_rd(bus, dev, 0, 0x0E) & 0x80 == 0 {
+                        break;
+                    }
                 }
             }
         }
+        G_N
     }
-    G_N
-}}
+}
 
 /// Number of devices found in the last `scan()`.
 pub fn count() -> usize {
@@ -130,11 +138,13 @@ pub fn get(idx: usize) -> KResult<PciDev> {
 }
 
 /// Write a 32-bit value to a config register. Used by IRQ routing.
-pub unsafe fn cfg_write(bus: u8, dev: u8, func: u8, off: u32, v: u32) { unsafe {
-    cfg_wr(bus, dev, func, off, v);
-}}
+pub unsafe fn cfg_write(bus: u8, dev: u8, func: u8, off: u32, v: u32) {
+    unsafe {
+        cfg_wr(bus, dev, func, off, v);
+    }
+}
 
 /// Read a 32-bit value from a config register.
-pub unsafe fn cfg_read(bus: u8, dev: u8, func: u8, off: u32) -> u32 { unsafe {
-    cfg_rd(bus, dev, func, off)
-}}
+pub unsafe fn cfg_read(bus: u8, dev: u8, func: u8, off: u32) -> u32 {
+    unsafe { cfg_rd(bus, dev, func, off) }
+}

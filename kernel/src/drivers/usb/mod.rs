@@ -23,17 +23,19 @@ pub unsafe fn control_transfer(
     data: Option<&mut [u8]>,
     data_in: bool,
     max_pkt: u32,
-) -> KResult<u32> { unsafe {
-    match G_ACTIVE {
-        ControllerType::Ehci => {
-            ehci::ehci_control_transfer(dev_addr, setup_pkt, data, data_in, max_pkt)
+) -> KResult<u32> {
+    unsafe {
+        match G_ACTIVE {
+            ControllerType::Ehci => {
+                ehci::ehci_control_transfer(dev_addr, setup_pkt, data, data_in, max_pkt)
+            }
+            ControllerType::Ohci => {
+                ohci::ohci_control_transfer(dev_addr, setup_pkt, data, data_in, max_pkt, 0)
+            }
+            ControllerType::None => Err(Errno::NoSys),
         }
-        ControllerType::Ohci => {
-            ohci::ohci_control_transfer(dev_addr, setup_pkt, data, data_in, max_pkt, 0)
-        }
-        ControllerType::None => Err(Errno::NoSys),
     }
-}}
+}
 
 pub fn n_ports() -> u8 {
     unsafe {
@@ -45,36 +47,44 @@ pub fn n_ports() -> u8 {
     }
 }
 
-pub unsafe fn port_status(idx: u8) -> KResult<u32> { unsafe {
-    match G_ACTIVE {
-        ControllerType::Ehci => ehci::ehci_port_status(idx),
-        ControllerType::Ohci => ohci::ohci_port_status(idx),
-        ControllerType::None => Err(Errno::NoSys),
+pub unsafe fn port_status(idx: u8) -> KResult<u32> {
+    unsafe {
+        match G_ACTIVE {
+            ControllerType::Ehci => ehci::ehci_port_status(idx),
+            ControllerType::Ohci => ohci::ohci_port_status(idx),
+            ControllerType::None => Err(Errno::NoSys),
+        }
     }
-}}
+}
 
-pub unsafe fn port_reset(idx: u8) -> KResult<()> { unsafe {
-    match G_ACTIVE {
-        ControllerType::Ehci => ehci::ehci_port_reset(idx),
-        ControllerType::Ohci => ohci::ohci_port_reset(idx),
-        ControllerType::None => Err(Errno::NoSys),
+pub unsafe fn port_reset(idx: u8) -> KResult<()> {
+    unsafe {
+        match G_ACTIVE {
+            ControllerType::Ehci => ehci::ehci_port_reset(idx),
+            ControllerType::Ohci => ohci::ohci_port_reset(idx),
+            ControllerType::None => Err(Errno::NoSys),
+        }
     }
-}}
+}
 
-pub unsafe fn port_enable(idx: u8) -> KResult<()> { unsafe {
-    match G_ACTIVE {
-        ControllerType::Ehci => ehci::ehci_port_enable(idx),
-        ControllerType::Ohci => ohci::ohci_port_enable(idx),
-        ControllerType::None => Err(Errno::NoSys),
+pub unsafe fn port_enable(idx: u8) -> KResult<()> {
+    unsafe {
+        match G_ACTIVE {
+            ControllerType::Ehci => ehci::ehci_port_enable(idx),
+            ControllerType::Ohci => ohci::ohci_port_enable(idx),
+            ControllerType::None => Err(Errno::NoSys),
+        }
     }
-}}
+}
 
-pub unsafe fn init_usb() -> KResult<()> { unsafe {
-    if ehci::probe_ehci(EHCI_BASE) {
-        ehci::init_ehci(EHCI_BASE)
-    } else if ohci::probe_ohci(OHCI_BASE) {
-        ohci::init_ohci(OHCI_BASE)
-    } else {
-        Err(Errno::NoEnt)
+pub unsafe fn init_usb() -> KResult<()> {
+    unsafe {
+        if ehci::probe_ehci(EHCI_BASE) {
+            ehci::init_ehci(EHCI_BASE)
+        } else if ohci::probe_ohci(OHCI_BASE) {
+            ohci::init_ohci(OHCI_BASE)
+        } else {
+            Err(Errno::NoEnt)
+        }
     }
-}}
+}

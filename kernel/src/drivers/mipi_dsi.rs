@@ -36,48 +36,52 @@ static mut G_DSI: usize = DSI_BASE;
 static mut G_DPHY: usize = DPHY_BASE;
 
 #[inline]
-unsafe fn rd(off: u32) -> u32 { unsafe {
-    Mmio::<u32>::at(G_DSI + off as usize).read()
-}}
+unsafe fn rd(off: u32) -> u32 {
+    unsafe { Mmio::<u32>::at(G_DSI + off as usize).read() }
+}
 
 #[inline]
-unsafe fn wr(off: u32, v: u32) { unsafe {
-    Mmio::<u32>::at(G_DSI + off as usize).write(v);
-}}
+unsafe fn wr(off: u32, v: u32) {
+    unsafe {
+        Mmio::<u32>::at(G_DSI + off as usize).write(v);
+    }
+}
 
 /// Initialise the DSI link for a 480x854 24bpp panel running at 60 Hz.
 /// `lane_mbps` selects the per-lane bit rate (typically 500..1000).
-pub unsafe fn init(base: usize, dphy: usize, lane_mbps: u32) -> KResult<()> { unsafe {
-    if base == 0 {
-        return Err(Errno::Inval);
+pub unsafe fn init(base: usize, dphy: usize, lane_mbps: u32) -> KResult<()> {
+    unsafe {
+        if base == 0 {
+            return Err(Errno::Inval);
+        }
+        G_DSI = base;
+        G_DPHY = dphy;
+        // Power down before config.
+        wr(R_DSI_PWR_UP, 0);
+        // 1 lane, escape clock division.
+        wr(R_DSI_CLKMGR_CFG, 0x10);
+        wr(R_DSI_DPI_VCID, 0);
+        wr(R_DSI_DPI_COLOR, 0x05); // 24-bit RGB888
+        wr(R_DSI_PCKHDL_CFG, 0x04);
+        // Video mode, burst, HSA/EOT packets enabled.
+        wr(R_DSI_VID_MODE_CFG, 0x1F01);
+        wr(R_DSI_CMD_MODE_CFG, 0);
+        // 480x854 panel timings.
+        wr(R_DSI_VID_PKT_SIZE, 480);
+        wr(R_DSI_VID_HSA, 10);
+        wr(R_DSI_VID_HBP, 40);
+        wr(R_DSI_VID_HLINE, 540);
+        wr(R_DSI_VID_VSA, 4);
+        wr(R_DSI_VID_VBP, 12);
+        wr(R_DSI_VID_VFP, 16);
+        wr(R_DSI_VID_VACTIVE, 854);
+        // D-PHY PLL: lane_mbps / 100 - 1.
+        let _ = lane_mbps;
+        // Power up.
+        wr(R_DSI_PWR_UP, 1);
+        Ok(())
     }
-    G_DSI = base;
-    G_DPHY = dphy;
-    // Power down before config.
-    wr(R_DSI_PWR_UP, 0);
-    // 1 lane, escape clock division.
-    wr(R_DSI_CLKMGR_CFG, 0x10);
-    wr(R_DSI_DPI_VCID, 0);
-    wr(R_DSI_DPI_COLOR, 0x05); // 24-bit RGB888
-    wr(R_DSI_PCKHDL_CFG, 0x04);
-    // Video mode, burst, HSA/EOT packets enabled.
-    wr(R_DSI_VID_MODE_CFG, 0x1F01);
-    wr(R_DSI_CMD_MODE_CFG, 0);
-    // 480x854 panel timings.
-    wr(R_DSI_VID_PKT_SIZE, 480);
-    wr(R_DSI_VID_HSA, 10);
-    wr(R_DSI_VID_HBP, 40);
-    wr(R_DSI_VID_HLINE, 540);
-    wr(R_DSI_VID_VSA, 4);
-    wr(R_DSI_VID_VBP, 12);
-    wr(R_DSI_VID_VFP, 16);
-    wr(R_DSI_VID_VACTIVE, 854);
-    // D-PHY PLL: lane_mbps / 100 - 1.
-    let _ = lane_mbps;
-    // Power up.
-    wr(R_DSI_PWR_UP, 1);
-    Ok(())
-}}
+}
 
 /// Send a DCS short command (1 byte payload).
 pub fn send_cmd(cmd: u8) -> KResult<()> {

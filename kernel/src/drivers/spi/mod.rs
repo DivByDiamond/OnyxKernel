@@ -42,28 +42,32 @@ pub(crate) const FMT_LEN_8: u32 = 8 << 16;
 pub(crate) static mut G_BASE: usize = SPI_BASE;
 
 #[inline]
-pub(crate) unsafe fn rd(off: u32) -> u32 { unsafe {
-    Mmio::<u32>::at(G_BASE + off as usize).read()
-}}
+pub(crate) unsafe fn rd(off: u32) -> u32 {
+    unsafe { Mmio::<u32>::at(G_BASE + off as usize).read() }
+}
 
 #[inline]
-pub(crate) unsafe fn wr(off: u32, v: u32) { unsafe {
-    Mmio::<u32>::at(G_BASE + off as usize).write(v);
-}}
+pub(crate) unsafe fn wr(off: u32, v: u32) {
+    unsafe {
+        Mmio::<u32>::at(G_BASE + off as usize).write(v);
+    }
+}
 
 /// Initialise the controller. `sckdiv` = (clk / (2 * spi_hz)) - 1.
 /// `cs` is the default chip-select line (0..MAX_CS).
-pub unsafe fn init(base: usize, sckdiv: u32, cs: u8) { unsafe {
-    G_BASE = base;
-    wr(R_SCKDIV, sckdiv);
-    wr(R_CSID, cs as u32);
-    wr(R_CSDEF, 1 << cs);
-    wr(R_CSMODE, CSMODE_AUTO);
-    wr(R_FMT, FMT_PROTO_SPI | FMT_ENDIAN_MSB | FMT_LEN_8);
-    wr(R_FCTRL, 0);
-    wr(R_TXMARK, 1);
-    wr(R_RXMARK, 0);
-}}
+pub unsafe fn init(base: usize, sckdiv: u32, cs: u8) {
+    unsafe {
+        G_BASE = base;
+        wr(R_SCKDIV, sckdiv);
+        wr(R_CSID, cs as u32);
+        wr(R_CSDEF, 1 << cs);
+        wr(R_CSMODE, CSMODE_AUTO);
+        wr(R_FMT, FMT_PROTO_SPI | FMT_ENDIAN_MSB | FMT_LEN_8);
+        wr(R_FCTRL, 0);
+        wr(R_TXMARK, 1);
+        wr(R_RXMARK, 0);
+    }
+}
 
 pub mod ops;
 pub mod xfer;

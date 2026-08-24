@@ -82,113 +82,129 @@ pub(super) static mut G_QTD_OFFSETS: [usize; MAX_QTD] = [0; MAX_QTD];
 pub(super) static mut G_QTD_COUNT: usize = 0;
 
 #[inline]
-pub(super) unsafe fn op_rd(reg: u32) -> u32 { unsafe {
-    Mmio::<u32>::at(G_OP_BASE + reg as usize).read()
-}}
+pub(super) unsafe fn op_rd(reg: u32) -> u32 {
+    unsafe { Mmio::<u32>::at(G_OP_BASE + reg as usize).read() }
+}
 #[inline]
-pub(super) unsafe fn op_wr(reg: u32, v: u32) { unsafe {
-    Mmio::<u32>::at(G_OP_BASE + reg as usize).write(v);
-}}
+pub(super) unsafe fn op_wr(reg: u32, v: u32) {
+    unsafe {
+        Mmio::<u32>::at(G_OP_BASE + reg as usize).write(v);
+    }
+}
 
 pub(super) unsafe fn pool_offset_to_phys(off: usize) -> u32 {
     let pool_va = &raw const G_DMA as usize;
     (pool_va + off) as u32
 }
 
-pub(super) unsafe fn alloc_dma(size: usize) -> KResult<usize> { unsafe {
-    let aligned = (size + 31) & !31;
-    let off = G_DMA_USED;
-    if off + aligned > DMA_POOL_SIZE {
-        return Err(Errno::NoMem);
+pub(super) unsafe fn alloc_dma(size: usize) -> KResult<usize> {
+    unsafe {
+        let aligned = (size + 31) & !31;
+        let off = G_DMA_USED;
+        if off + aligned > DMA_POOL_SIZE {
+            return Err(Errno::NoMem);
+        }
+        G_DMA_USED = off + aligned;
+        ::core::ptr::write_bytes(G_DMA.data.as_mut_ptr().add(off), 0, aligned);
+        Ok(off)
     }
-    G_DMA_USED = off + aligned;
-    ::core::ptr::write_bytes(G_DMA.data.as_mut_ptr().add(off), 0, aligned);
-    Ok(off)
-}}
+}
 
-pub(super) unsafe fn alloc_qh() -> KResult<usize> { unsafe {
-    if G_QH_COUNT >= MAX_QH {
-        return Err(Errno::NoMem);
+pub(super) unsafe fn alloc_qh() -> KResult<usize> {
+    unsafe {
+        if G_QH_COUNT >= MAX_QH {
+            return Err(Errno::NoMem);
+        }
+        let off = alloc_dma(QH_SIZE)?;
+        let idx = G_QH_COUNT;
+        G_QH_OFFSETS[idx] = off;
+        G_QH_COUNT += 1;
+        Ok(idx)
     }
-    let off = alloc_dma(QH_SIZE)?;
-    let idx = G_QH_COUNT;
-    G_QH_OFFSETS[idx] = off;
-    G_QH_COUNT += 1;
-    Ok(idx)
-}}
+}
 
-pub(super) unsafe fn alloc_qtd() -> KResult<usize> { unsafe {
-    if G_QTD_COUNT >= MAX_QTD {
-        return Err(Errno::NoMem);
+pub(super) unsafe fn alloc_qtd() -> KResult<usize> {
+    unsafe {
+        if G_QTD_COUNT >= MAX_QTD {
+            return Err(Errno::NoMem);
+        }
+        let off = alloc_dma(QTD_SIZE)?;
+        let idx = G_QTD_COUNT;
+        G_QTD_OFFSETS[idx] = off;
+        G_QTD_COUNT += 1;
+        Ok(idx)
     }
-    let off = alloc_dma(QTD_SIZE)?;
-    let idx = G_QTD_COUNT;
-    G_QTD_OFFSETS[idx] = off;
-    G_QTD_COUNT += 1;
-    Ok(idx)
-}}
+}
 
-pub(super) unsafe fn qh_ptr(idx: usize) -> *mut QH { unsafe {
-    G_DMA.data.as_mut_ptr().add(G_QH_OFFSETS[idx]) as *mut QH
-}}
+pub(super) unsafe fn qh_ptr(idx: usize) -> *mut QH {
+    unsafe { G_DMA.data.as_mut_ptr().add(G_QH_OFFSETS[idx]) as *mut QH }
+}
 
-pub(super) unsafe fn qtd_ptr(idx: usize) -> *mut Qtd { unsafe {
-    G_DMA.data.as_mut_ptr().add(G_QTD_OFFSETS[idx]) as *mut Qtd
-}}
+pub(super) unsafe fn qtd_ptr(idx: usize) -> *mut Qtd {
+    unsafe { G_DMA.data.as_mut_ptr().add(G_QTD_OFFSETS[idx]) as *mut Qtd }
+}
 
-pub(super) unsafe fn qh_phys(idx: usize) -> u32 { unsafe {
-    pool_offset_to_phys(G_QH_OFFSETS[idx])
-}}
+pub(super) unsafe fn qh_phys(idx: usize) -> u32 {
+    unsafe { pool_offset_to_phys(G_QH_OFFSETS[idx]) }
+}
 
-pub(super) unsafe fn qtd_phys(idx: usize) -> u32 { unsafe {
-    pool_offset_to_phys(G_QTD_OFFSETS[idx])
-}}
+pub(super) unsafe fn qtd_phys(idx: usize) -> u32 {
+    unsafe { pool_offset_to_phys(G_QTD_OFFSETS[idx]) }
+}
 
-pub(super) unsafe fn probe_ehci(base: usize) -> bool { unsafe {
-    if base == 0 {
-        return false;
+pub(super) unsafe fn probe_ehci(base: usize) -> bool {
+    unsafe {
+        if base == 0 {
+            return false;
+        }
+        let cl = Mmio::<u32>::at(base).read();
+        let v = Mmio::<u32>::at(base + EHCI_CAP_VERSION as usize).read();
+        (v & 0xFF) >= 0x10 && (cl & 0xFF) > 0
     }
-    let cl = Mmio::<u32>::at(base).read();
-    let v = Mmio::<u32>::at(base + EHCI_CAP_VERSION as usize).read();
-    (v & 0xFF) >= 0x10 && (cl & 0xFF) > 0
-}}
+}
 
 pub(super) fn ehci_n_ports() -> u8 {
     unsafe { G_N_PORTS }
 }
 
-pub(super) unsafe fn ehci_port_status(idx: u8) -> KResult<u32> { unsafe {
-    if idx >= G_N_PORTS {
-        return Err(Errno::Range);
+pub(super) unsafe fn ehci_port_status(idx: u8) -> KResult<u32> {
+    unsafe {
+        if idx >= G_N_PORTS {
+            return Err(Errno::Range);
+        }
+        let reg = OP_PORTSC + 4 * idx as u32;
+        Ok(op_rd(reg))
     }
-    let reg = OP_PORTSC + 4 * idx as u32;
-    Ok(op_rd(reg))
-}}
+}
 
-pub(super) unsafe fn ehci_port_reset(idx: u8) -> KResult<()> { unsafe {
-    if idx >= G_N_PORTS {
-        return Err(Errno::Range);
+pub(super) unsafe fn ehci_port_reset(idx: u8) -> KResult<()> {
+    unsafe {
+        if idx >= G_N_PORTS {
+            return Err(Errno::Range);
+        }
+        let reg = OP_PORTSC + 4 * idx as u32;
+        op_wr(reg, op_rd(reg) | (1 << 8));
+        let mut timeout = 100_000u32;
+        while timeout > 0 && (op_rd(reg) & (1 << 8)) != 0 {
+            timeout -= 1;
+        }
+        if timeout == 0 {
+            return Err(Errno::Io);
+        }
+        Ok(())
     }
-    let reg = OP_PORTSC + 4 * idx as u32;
-    op_wr(reg, op_rd(reg) | (1 << 8));
-    let mut timeout = 100_000u32;
-    while timeout > 0 && (op_rd(reg) & (1 << 8)) != 0 {
-        timeout -= 1;
-    }
-    if timeout == 0 {
-        return Err(Errno::Io);
-    }
-    Ok(())
-}}
+}
 
-pub(super) unsafe fn ehci_port_enable(idx: u8) -> KResult<()> { unsafe {
-    if idx >= G_N_PORTS {
-        return Err(Errno::Range);
+pub(super) unsafe fn ehci_port_enable(idx: u8) -> KResult<()> {
+    unsafe {
+        if idx >= G_N_PORTS {
+            return Err(Errno::Range);
+        }
+        let reg = OP_PORTSC + 4 * idx as u32;
+        op_wr(reg, op_rd(reg) | (1 << 4));
+        Ok(())
     }
-    let reg = OP_PORTSC + 4 * idx as u32;
-    op_wr(reg, op_rd(reg) | (1 << 4));
-    Ok(())
-}}
+}
 
 pub(super) use queue::init_ehci;
 pub(super) use xfer::bulk::ehci_bulk_transfer;

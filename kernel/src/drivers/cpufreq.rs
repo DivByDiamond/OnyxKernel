@@ -28,29 +28,35 @@ static mut G_PLL: usize = PLL_BASE;
 static mut G_CUR_OPP: usize = 1; // default 500 MHz
 
 #[inline]
-unsafe fn cru_rd(off: u32) -> u32 { unsafe {
-    Mmio::<u32>::at(G_CRU + off as usize).read()
-}}
+unsafe fn cru_rd(off: u32) -> u32 {
+    unsafe { Mmio::<u32>::at(G_CRU + off as usize).read() }
+}
 
 #[inline]
-unsafe fn cru_wr(off: u32, v: u32) { unsafe {
-    Mmio::<u32>::at(G_CRU + off as usize).write(v);
-}}
+unsafe fn cru_wr(off: u32, v: u32) {
+    unsafe {
+        Mmio::<u32>::at(G_CRU + off as usize).write(v);
+    }
+}
 
 #[inline]
-unsafe fn pll_rd(off: u32) -> u32 { unsafe {
-    Mmio::<u32>::at(G_PLL + off as usize).read()
-}}
+unsafe fn pll_rd(off: u32) -> u32 {
+    unsafe { Mmio::<u32>::at(G_PLL + off as usize).read() }
+}
 
 #[inline]
-unsafe fn _pll_wr(off: u32, v: u32) { unsafe {
-    Mmio::<u32>::at(G_PLL + off as usize).write(v);
-}}
+unsafe fn _pll_wr(off: u32, v: u32) {
+    unsafe {
+        Mmio::<u32>::at(G_PLL + off as usize).write(v);
+    }
+}
 
-pub unsafe fn init(cru: usize, pll: usize) { unsafe {
-    G_CRU = cru;
-    G_PLL = pll;
-}}
+pub unsafe fn init(cru: usize, pll: usize) {
+    unsafe {
+        G_CRU = cru;
+        G_PLL = pll;
+    }
+}
 
 /// Read the current CPU frequency in MHz. Derived from PLL0 and the
 /// divider in the CRU.

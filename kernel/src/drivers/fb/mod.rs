@@ -60,15 +60,17 @@ pub fn fb_base_pa() -> usize {
     unsafe { G_FB.base as usize }
 }
 
-pub unsafe fn init(paddr: usize) -> KResult<()> { unsafe {
-    // Only accept pmm-managed RAM. On OC2R the ECAM PCI scan can report a
-    // bogus display BAR in device space (e.g. 0x10100000) that is not backed
-    // by a real device — clearing it page-faults the kernel.
-    if paddr < 0x8000_0000 {
-        return Err(onyx_core::errno::Errno::Inval);
+pub unsafe fn init(paddr: usize) -> KResult<()> {
+    unsafe {
+        // Only accept pmm-managed RAM. On OC2R the ECAM PCI scan can report a
+        // bogus display BAR in device space (e.g. 0x10100000) that is not backed
+        // by a real device — clearing it page-faults the kernel.
+        if paddr < 0x8000_0000 {
+            return Err(onyx_core::errno::Errno::Inval);
+        }
+        init_device(paddr, FB_WIDTH, FB_HEIGHT, FB_PITCH, FB_BPP)
     }
-    init_device(paddr, FB_WIDTH, FB_HEIGHT, FB_PITCH, FB_BPP)
-}}
+}
 
 /// Init from a device-provided framebuffer (FDT `simple-framebuffer` on
 /// OC2R/sedna): the address is MMIO outside pmm-managed RAM, and the geometry
@@ -79,21 +81,23 @@ pub unsafe fn init_device(
     height: usize,
     stride: usize,
     bpp: usize,
-) -> KResult<()> { unsafe {
-    if paddr == 0 || width == 0 || height == 0 || bpp == 0 || stride < width * (bpp / 8) {
-        return Err(onyx_core::errno::Errno::Inval);
+) -> KResult<()> {
+    unsafe {
+        if paddr == 0 || width == 0 || height == 0 || bpp == 0 || stride < width * (bpp / 8) {
+            return Err(onyx_core::errno::Errno::Inval);
+        }
+        G_FB = Fb {
+            base: paddr as *mut u8,
+            width,
+            height,
+            pitch: stride,
+            bpp,
+            enabled: true,
+        };
+        clear();
+        Ok(())
     }
-    G_FB = Fb {
-        base: paddr as *mut u8,
-        width,
-        height,
-        pitch: stride,
-        bpp,
-        enabled: true,
-    };
-    clear();
-    Ok(())
-}}
+}
 
 pub fn clear() {
     unsafe {
@@ -123,7 +127,7 @@ fn put_pixel(x: usize, y: usize, color: u32) {
         } else if G_FB.bpp >= 32 {
             // X8R8G8B8, little-endian: blue in the low byte, matching the
             // byte-wise order this replaces.
-            let px = color & 0xFF_FFFF ;
+            let px = color & 0xFF_FFFF;
             core::ptr::write_volatile(base.add(off) as *mut u32, px.to_le());
         } else {
             *base.add(off) = (color & 0xFF) as u8;

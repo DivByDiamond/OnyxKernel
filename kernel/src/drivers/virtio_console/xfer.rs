@@ -36,8 +36,11 @@ pub fn putc(b: u8) -> KResult<()> {
         push(0, false);
         reg_w(G_CON.base, R_QUEUE_NOTIFY, 1);
         let used_idx = ptr::read_volatile(ptr::addr_of!((*G_CON.tx_used).idx));
-        #[allow(clippy::while_immutable_condition)]
-        while ptr::read_volatile(ptr::addr_of!((*G_CON.tx_used).idx)) == used_idx {}
+        loop {
+            if ptr::read_volatile(ptr::addr_of!((*G_CON.tx_used).idx)) != used_idx {
+                break;
+            }
+        }
         pmm::free(buf_pa as u64);
         Ok(())
     }
