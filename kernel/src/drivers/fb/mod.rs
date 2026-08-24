@@ -7,6 +7,30 @@ pub const FB_PITCH: usize = FB_WIDTH * (FB_BPP / 8);
 pub const FB_SIZE: usize = FB_HEIGHT * FB_PITCH;
 pub(crate) const COL_BLACK: u32 = 0x000000;
 pub(crate) const COL_GREEN: u32 = 0x00FF00;
+pub(crate) const COL_RED: u32 = 0xFF0000;
+pub(crate) const COL_YELLOW: u32 = 0xFFFF00;
+pub(crate) const COL_BLUE: u32 = 0x0000FF;
+pub(crate) const COL_MAGENTA: u32 = 0xFF00FF;
+pub(crate) const COL_CYAN: u32 = 0x00FFFF;
+pub(crate) const COL_WHITE: u32 = 0xFFFFFF;
+
+/// (width, pitch, bpp, height, base) for ANSI scroll/erase fast paths.
+pub fn info() -> (usize, usize, usize, usize, usize) {
+    unsafe {
+        (
+            G_FB.width,
+            G_FB.pitch,
+            G_FB.bpp,
+            G_FB.height,
+            G_FB.base as usize,
+        )
+    }
+}
+
+/// Blend-safe pixel write used by the ANSI eraser (handles 16/32 bpp).
+pub fn put_pixel_blend(x: usize, y: usize, color: u32) {
+    put_pixel(x, y, color);
+}
 
 static mut G_FB: Fb = Fb {
     base: core::ptr::null_mut(),
