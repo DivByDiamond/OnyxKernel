@@ -22,7 +22,7 @@ OnyxKernel — RISC-V 64 (rv64gc) ядро с трёхуровневой изо�
 - Устанавливает `medeleg`/`mideleg` — делегирует исключения и прерывания в S-mode
 - Переключается в S-mode через `mret` в `kmain`
 
-### 2.2 kmain (`kernel/src/srv/main.rs`)
+### 2.2 kmain (`kernel/src/srv/main/mod.rs`)
 - Инициализация UART (последовательный порт)
 - Парсинг FDT (Flattened Device Tree) — определение памяти, PLIC, устройств
 - Инициализация PMM (Physical Memory Manager) — bitmap + slab аллокатор
@@ -47,8 +47,8 @@ OnyxKernel — RISC-V 64 (rv64gc) ядро с трёхуровневой изо�
 | 2 | User Space | U-mode | нет | ограниченный набор syscalls; нет доступа к /service/* |
 
 ### 3.1 Ограничения Ring 2 (User)
-- **Syscall ACL** (`kernel/src/syscall/handler.rs:38-59`): spawn, wait, kill, create, mkdir, snapshot, chan_create запрещены
-- **Path policy** (`kernel/src/syscall/fs_sys.rs:96-99`): User-процессы не могут открыть файлы из `/service/`
+- **Syscall ACL** (`kernel/src/syscall/handler/acl.rs`): spawn, wait, kill, create, mkdir, snapshot, chan_create запрещены
+- **Path policy** (`kernel/src/syscall/fs_sys/open_close/open.rs:34`): User-процессы не могут открыть файлы из `/service/`
 
 ### 3.2 Dropring
 - `SYS_dropping(target)` — однонаправленный переход: 0→1, 0→2, 1→2
@@ -69,7 +69,7 @@ OnyxKernel — RISC-V 64 (rv64gc) ядро с трёхуровневой изо�
 
 ## 5. Аутентификация и вход (login)
 
-**`/bin/login`** (`init/src/login.rs`):
+**`/bin/login`** (`init/src/login/`):
 1. Выводит `OnyxOS Login`
 2. Читает username и password через `SYS_read`
 3. MVP-логика: любой непустой username/password → успех
@@ -80,7 +80,7 @@ OnyxKernel — RISC-V 64 (rv64gc) ядро с трёхуровневой изо�
 
 ## 6. Пользовательский Shell (osh)
 
-**`/bin/osh`** (`init/src/osh.rs`):
+**`/bin/osh`** (пользовательский shell; исходник не входит в это дерево репозитория, в систему попадает как бинарник `/bin/osh`):
 - Работает в Ring 2 (user space)
 - Команды: `help`, `echo`, `cat`, `ls`, `exec`, `clear`, `exit`, `whoami`, `pwd`
 - `whoami` вызывает `SYS_getring()` и выводит "root" (ring 1) или "user" (ring 2)
@@ -94,23 +94,31 @@ OnyxKernel — RISC-V 64 (rv64gc) ядро с трёхуровневой изо�
 
 ### 7.1 Диспетчеризация
 - Trap handler (`kernel/src/srv/trap.rs`) ловит `ecall` (CAUSE_U_ECALL)
-- Вызывает `handler::handle()` (`kernel/src/syscall/handler.rs`)
-- Всего 31 syscall (см. `kernel/src/syscall/abi.rs`)
+- Вызывает `handler::handle()` (`kernel/src/syscall/handler/dispatch.rs`)
+- Всего 85 syscall (см. `kernel/src/syscall/abi.rs`)
 
 ### 7.2 ACL
+
+Полная версия в `kernel/src/syscall/handler/acl.rs`. Структура решения (сокращённо):
+
 ```rust
 fn syscall_allowed(nr: u64, ring: u8) -> bool {
     match nr {
-        SYS_write | SYS_read | SYS_exit | SYS_yield | SYS_getpid
-        | SYS_sbrk | SYS_open | SYS_close | SYS_lseek | SYS_stat
-        | SYS_exec | SYS_readdir | SYS_getring | SYS_dropring
-        | SYS_sigmask | SYS_write_fd | SYS_chan_connect
-        | SYS_chan_send | SYS_chan_recv | SYS_chan_close => true,
-        SYS_spawn | SYS_wait | SYS_snapshot_create
-        | SYS_snapshot_rollback | SYS_snapshot_list
-        | SYS_kill | SYS_create | SYS_mkdir | SYS_chan_create
-        => ring <= PROC_RING_ROOT,
-        _ => false,
+        // ~65 syscall'ов разрешены всем: write, read, exit, yield, getpid,
+        // sbrk/brk/mmap/munmap, open/close/lseek/stat/fstat, exec/execve,
+        // readdir/getdents64, dup/chdir/getcwd/access, fcntl/ioctl/isatty,
+        // chan_connect/send/recv/close/open, сигналы (sigaction/sigprocmask/
+        // sigreturn/sigmask), время (gettimeofday/nanosleep/clock_*),
+        // waitpid/fork, net_connect/send/recv/close, ...
+        // => true,
+        // root-only: spawn, wait, snapshot_create/rollback/list, kill,
+        // mkdir, chan_create(_named), unlink, truncate, utimens, pipe,
+        // fsync, symlink, chmod/fchmod, chown/fchown
+        // => ring <= PROC_RING_ROOT,
+        SYS_create | SYS_rename => {
+            ring <= proc::PROC_RING_ROOT || proc::current_opt().is_some_and(|p| p.uid == 0)
+        }
+        _ => false, // default-deny
     }
 }
 ```
@@ -119,7 +127,7 @@ fn syscall_allowed(nr: u64, ring: u8) -> bool {
 
 ## 8. Процессы
 
-### 8.1 Структура (`kernel/src/proc/process.rs`)
+### 8.1 Структура (`kernel/src/proc/process/types.rs`)
 ```rust
 pub struct Proc {
     pid: u32,
@@ -150,8 +158,8 @@ pub struct Proc {
 - `wait()` — блокировка до выхода дочернего процесса
 
 ### 8.3 Создание процесса
-- `spawn()` (`kernel/src/proc/spawn.rs:52`) — открывает `.onx` файл через VFS, читает, загружает сегменты через `onx::load()`, выделяет PID, вызывает `create_user()`
-- `exec()` (`kernel/src/syscall/fs_sys2.rs:14`) — заменяет текущий процесс (очищает старые страничные таблицы, загружает новые)
+- `spawn()` (`kernel/src/proc/spawn/mod.rs:93`) — открывает `.onx` файл через VFS, читает, загружает сегменты через `onx::load()`, выделяет PID, вызывает `create_user()`
+- `exec()` (`kernel/src/syscall/fs_sys2.rs:12`) — заменяет текущий процесс (очищает старые страничные таблицы, загружает новые)
 
 ---
 
@@ -214,7 +222,7 @@ pub struct Proc {
 
 ## 12. Он-лайф формат (OnyxExec / .onx)
 
-`tools/src/elf2onx.rs` конвертирует ELF → .onx.
+`tools/src/elf2onx/` конвертирует ELF → .onx.
 
 ### 12.1 Формат (v2)
 ```
