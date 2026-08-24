@@ -111,7 +111,8 @@ fn test_trap_frame_clone() {
 #[test]
 fn test_proc_constants() {
     assert_eq!(PROC_PID_INIT, 1);
-    assert_eq!(KSTACK_SIZE, 16 * 1024);
+    // 64 KB since the execve kstack-overflow fix (todo.md item 0).
+    assert_eq!(KSTACK_SIZE, 64 * 1024);
     assert_eq!(PROC_MAX_FDS, 16);
 }
 

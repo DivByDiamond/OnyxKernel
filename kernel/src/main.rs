@@ -48,6 +48,7 @@ pub mod module;
 pub mod net;
 pub mod proc;
 pub mod srv;
+pub mod sync;
 pub mod syscall;
 
 use core::panic::PanicInfo;

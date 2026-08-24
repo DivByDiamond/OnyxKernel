@@ -1,5 +1,4 @@
-use core::hint::spin_loop;
-use core::sync::atomic::{AtomicBool, Ordering};
+use crate::sync::SpinLock;
 
 /// Global VMM spinlock (Bug #2 fix). All page-table mutations (map, unmap,
 /// split_leaf, destroy_root) go through this lock, preventing the SMP race
@@ -11,18 +10,17 @@ use core::sync::atomic::{AtomicBool, Ordering};
 /// a concurrent split_leaf may momentarily observe a stale PTE but cannot
 /// corrupt the walker's state. Locking them would massively amplify lock
 /// contention since translate is called from every user-pointer access.
-pub(super) static G_VMM_LOCK: AtomicBool = AtomicBool::new(false);
+///
+/// Uses the shared `SpinLock` primitive (interrupt invariant: only take with
+/// interrupts disabled in kernel context — see `crate::sync::SpinLock`).
+pub(super) static G_VMM_LOCK: SpinLock = SpinLock::new();
 
 #[inline]
 pub unsafe fn vmm_lock() {
-    while G_VMM_LOCK.swap(true, Ordering::Acquire) {
-        while G_VMM_LOCK.load(Ordering::Relaxed) {
-            spin_loop();
-        }
-    }
+    G_VMM_LOCK.lock();
 }
 
 #[inline]
 pub unsafe fn vmm_unlock() {
-    G_VMM_LOCK.store(false, Ordering::Release);
+    G_VMM_LOCK.unlock();
 }

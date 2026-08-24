@@ -1,17 +1,36 @@
 //! CLINT timer (100 Hz tick).
-use crate::arch::csr;
+use core::sync::atomic::{AtomicU64, Ordering};
+
 #[cfg(not(feature = "smode"))]
 use crate::arch::mmio::Mmio;
-use crate::arch::regs::*;
-use crate::proc;
+use crate::{
+    arch::{csr, regs::*},
+    proc,
+};
 #[cfg(not(feature = "smode"))]
 static mut G_MTIME: usize = 0;
 #[cfg(not(feature = "smode"))]
 static mut G_MTIMECMP: usize = 0;
 static mut G_FREQ: u64 = CLINT_FREQ_QEMU;
 static mut G_TICK_INTERVAL: u64 = 0;
-static mut G_UPTICKS: u64 = 0;
+// Audit fix: G_UPTICKS/G_JIFFIES were `static mut u64` with non-atomic RMW
+// from every ticking hart — concurrent increments could be lost. Both are now
+// only written via atomic fetch_add.
+static G_UPTICKS: AtomicU64 = AtomicU64::new(0);
+/// Monotonic tick counter, incremented once per timer tick per hart.
+/// Written ONLY through the atomic view below (`AtomicU64::from_ptr`);
+/// external readers still access this `pub static mut u64` directly
+/// (fs timestamps, nanosleep), which is why the type is unchanged.
+/// Migrating those readers to a load(Acquire) accessor is a follow-up.
 pub static mut G_JIFFIES: u64 = 0;
+
+#[inline]
+fn jiffies_atomic() -> &'static AtomicU64 {
+    // SAFETY: G_JIFFIES is a naturally-aligned u64 static that outlives the
+    // program; the pointer stays valid forever. Same pattern as
+    // arch/smp.rs G_RELEASE.
+    unsafe { AtomicU64::from_ptr(core::ptr::addr_of_mut!(G_JIFFIES)) }
+}
 
 pub unsafe fn init() {
     unsafe {
@@ -104,8 +123,9 @@ pub unsafe fn init_hart(hartid: usize) {
 
 pub unsafe fn handle() {
     unsafe {
-        G_UPTICKS = G_UPTICKS.wrapping_add(1);
-        G_JIFFIES = G_JIFFIES.wrapping_add(1);
+        // Atomic RMW so ticks from different harts are never lost.
+        G_UPTICKS.fetch_add(1, Ordering::Relaxed);
+        jiffies_atomic().fetch_add(1, Ordering::Relaxed);
         let now = read_mtime();
         let next = now + G_TICK_INTERVAL;
         // Re-arm the tick for THIS hart. In M-mode we write the per-hart
@@ -127,11 +147,13 @@ pub unsafe fn handle() {
         // resets if a scheduler stall prevents us from reaching this point.
         crate::drivers::watchdog::tick();
         // LED activity pulse once every 50 ticks (~0.5 s at 100 Hz).
-        if G_UPTICKS.is_multiple_of(50) {
+        if G_UPTICKS.load(Ordering::Relaxed).is_multiple_of(50) {
             crate::drivers::led::pulse_activity();
         }
     }
 }
 pub fn uptime_us() -> u64 {
-    unsafe { G_UPTICKS * 10_000 }
+    // Acquire load: readers of uptime get a consistent (if wrapping) sample.
+    // The multiply intentionally wraps like the old code.
+    G_UPTICKS.load(Ordering::Acquire).wrapping_mul(10_000)
 }

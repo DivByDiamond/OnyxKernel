@@ -1,15 +1,18 @@
-use core::sync::atomic::{AtomicBool, Ordering};
+use crate::sync::SpinLock;
 pub const HEAP_SIZE: usize = 4 * 1024 * 1024;
 pub const MIN_BLOCK: usize = 16;
 
-static HEAP_LOCK: AtomicBool = AtomicBool::new(false);
+// Unified SpinLock primitive (audit fix): this used to be a bare AtomicBool
+// with NO backoff — under SMP contention it re-issued an LL/SC swap in a tight
+// loop, hammering the holder's cache line.
+static HEAP_LOCK: SpinLock = SpinLock::new();
 
 fn lock_heap() {
-    while HEAP_LOCK.swap(true, Ordering::Acquire) {}
+    HEAP_LOCK.lock();
 }
 
 fn unlock_heap() {
-    HEAP_LOCK.store(false, Ordering::Release);
+    HEAP_LOCK.unlock();
 }
 
 #[repr(C)]
@@ -44,23 +47,26 @@ mod alloc;
 mod realloc;
 
 pub use alloc::*;
+
 pub use realloc::*;
 
-pub unsafe fn init() { unsafe {
-    let kernel_end_pa = &crate::arch::__kernel_end as *const u8 as usize;
-    let block = kernel_end_pa as *mut Block;
-    (*block).size = HEAP_SIZE - Block::hdr_size();
-    (*block).free = true;
-    (*block).next = core::ptr::null_mut();
-    (*block).prev = core::ptr::null_mut();
-    let p = &raw mut G_HEAP;
-    *p = Heap {
-        base: kernel_end_pa,
-        size: HEAP_SIZE,
-        used: 0,
-        free_list: block,
-    };
-}}
+pub unsafe fn init() {
+    unsafe {
+        let kernel_end_pa = &crate::arch::__kernel_end as *const u8 as usize;
+        let block = kernel_end_pa as *mut Block;
+        (*block).size = HEAP_SIZE - Block::hdr_size();
+        (*block).free = true;
+        (*block).next = core::ptr::null_mut();
+        (*block).prev = core::ptr::null_mut();
+        let p = &raw mut G_HEAP;
+        *p = Heap {
+            base: kernel_end_pa,
+            size: HEAP_SIZE,
+            used: 0,
+            free_list: block,
+        };
+    }
+}
 
 pub fn used() -> usize {
     unsafe { G_HEAP.used }
