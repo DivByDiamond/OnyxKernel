@@ -10,13 +10,13 @@ use crate::{
 };
 
 pub unsafe fn sched_tick() {
-    unsafe {
-        let hartid = hart_id();
-        let cur = current_for_hart(hartid);
-        if !cur.is_null() && !matches!((*cur).state, ProcState::Free) {
-            G_NEED_RESCHED[hartid].store(true, Ordering::Release);
-        }
-    }
+    let hartid = hart_id();
+    // SMP (wave 2): idle harts (current == null) must also request
+    // scheduling. The tick trap is what wakes an idle hart out of wfi;
+    // the resulting sched_yield dequeues local work or steals from a
+    // remote runqueue and switches into it. Without this, secondary
+    // harts booted into idle never picked up any work.
+    G_NEED_RESCHED[hartid].store(true, Ordering::Release);
 }
 
 pub unsafe fn set_need_resched(hartid: usize, v: bool) {

@@ -25,21 +25,35 @@ pub use trap_asm_32::{drop_to_user, sched_switch, trap_entry, trap_return};
 #[cfg(not(test))]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn trap_handler(tf: *mut crate::arch::trap_frame::TrapFrame) {
+    // SAFETY: per contract, `tf` is the live frame for this hart and is not
+    // aliased by any other hart, so a single `&mut` is sound.
     let frame = unsafe { &mut *tf };
+    // SAFETY: `frame` satisfies `handle`'s requirement of an exclusively-
+    // owned live trap frame; we run in S-mode with SIE cleared (hardware).
     unsafe {
         crate::srv::trap::handle(frame);
     }
 }
 
+// SAFETY (test stubs): these are no-ops so host-side unit tests can link;
+// they perform no memory access and uphold no invariants.
 #[cfg(test)]
+/// # Safety
+/// Test stub: no-op, safe to call with any arguments.
 pub unsafe fn trap_entry() {}
 #[cfg(test)]
+/// # Safety
+/// Test stub: never returns.
 pub unsafe fn trap_return() {}
 #[cfg(test)]
+/// # Safety
+/// Test stub: never returns; `_new_sp` unused.
 pub unsafe fn sched_switch(_new_sp: usize) -> ! {
     loop {}
 }
 #[cfg(test)]
+/// # Safety
+/// Test stub: never returns; arguments unused.
 pub unsafe fn drop_to_user(_entry: usize, _ustack: usize, _user_root_pa: usize) -> ! {
     loop {}
 }

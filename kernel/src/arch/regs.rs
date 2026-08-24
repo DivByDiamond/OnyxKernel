@@ -7,8 +7,17 @@ pub const MSTATUS_MPIE: u64 = 1 << 7;
 pub const MSTATUS_SPP: u64 = 1 << 8;
 pub const SSTATUS_SIE: u64 = 1 << 1;
 pub const SSTATUS_SPIE: u64 = 1 << 5;
+/// sstatus.FS = Initial (01): FPU enabled for U-mode, FP instructions no
+/// longer illegal-instruction. The kernel never touches FP registers, so
+/// every freshly built user trap frame must carry this (sstatus resets to
+/// FS=Off after boot, and trap_restore csrw's the whole tf.sstatus).
+pub const SSTATUS_FS_INITIAL: u64 = 1 << 14;
 pub const SSTATUS_SPP: u64 = 1 << 8;
 pub const SSTATUS_SUM: u64 = 1 << 18;
+/// sie.STIE — supervisor timer interrupt enable.
+pub const SIE_STIE: u64 = 1 << 5;
+/// sie.SEIE — supervisor external interrupt enable.
+pub const SIE_SEIE: u64 = 1 << 9;
 pub const SSTATUS_MXR: u64 = 1 << 19;
 pub const SATP_MODE_BARE: u64 = 0;
 #[cfg(target_pointer_width = "64")]
