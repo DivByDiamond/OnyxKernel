@@ -4,15 +4,27 @@
 
 use crate::auth::SHADOW_PATH;
 use crate::auth::crypto::{
-    bytes_to_hex, const_time_eq, generate_salt, hash_password, hex_decode_8,
+    classify_password, format_shadow_field, generate_salt, hash_password, parse_shadow_field,
 };
-use crate::syscalls;
+use onyx_core::crypto::HashScheme;
+
+/// Result of checking a password against /etc/shadow.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum VerifyOutcome {
+    /// Verified against the current iterated KDF — nothing to do.
+    Ok,
+    /// Verified but stored under the legacy single-round scheme; caller
+    /// should opportunistically rehash when it has write access.
+    OkLegacy,
+    /// No match (or unreadable/malformed shadow) — always fail closed.
+    Fail,
+}
 
 pub fn read_shadow_password(username: &[u8]) -> Result<[u8; 128], i64> {
     let mut path_buf = [0u8; 64];
     let n = SHADOW_PATH.len().min(63);
     path_buf[..n].copy_from_slice(&SHADOW_PATH[..n]);
-    let fd = unsafe { syscalls::open(path_buf.as_ptr(), 0, 0) };
+    let fd = unsafe { crate::syscalls::open(path_buf.as_ptr(), 0, 0) };
     if fd < 0 {
         return Err(fd);
     }
@@ -20,7 +32,7 @@ pub fn read_shadow_password(username: &[u8]) -> Result<[u8; 128], i64> {
     let mut total = 0usize;
     loop {
         let n = unsafe {
-            syscalls::read(
+            crate::syscalls::read(
                 fd as u64,
                 buf[total..].as_mut_ptr(),
                 (buf.len() - total) as u64,
@@ -34,7 +46,7 @@ pub fn read_shadow_password(username: &[u8]) -> Result<[u8; 128], i64> {
             break;
         }
     }
-    unsafe { syscalls::close(fd as u64) };
+    unsafe { crate::syscalls::close(fd as u64) };
 
     let mut shadow_val = [0u8; 128];
     let data = &buf[..total];
@@ -63,45 +75,47 @@ pub fn read_shadow_password(username: &[u8]) -> Result<[u8; 128], i64> {
     Err(-2)
 }
 
-pub fn verify_shadow_password(username: &[u8], password: &[u8]) -> bool {
+/// Parse the raw shadow value into a NUL-trimmed byte slice.
+fn stored_slice(stored: &[u8; 128]) -> &[u8] {
+    let len = stored.iter().position(|&b| b == 0).unwrap_or(stored.len());
+    &stored[..len]
+}
+
+/// Verify `username`/`password`, transparently accepting both the current
+/// iterated `$5$` scheme and the legacy single-round scheme. Fail-closed:
+/// any read error or malformed entry is `Fail`.
+///
+/// Migration design: both schemes share the `$5$salt$hash` layout, so the
+/// scheme is determined by re-computation (`classify_password`) rather
+/// than a format tag. Callers that learn `OkLegacy` and hold write access
+/// (root session) rewrite the entry via `update_shadow_password`, which
+/// stores an iterated-format hash.
+pub fn verify_shadow_outcome(username: &[u8], password: &[u8]) -> VerifyOutcome {
     let stored = match read_shadow_password(username) {
         Ok(s) => s,
-        Err(_) => return false,
+        Err(_) => return VerifyOutcome::Fail,
     };
 
-    let stored_len = stored.iter().position(|&b| b == 0).unwrap_or(stored.len());
-    let data = &stored[..stored_len];
-
-    if data.len() < 3 || data[0] != b'$' || data[1] != b'5' || data[2] != b'$' {
-        return false;
-    }
-
-    let rest = &data[3..];
-    let salt_end = match rest.iter().position(|&b| b == b'$') {
-        Some(n) => n,
-        None => return false,
+    let field = match parse_shadow_field(stored_slice(&stored)) {
+        Some(f) => f,
+        None => return VerifyOutcome::Fail,
     };
-    let salt_hex = &rest[..salt_end];
-    let stored_hash_hex = &rest[salt_end + 1..];
 
-    if salt_hex.len() != 16 || stored_hash_hex.len() < 64 {
-        return false;
+    match classify_password(password, &field) {
+        HashScheme::Iterated => VerifyOutcome::Ok,
+        HashScheme::Legacy => VerifyOutcome::OkLegacy,
+        HashScheme::Unknown => VerifyOutcome::Fail,
     }
-    let stored_hash_hex = &stored_hash_hex[..64];
+}
 
-    let salt_bytes = hex_decode_8(salt_hex);
-
-    let computed_hash = hash_password(password, &salt_bytes);
-    let computed_hex = bytes_to_hex(&computed_hash);
-
-    const_time_eq(&computed_hex[..64], stored_hash_hex)
+/// Back-compat wrapper used by passwd/su: any successful verify counts.
+pub fn verify_shadow_password(username: &[u8], password: &[u8]) -> bool {
+    verify_shadow_outcome(username, password) != VerifyOutcome::Fail
 }
 
 pub(crate) fn format_shadow_entry(username: &[u8], password: &[u8]) -> ([u8; 128], usize) {
     let salt = generate_salt();
     let hash = hash_password(password, &salt);
-    let salt_hex = bytes_to_hex(&salt);
-    let hash_hex = bytes_to_hex(&hash);
 
     let mut buf = [0u8; 128];
     let mut pos = 0;
@@ -117,30 +131,9 @@ pub(crate) fn format_shadow_entry(username: &[u8], password: &[u8]) -> ([u8; 128
         buf[pos] = b':';
         pos += 1;
     }
-    for &b in b"$5$" {
-        if pos >= buf.len() {
-            break;
-        }
-        buf[pos] = b;
-        pos += 1;
-    }
-    for &b in salt_hex.iter().take(16) {
-        if pos >= buf.len() {
-            break;
-        }
-        buf[pos] = b;
-        pos += 1;
-    }
-    if pos < buf.len() {
-        buf[pos] = b'$';
-        pos += 1;
-    }
-    for &b in hash_hex.iter() {
-        if pos >= buf.len() {
-            break;
-        }
-        buf[pos] = b;
-        pos += 1;
-    }
+    // "$5$<salt-hex>$<hash-hex>" — see onyx_core::crypto::kdf for the
+    // documented deviation from crypt(3) sha256crypt.
+    let field_len = format_shadow_field(&salt, &hash, &mut buf[pos..]);
+    pos += field_len;
     (buf, pos)
 }

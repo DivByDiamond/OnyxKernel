@@ -18,6 +18,7 @@
 
 extern crate alloc;
 
+pub mod crypto;
 pub mod errno;
 pub mod fmt;
 pub mod formats;
