@@ -19,6 +19,11 @@ pub(super) const fn size_of_slab_header() -> usize {
     32
 }
 
+/// # Safety
+///
+/// `SLAB_SIZES` is a compile-time constant and the loop only reads it by
+/// index; no actual unsafety is exercised — this is `unsafe` for signature
+/// symmetry with its callers.
 unsafe fn slab_class_for(size: usize) -> Option<usize> {
     for (i, &s) in SLAB_SIZES.iter().enumerate() {
         if size <= s {
@@ -28,6 +33,12 @@ unsafe fn slab_class_for(size: usize) -> Option<usize> {
     None
 }
 
+/// Allocate a `size`-byte object from a SLAB pool.
+///
+/// # Safety
+///
+/// PMM must be initialised and interrupts disabled (spinlock invariant).
+/// The returned pointer (if any) is valid until passed to [`slab_free`].
 pub unsafe fn slab_alloc(size: usize) -> Option<*mut u8> {
     unsafe {
         super::pmm_lock();
@@ -38,7 +49,18 @@ pub unsafe fn slab_alloc(size: usize) -> Option<*mut u8> {
 }
 
 /// Internal slab_alloc without locking. Caller MUST hold `pmm_lock()`.
+///
+/// # Safety
+///
+/// Same as [`slab_alloc`] plus: caller must hold `pmm_lock()`. The returned
+/// slot lies inside a PMM page whose header was validated by `SLAB_MAGIC`
+/// at creation, and `slot < capacity <= 64` keeps the free-bit shifts in
+/// range.
 unsafe fn slab_alloc_unlocked(size: usize) -> Option<*mut u8> {
+    // SAFETY: raw-pointer traversal of the per-class slab list; headers
+    // were fully initialised when the page entered the list, `slot` is
+    // bounded by `hdr.capacity` (<= 64), and new-page setup writes every
+    // header field before publishing the page on the list.
     unsafe {
         let class = slab_class_for(size)?;
         let obj_size = SLAB_SIZES[class];
@@ -92,6 +114,13 @@ unsafe fn slab_alloc_unlocked(size: usize) -> Option<*mut u8> {
     }
 }
 
+/// Free an object previously returned by [`slab_alloc`].
+///
+/// # Safety
+///
+/// PMM initialised, interrupts disabled. `ptr` must come from
+/// [`slab_alloc`] and must not be freed twice; foreign pointers are
+/// rejected by the magic/alignment checks inside.
 pub unsafe fn slab_free(ptr: *mut u8) -> bool {
     unsafe {
         super::pmm_lock();
@@ -102,7 +131,15 @@ pub unsafe fn slab_free(ptr: *mut u8) -> bool {
 }
 
 /// Internal slab_free without locking. Caller MUST hold `pmm_lock()`.
+///
+/// # Safety
+///
+/// Same as [`slab_free`] plus: caller must hold `pmm_lock()`.
 unsafe fn slab_free_unlocked(ptr: *mut u8) -> bool {
+    // SAFETY: the page pointer is derived by masking to a page boundary;
+    // every dereference below is guarded by the magic check, size_idx
+    // bounds check, header-offset check, alignment check and slot <
+    // capacity check, so only genuinely slab-owned memory is written.
     unsafe {
         let page_addr = (ptr as usize) & !(PAGE_SIZE - 1);
         let page = page_addr as *mut SlabHeader;

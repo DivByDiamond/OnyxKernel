@@ -1,7 +1,18 @@
 use crate::arch::regs::*;
 use core::ptr;
 
+/// Software Sv39 page-table walk returning the physical address that
+/// `vaddr` resolves to (0 if unmapped).
+///
+/// # Safety
+///
+/// `root_pa` must be a page-aligned physical address of a live Sv39 root
+/// table readable through the kernel's direct physical mapping, and every
+/// non-leaf PTE on the walk must point to an allocated next-level table.
 pub unsafe fn translate(root_pa: u64, vaddr: u64) -> u64 {
+    // SAFETY: volatile reads of PTE slots; all slot addresses are
+    // `table_pa + idx*8` with idx < 512 and table PAs taken from valid
+    // PTEs per the contract above.
     unsafe {
         if root_pa == 0 {
             crate::kerr!(
@@ -39,7 +50,14 @@ pub unsafe fn translate(root_pa: u64, vaddr: u64) -> u64 {
     }
 }
 
+/// Like [`translate`], but only succeeds for user-accessible leaves
+/// (`PTE_U` set); returns 0 otherwise.
+///
+/// # Safety
+///
+/// Same contract as [`translate`].
 pub unsafe fn translate_user(root_pa: u64, vaddr: u64) -> u64 {
+    // SAFETY: same volatile PTE walk as `translate`; see its SAFETY note.
     unsafe {
         if root_pa == 0 {
             return 0;
@@ -75,7 +93,14 @@ pub unsafe fn translate_user(root_pa: u64, vaddr: u64) -> u64 {
     }
 }
 
+/// Like [`translate`], but only succeeds for user leaves that are also
+/// writable (`PTE_U | PTE_W`); returns 0 otherwise.
+///
+/// # Safety
+///
+/// Same contract as [`translate`].
 pub unsafe fn translate_user_write(root_pa: u64, vaddr: u64) -> u64 {
+    // SAFETY: same volatile PTE walk as `translate`; see its SAFETY note.
     unsafe {
         if root_pa == 0 {
             return 0;
@@ -111,7 +136,14 @@ pub unsafe fn translate_user_write(root_pa: u64, vaddr: u64) -> u64 {
     }
 }
 
+/// Return the flag bits of the user leaf PTE covering `vaddr`
+/// (0 if unmapped or not a user leaf).
+///
+/// # Safety
+///
+/// Same contract as [`translate`].
 pub unsafe fn pte_user_flags(root_pa: u64, vaddr: u64) -> u64 {
+    // SAFETY: same volatile PTE walk as `translate`; see its SAFETY note.
     unsafe {
         if root_pa == 0 {
             return 0;
@@ -143,7 +175,20 @@ pub unsafe fn pte_user_flags(root_pa: u64, vaddr: u64) -> u64 {
 /// OR `add_flags` into an existing level-0 user PTE. Returns `false` if the
 /// page is not mapped as a user leaf at level 0 (caller must then fall back
 /// to a fresh mapping or report an error).
+/// OR `add_flags` into an existing level-0 user PTE. Returns `false` if the
+/// page is not mapped as a user leaf at level 0 (caller must then fall back
+/// to a fresh mapping or report an error).
+///
+/// # Safety
+///
+/// Same contract as [`translate`]; additionally the caller must hold the
+/// VMM lock so the read-modify-write of the PTE is atomic with respect to
+/// other mappers, and must tolerate the stale-TLB window closed by the
+/// `sfence.vma` issued here.
 pub unsafe fn update_user_pte(root_pa: u64, vaddr: u64, add_flags: u64) -> bool {
+    // SAFETY: volatile PTE walk as in `translate`; the single write below
+    // targets a validated level-0 leaf slot and is serialised by the VMM
+    // lock per the contract above.
     unsafe {
         if root_pa == 0 {
             return false;

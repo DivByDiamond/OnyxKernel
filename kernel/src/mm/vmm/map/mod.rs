@@ -8,7 +8,17 @@ use super::walk::walk;
 #[cfg(target_pointer_width = "32")]
 use super::walk::walk;
 
+/// Map `[paddr, paddr+size)` at `vaddr` in the address space rooted at
+/// `root_pa`, using large pages where alignment permits.
+///
+/// # Safety
+///
+/// `root_pa` must be a live root table (direct-mapped); `vaddr`/`paddr`
+/// must be page-aligned and the ranges must not overlap existing user
+/// mappings (EEXIST is returned if they do). Interrupts disabled.
 pub unsafe fn map(root_pa: u64, vaddr: u64, paddr: u64, size: usize, flags: u64) -> KResult<()> {
+    // SAFETY: lock acquisition itself is safe; `map_impl` upholds the
+    // contract above under the VMM lock.
     unsafe {
         super::lock::vmm_lock();
         let r = map_impl(root_pa, vaddr, paddr, size, flags);
@@ -17,7 +27,15 @@ pub unsafe fn map(root_pa: u64, vaddr: u64, paddr: u64, size: usize, flags: u64)
     }
 }
 
+/// Locking variant of [`map`]. Caller MUST hold the VMM lock.
+///
+/// # Safety
+///
+/// Same as [`map`] plus: caller must hold the VMM lock. Each iteration
+/// writes one PTE via [`map_one`], whose slot comes from a validated walk.
 unsafe fn map_impl(root_pa: u64, vaddr: u64, paddr: u64, size: usize, flags: u64) -> KResult<()> {
+    // SAFETY: all PTE writes happen inside `map_one` on walk-validated
+    // slots; the loop arithmetic is bounded by `remaining`.
     unsafe {
         let mut va = vaddr;
         let mut pa = paddr;
@@ -48,7 +66,17 @@ unsafe fn map_impl(root_pa: u64, vaddr: u64, paddr: u64, size: usize, flags: u64
     }
 }
 
+/// Map `size` bytes of freshly allocated zeroed pages at `vaddr`, charging
+/// each page against the per-system user-memory budget. Rolls back every
+/// allocation on failure.
+///
+/// # Safety
+///
+/// `root_pa` must be a live root table; `vaddr` must be page-aligned and
+/// free of existing user mappings. Interrupts disabled.
 pub unsafe fn map_anon(root_pa: u64, vaddr: u64, size: usize, flags: u64) -> KResult<()> {
+    // SAFETY: lock acquisition itself is safe; the impl upholds the
+    // contract above under the VMM lock.
     unsafe {
         super::lock::vmm_lock();
         let r = map_anon_impl(root_pa, vaddr, size, flags);
@@ -57,7 +85,15 @@ pub unsafe fn map_anon(root_pa: u64, vaddr: u64, size: usize, flags: u64) -> KRe
     }
 }
 
+/// Locking variant of [`map_anon`]. Caller MUST hold the VMM lock.
+///
+/// # Safety
+///
+/// Same as [`map_anon`] plus: caller must hold the VMM lock.
 unsafe fn map_anon_impl(root_pa: u64, vaddr: u64, size: usize, flags: u64) -> KResult<()> {
+    // SAFETY: VMM lock held; every PTE write goes through `map_one` on a
+    // walk-validated slot and every failure path unmaps/frees the pages
+    // allocated so far, so no partial state escapes.
     unsafe {
         let mut va = vaddr;
         let size_aligned = (size + 4095) & !4095;
@@ -108,7 +144,18 @@ unsafe fn map_anon_impl(root_pa: u64, vaddr: u64, size: usize, flags: u64) -> KR
     }
 }
 
+/// Write a single PTE for (`vaddr`, `paddr`) at `level`, creating
+/// intermediate tables as needed.
+///
+/// # Safety
+///
+/// Caller must hold the VMM lock. `root_pa` must be a live root table;
+/// `paddr` must be aligned to the block size implied by `level` (checked
+/// below); `flags` must not contain reserved/illegal PTE bits.
 unsafe fn map_one(root_pa: u64, vaddr: u64, paddr: u64, flags: u64, level: u32) -> KResult<()> {
+    // SAFETY: VMM lock held; `walk(.., true)` returns a pointer to a live
+    // PTE slot (see its contract), and both volatile accesses below target
+    // exactly that slot. sfence_vma closes the stale-TLB window.
     unsafe {
         #[cfg(target_pointer_width = "64")]
         if level == 1 && paddr & ((1u64 << 21) - 1) != 0 {
@@ -144,6 +191,11 @@ unsafe fn map_one(root_pa: u64, vaddr: u64, paddr: u64, flags: u64, level: u32) 
     }
 }
 
+/// Public, self-locking wrapper around [`map_one`] for one-shot mappings.
+///
+/// # Safety
+///
+/// Same contract as [`map_one`]; interrupts disabled (spinlock invariant).
 pub unsafe fn map_one_pub(
     root_pa: u64,
     vaddr: u64,
@@ -151,6 +203,8 @@ pub unsafe fn map_one_pub(
     flags: u64,
     level: u32,
 ) -> KResult<()> {
+    // SAFETY: lock acquisition itself is safe; `map_one` upholds its
+    // contract under the VMM lock.
     unsafe {
         super::lock::vmm_lock();
         let r = map_one(root_pa, vaddr, paddr, flags, level);
@@ -181,70 +235,6 @@ fn best_level(va: u64, pa: u64, remaining: u64) -> u32 {
     0
 }
 
-/// Validate that every 4 KiB page of user range `[uaddr, uaddr+len)` is
-/// mapped as a user leaf (PTE_U), optionally writable, in the given address
-/// space. Syscalls must call this before dereferencing user buffers so a
-/// bad pointer returns `EFAULT` instead of halting on an S-mode page fault.
-pub unsafe fn check_user_range(root_pa: u64, uaddr: u64, len: u64, write: bool) -> KResult<()> {
-    unsafe {
-        if len == 0 {
-            return Ok(());
-        }
-        let end = uaddr.checked_add(len).ok_or(Errno::Fault)?;
-        let mut va = uaddr & !0xFFF;
-        while va < end {
-            let mapped = if write {
-                super::translate_user_write(root_pa, va)
-            } else {
-                super::translate_user(root_pa, va)
-            };
-            if mapped == 0 {
-                return Err(Errno::Fault);
-            }
-            va += 0x1000;
-        }
-        Ok(())
-    }
-}
+mod user_copy;
 
-/// Copy `len` bytes from kernel `src` into user VA `[uaddr, uaddr+len)`,
-/// re-translating at each 4 KiB frame boundary. Fails with `Errno::Fault`
-/// if any covered page is not a writable user mapping.
-pub unsafe fn copy_to_user(root_pa: u64, uaddr: u64, src: *const u8, len: usize) -> KResult<()> {
-    unsafe {
-        check_user_range(root_pa, uaddr, len as u64, true)?;
-        let mut done = 0usize;
-        while done < len {
-            let va = uaddr + done as u64;
-            let pa = super::translate_user_write(root_pa, va);
-            if pa == 0 {
-                return Err(Errno::Fault);
-            }
-            let n = usize::min(len - done, (0x1000 - (va & 0xFFF)) as usize);
-            core::ptr::copy_nonoverlapping(src.add(done), pa as *mut u8, n);
-            done += n;
-        }
-        Ok(())
-    }
-}
-
-/// Copy `len` bytes from user VA `[uaddr, uaddr+len)` into kernel `dst`,
-/// re-translating at each 4 KiB frame boundary. Fails with `Errno::Fault`
-/// if any covered page is not a readable user mapping.
-pub unsafe fn copy_from_user(root_pa: u64, dst: *mut u8, uaddr: u64, len: usize) -> KResult<()> {
-    unsafe {
-        check_user_range(root_pa, uaddr, len as u64, false)?;
-        let mut done = 0usize;
-        while done < len {
-            let va = uaddr + done as u64;
-            let pa = super::translate_user(root_pa, va);
-            if pa == 0 {
-                return Err(Errno::Fault);
-            }
-            let n = usize::min(len - done, (0x1000 - (va & 0xFFF)) as usize);
-            core::ptr::copy_nonoverlapping(pa as *const u8, dst.add(done), n);
-            done += n;
-        }
-        Ok(())
-    }
-}
+pub use user_copy::{check_user_range, copy_from_user, copy_to_user};

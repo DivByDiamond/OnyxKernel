@@ -3,7 +3,17 @@ use onyx_core::errno::{Errno, KResult};
 use super::{Block, G_HEAP, HEAP_SIZE, MIN_BLOCK, lock_heap, unlock_heap};
 use crate::mm::pmm;
 
+/// Allocate `size` bytes from the kernel heap (SLAB first, then the
+/// free-list).
+///
+/// # Safety
+///
+/// The heap must be initialised (`heap::init`) and interrupts disabled
+/// (spinlock invariant). On success the pointer must later be released
+/// with [`kfree`] or reallocated with [`krealloc`].
 pub unsafe fn kmalloc(size: usize) -> KResult<*mut u8> {
+    // SAFETY: lock acquisition itself is safe; the locked body upholds the
+    // `# Safety` contract above.
     unsafe {
         if size == 0 {
             return Err(Errno::Inval);
@@ -18,7 +28,16 @@ pub unsafe fn kmalloc(size: usize) -> KResult<*mut u8> {
     }
 }
 
+/// Locking variant of [`kmalloc`]. Caller MUST hold the heap lock.
+///
+/// # Safety
+///
+/// Same as [`kmalloc`] plus: caller must hold `lock_heap()`. All
+/// raw-pointer dereferences below walk the `G_HEAP.free_list`, whose nodes
+/// were created exclusively by this module inside the lock.
 unsafe fn kmalloc_locked(size: usize) -> KResult<*mut u8> {
+    // SAFETY: heap lock held; free-list nodes and slab headers are only
+    // ever mutated under this lock, so the pointer walk is exclusive.
     unsafe {
         if let Some(p) = pmm::slab_alloc(size) {
             G_HEAP.used += size;
@@ -54,7 +73,16 @@ unsafe fn kmalloc_locked(size: usize) -> KResult<*mut u8> {
     }
 }
 
+/// Free a pointer returned by [`kmalloc`]/[`krealloc`].
+///
+/// # Safety
+///
+/// `p` must be null or a live allocation from this heap; double-free or
+/// freeing a foreign pointer corrupts the free-list. Heap initialised,
+/// interrupts disabled.
 pub unsafe fn kfree(p: *mut u8) {
+    // SAFETY: lock acquisition itself is safe; the locked body upholds the
+    // `# Safety` contract above.
     unsafe {
         if p.is_null() {
             return;
@@ -65,7 +93,17 @@ pub unsafe fn kfree(p: *mut u8) {
     }
 }
 
+/// Locking variant of [`kfree`]. Caller MUST hold the heap lock.
+///
+/// # Safety
+///
+/// Same as [`kfree`] plus: caller must hold `lock_heap()`. The block
+/// pointer arithmetic is guarded by the alignment/size sanity checks, and
+/// coalescing only touches list nodes created by this module.
 unsafe fn kfree_locked(p: *mut u8) {
+    // SAFETY: heap lock held; `slab_free` validates the magic, and for
+    // free-list blocks the alignment/size checks below gate every Block
+    // dereference and coalescing step.
     unsafe {
         if pmm::slab_free(p) {
             return;
