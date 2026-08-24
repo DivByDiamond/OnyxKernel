@@ -7,7 +7,6 @@ use crate::mm::vmm;
 use crate::proc;
 use crate::syscall::abi::{TCGETS, TCSETS};
 use crate::syscall::handler::user_ptr_ok;
-use crate::syscall::tty::{ECHO_ENABLED, ICANON_ENABLED};
 
 const ECHO: u32 = 0o0000010;
 const ICANON: u32 = 0o0000002;
@@ -75,19 +74,22 @@ pub unsafe fn sys_ioctl(fd: u64, request: u64, arg: u64) -> i64 {
                 }
                 let mut buf = [0u8; TERMIOS_SIZE];
 
+                // Report the CURRENT process's termios, not a global: each
+                // process owns its line-discipline state.
+                let p = proc::current();
                 let mut lflag = 0u32;
-                if ECHO_ENABLED {
+                if p.term_echo {
                     lflag |= ECHO;
                 }
-                if ICANON_ENABLED {
+                if p.term_icanon {
                     lflag |= ICANON;
                 }
 
                 let buf = buf.as_mut_ptr();
                 ptr::write(buf.add(C_CFLAG) as *mut u32, B9600);
                 ptr::write(buf.add(C_LFLAG) as *mut u32, lflag);
-                ptr::write(buf.add(C_CC + C_CC_VMIN), 1u8);
-                ptr::write(buf.add(C_CC + C_CC_VTIME), 0u8);
+                ptr::write(buf.add(C_CC + C_CC_VMIN), p.term_vmin);
+                ptr::write(buf.add(C_CC + C_CC_VTIME), p.term_vtime);
                 put_user(arg, buf, TERMIOS_SIZE)
             }
             TCSETS => {
@@ -99,8 +101,13 @@ pub unsafe fn sys_ioctl(fd: u64, request: u64, arg: u64) -> i64 {
                     return Errno::Fault.as_i64();
                 }
                 let lflag = ptr::read(buf.as_ptr().add(C_LFLAG) as *const u32);
-                ECHO_ENABLED = (lflag & ECHO) != 0;
-                ICANON_ENABLED = (lflag & ICANON) != 0;
+                let cc_vmin = buf[C_CC + C_CC_VMIN];
+                let cc_vtime = buf[C_CC + C_CC_VTIME];
+                let p = proc::current();
+                p.term_echo = (lflag & ECHO) != 0;
+                p.term_icanon = (lflag & ICANON) != 0;
+                p.term_vmin = cc_vmin;
+                p.term_vtime = cc_vtime;
                 0
             }
             0x5421 => {
@@ -125,13 +132,33 @@ pub unsafe fn sys_ioctl(fd: u64, request: u64, arg: u64) -> i64 {
                 }
             }
             0x5413 => {
+                // TIOCGWINSZ: real terminal size. On the framebuffer console
+                // derive it from the fb geometry (ANSI cell grid 8x16); else
+                // fall back to the UART default 80x24.
                 if arg == 0 {
                     return 0;
                 }
-                let mut ws = [0u16; 4];
-                ws[0] = 24;
-                ws[1] = 80;
-                put_user(arg, ws.as_ptr().cast::<u8>(), 8)
+                if !user_ptr_ok(arg, 8) {
+                    return Errno::Inval.as_i64();
+                }
+                let pa = crate::mm::vmm::translate(proc::current().root_pa, arg);
+                if pa == 0 {
+                    return Errno::Inval.as_i64();
+                }
+                let ws = pa as *mut u16;
+                let (rows, cols) = if crate::drivers::fb::enabled() {
+                    let cols = (crate::drivers::fb::width() / 8) as u16;
+                    let rows = (crate::drivers::fb::height() / 16) as u16;
+                    (rows.max(1), cols.max(1))
+                } else {
+                    (24, 80)
+                };
+                // ws_row, ws_col, ws_xpixel, ws_ypixel
+                ptr::write(ws.add(0), rows);
+                ptr::write(ws.add(1), cols);
+                ptr::write(ws.add(2), 0);
+                ptr::write(ws.add(3), 0);
+                0
             }
             0x541B => {
                 if arg == 0 {

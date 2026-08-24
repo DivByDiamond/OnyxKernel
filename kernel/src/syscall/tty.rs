@@ -1,6 +1,3 @@
-pub(crate) static mut ECHO_ENABLED: bool = true;
-pub(crate) static mut ICANON_ENABLED: bool = true;
-
 /// Console input line discipline: applied to every byte pulled from the
 /// UART before it reaches a reader of fd 0.
 ///

@@ -86,13 +86,14 @@ pub(super) fn syscall_allowed(nr: u64, ring: u8) -> bool {
         | SYS_fchmod
         | SYS_chown
         | SYS_fchown => ring <= proc::PROC_RING_ROOT,
-        // Правило ACL (todo.md «umask/права OnyxFS»): create/rename разрешены
-        // ring <= 1, а также процессам ring 2 с uid == 0. Это root self-service:
-        // /bin/passwd работает в ring 2 и должен пересоздавать /etc/shadow,
-        // а root и так обходит shadow-deny в open (fs_sys/open_close/open.rs).
-        // Для обычных ring-2 пользователей остаётся default-deny — защита
-        // shadow не ослабляется, меняется только возможность root менять
-        // свои системные файлы из своей оболочки.
+        // ACL rule (todo.md "umask/OnyxFS permissions"): create/rename are
+        // allowed for ring <= 1 and for ring-2 processes with uid == 0. This
+        // is root self-service: /bin/passwd runs in ring 2 and must recreate
+        // /etc/shadow, while root already bypasses the shadow-deny in open
+        // (fs_sys/open_close/open.rs). For ordinary ring-2 users the
+        // default-deny stays — shadow protection is not weakened; only
+        // root's ability to modify its own system files from its own shell
+        // changes.
         SYS_create | SYS_rename => {
             ring <= proc::PROC_RING_ROOT || proc::current_opt().is_some_and(|p| p.uid == 0)
         }

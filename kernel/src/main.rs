@@ -1,7 +1,7 @@
 //! # OnyxKernel — RISC-V 64 (rv64gc) OS with Root Space / User Space isolation
 //!
-//! Полный порт SlipperKernel→OnyxKernel на Rust.
-//! ~98% Rust, assembly через `global_asm!`.
+//! Full port of SlipperKernel→OnyxKernel in Rust.
+//! ~98% Rust, assembly via `global_asm!`.
 //!
 //! ## Rings
 //! - 0 (kernel): S-mode, OnyxKernel + drivers

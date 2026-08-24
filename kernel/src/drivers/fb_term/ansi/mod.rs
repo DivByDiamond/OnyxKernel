@@ -1,4 +1,4 @@
-//! ansi.rs — ANSI/VT100 escape-sequence interpreter for the kernel console.
+//! ANSI/VT100 escape-sequence interpreter for the kernel console.
 //!
 //! Full-screen terminal programs (editors like oed, monitors like osysmon)
 //! drive the console with escape sequences. The kernel's fb_term provides a
@@ -6,6 +6,12 @@
 //! commands and applies them to the grid, giving real cursor addressing,
 //! colors, erase operations and scroll regions — enough for nano/vim/btop
 //! style UIs without any userspace framebuffer access.
+//!
+//! Module layout (responsibility split):
+//! - `mod.rs` (this file): parser state machine and terminal state
+//!   (cursor position, SGR attributes, scroll region, saved cursor).
+//! - [`render`]: pixel-level rendering — character drawing, erase
+//!   operations, region scrolling and the software cursor block.
 //!
 //! Supported sequences:
 //!   CSI n A/B/C/D  — cursor up/down/forward/back
@@ -24,10 +30,12 @@
 //!   ESC D          — index (scroll up inside region)
 //!   ESC E          — next line
 
+pub(crate) mod render;
+
 use crate::drivers::fb;
 
-const FONT_W: usize = 8;
-const FONT_H: usize = 16;
+pub(crate) const FONT_W: usize = 8;
+pub(crate) const FONT_H: usize = 16;
 
 pub struct AnsiTerm {
     /// Grid dimensions in cells.
@@ -47,8 +55,8 @@ pub struct AnsiTerm {
     save_fg: u32,
     save_bg: u32,
     /// Scroll region (inclusive, 0-based).
-    top: usize,
-    bot: usize,
+    pub(super) top: usize,
+    pub(super) bot: usize,
     /// Parser state.
     state: ParseState,
     /// Numeric parameters of the active CSI sequence.
@@ -58,7 +66,6 @@ pub struct AnsiTerm {
     private: bool,
     /// Cursor visible.
     pub cursor_visible: bool,
-    /// Last output position for cursor redraw invalidation.
     /// Cursor position at the previous console_cursor() call (reserved for
     /// diff-based redraw; currently write-only state).
     #[allow(dead_code)]
@@ -72,6 +79,12 @@ enum ParseState {
     Ground,
     Esc,
     Csi,
+}
+
+impl Default for AnsiTerm {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl AnsiTerm {
@@ -177,12 +190,11 @@ impl AnsiTerm {
                     self.state = ParseState::Ground;
                 }
                 b'(' | b')' => {
-                    /* charset designation — swallow next byte */
-                    self.state = ParseState::Esc; /* stay: handled below via Csi? simple: ignore */
+                    // Charset designation — swallow next byte.
                     self.state = ParseState::Ground;
                 }
                 b']' => {
-                    /* OSC — ignore until BEL/ST (simplified: swallow) */
+                    // OSC — ignore until BEL/ST (simplified: swallow).
                     self.state = ParseState::Ground;
                 }
                 _ => self.state = ParseState::Ground,
@@ -341,6 +353,8 @@ impl AnsiTerm {
         self.bg = self.save_bg;
     }
 
+    /// Move the cursor down one line, scrolling the region up when at its
+    /// bottom edge.
     fn index(&mut self) {
         if self.cur_row == self.bot {
             self.scroll_up();
@@ -349,6 +363,8 @@ impl AnsiTerm {
         }
     }
 
+    /// Move the cursor up one line, scrolling the region down when at its
+    /// top edge.
     fn reverse_index(&mut self) {
         if self.cur_row == self.top {
             self.scroll_down();
@@ -359,138 +375,6 @@ impl AnsiTerm {
 
     fn newline(&mut self) {
         self.index();
-    }
-
-    /// Scroll the region up by one line (content moves up).
-    fn scroll_up(&mut self) {
-        let (_, pitch, bpp, _, base) = fb_info();
-        if bpp != 32 || base == 0 {
-            return;
-        }
-        let bytes_pp = 4;
-        let row_bytes = pitch * FONT_H;
-        // Move rows top+1..=bot up by one.
-        for row in self.top..self.bot {
-            let dst = base + row * row_bytes;
-            let src = base + (row + 1) * row_bytes;
-            unsafe {
-                core::ptr::copy_nonoverlapping(src as *const u8, dst as *mut u8, row_bytes);
-            }
-        }
-        // Clear the bottom row of the region.
-        let dst = base + self.bot * row_bytes;
-        clear_row_bytes(dst, row_bytes, self.bg);
-        let _ = bytes_pp;
-    }
-
-    /// Scroll the region down by one line (content moves down).
-    fn scroll_down(&mut self) {
-        let (_, pitch, bpp, _, base) = fb_info();
-        if bpp != 32 || base == 0 {
-            return;
-        }
-        let row_bytes = pitch * FONT_H;
-        let mut row = self.bot;
-        while row > self.top {
-            let dst = base + row * row_bytes;
-            let src = base + (row - 1) * row_bytes;
-            unsafe {
-                core::ptr::copy_nonoverlapping(src as *const u8, dst as *mut u8, row_bytes);
-            }
-            row -= 1;
-        }
-        let dst = base + self.top * row_bytes;
-        clear_row_bytes(dst, row_bytes, self.bg);
-    }
-
-    fn erase_display(&mut self, mode: u32) {
-        match mode {
-            0 => {
-                self.erase_line(0);
-                for row in (self.cur_row + 1)..self.rows {
-                    self.clear_row(row);
-                }
-            }
-            1 => {
-                self.erase_line(1);
-                for row in 0..self.cur_row {
-                    self.clear_row(row);
-                }
-            }
-            _ => {
-                for row in 0..self.rows {
-                    self.clear_row(row);
-                }
-            }
-        }
-    }
-
-    fn erase_line(&mut self, mode: u32) {
-        let (w, h) = (FONT_W, FONT_H);
-        let x0 = match mode {
-            1 => 0,
-            _ => self.cur_col * w,
-        };
-        let x1 = match mode {
-            0 | 1 => self.cols * w,
-            _ => (self.cur_col + 1) * w,
-        };
-        let y = self.cur_row * h;
-        for x in x0..x1.min(fb::width()) {
-            for dy in 0..h.min(fb::height() - y) {
-                fb::put_pixel_blend(x, y + dy, self.bg);
-            }
-        }
-        if mode == 1 {
-            // keep cursor cell drawn? Classic: erase up to AND including cursor.
-            self.draw_char_at(self.cur_row, self.cur_col, b' ');
-        }
-    }
-
-    fn clear_row(&mut self, row: usize) {
-        let (_, pitch, bpp, _, base) = fb_info();
-        if bpp == 32 && base != 0 {
-            clear_row_bytes(base + row * pitch * FONT_H, pitch * FONT_H, self.bg);
-        } else {
-            for x in 0..self.cols * FONT_W {
-                for dy in 0..FONT_H {
-                    fb::put_pixel_blend(x, row * FONT_H + dy, self.bg);
-                }
-            }
-        }
-    }
-
-    fn print_char(&mut self, c: u8) {
-        self.draw_char_at(self.cur_row, self.cur_col, c);
-        self.cur_col += 1;
-        if self.cur_col >= self.cols {
-            self.cur_col = 0;
-            self.index();
-        }
-    }
-
-    fn draw_char_at(&mut self, row: usize, col: usize, c: u8) {
-        let (fg, bg) = if self.reverse {
-            (self.bg, self.fg)
-        } else {
-            (self.fg, self.bg)
-        };
-        fb::draw_char(col * FONT_W, row * FONT_H, c, fg, bg);
-    }
-
-    /// Draw the cursor block at the current position (called by the kernel
-    /// after console writes when the cursor is visible).
-    pub fn draw_cursor(&mut self) {
-        if !self.cursor_visible {
-            return;
-        }
-        // Invert the cell by re-drawing a block glyph over the position.
-        let (fg, bg) = if self.reverse {
-            (self.bg, self.fg)
-        } else {
-            (self.fg, self.bg)
-        };
-        fb::draw_char(self.cur_col * FONT_W, self.cur_row * FONT_H, b' ', bg, fg);
     }
 }
 
@@ -505,20 +389,6 @@ fn sgr_color(idx: u32, bright: bool) -> u32 {
         5 => fb::COL_MAGENTA,
         6 => fb::COL_CYAN,
         _ => fb::COL_WHITE,
-    }
-}
-
-fn fb_info() -> (usize, usize, usize, usize, usize) {
-    fb::info()
-}
-
-fn clear_row_bytes(dst: usize, len: usize, color: u32) {
-    let bytes = color.to_le_bytes();
-    unsafe {
-        let d = dst as *mut u8;
-        for i in 0..len {
-            *d.add(i) = bytes[i & 3];
-        }
     }
 }
 
