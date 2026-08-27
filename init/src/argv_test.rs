@@ -1,6 +1,8 @@
 #![no_std]
 #![no_main]
-#![allow(clippy::missing_safety_doc, non_snake_case, unsafe_op_in_unsafe_fn)]
+// TODO(2026-08-27): bin-root allow — raw syscall asm runs inside `unsafe fn`
+// wrappers (no_std, per-bin compile); re-evaluate on toolchain/edition bump.
+#![allow(unsafe_op_in_unsafe_fn)]
 
 mod syscalls;
 
@@ -26,6 +28,10 @@ fn write_dec(v: usize) {
 }
 
 #[unsafe(no_mangle)]
+/// # Safety
+///
+/// Process entry point: called directly by the kernel; `a0`/`a1` are the
+/// raw argument registers as passed by the kernel at the ELF entry address.
 pub unsafe extern "C" fn _start(a0: usize, a1: usize) -> ! {
     let msg = b"argv_test: a0=";
     unsafe {

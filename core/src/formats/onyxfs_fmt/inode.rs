@@ -5,7 +5,7 @@ use super::superblock::ONYFS_DIRECT_BLKS;
 
 /// OnyxFS v2 inode — 128 bytes (expanded from 64).
 /// Added: timestamps (crtime, mtime, atime, ctime), uid, gid, nlink, double_indirect.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct OnyfsInode {
     pub mode: u32,
     pub size: u64,                        // v2: 64-bit file size (was 32-bit)

@@ -1,6 +1,8 @@
 #![no_std]
 #![no_main]
-#![allow(unsafe_op_in_unsafe_fn, non_snake_case, clippy::missing_safety_doc)]
+// TODO(2026-08-27): bin-root allow — raw syscall asm runs inside `unsafe fn`
+// wrappers (no_std, per-bin compile); re-evaluate on toolchain/edition bump.
+#![allow(unsafe_op_in_unsafe_fn)]
 
 #[path = "../auth/mod.rs"]
 mod auth;
@@ -64,6 +66,10 @@ fn exec_shell(username: &[u8], shell_path: &[u8]) -> i64 {
 }
 
 #[unsafe(no_mangle)]
+/// # Safety
+///
+/// Process entry point: called directly by the kernel from the ELF entry
+/// address; the stack is freshly initialized per the RISC-V calling convention.
 pub unsafe extern "C" fn _start() -> ! {
     syscalls::write(1, b"\nOnyxOS Login\n".as_ptr(), 14);
 
@@ -176,11 +182,12 @@ pub unsafe extern "C" fn _start() -> ! {
         // single-round scheme, rewrite it in the current iterated $5$
         // format — but only from a root session, since rewriting
         // /etc/shadow needs write access (ACL allows uid==0).
-        if outcome == auth::VerifyOutcome::OkLegacy && users[user_idx].uid == 0 {
-            if auth::update_shadow_password(username, password).is_ok() {
-                const MIG_MSG: &[u8] = b"[login] shadow entry migrated to iterated $5$ format\n";
-                syscalls::write(1, MIG_MSG.as_ptr(), MIG_MSG.len());
-            }
+        if outcome == auth::VerifyOutcome::OkLegacy
+            && users[user_idx].uid == 0
+            && auth::update_shadow_password(username, password).is_ok()
+        {
+            const MIG_MSG: &[u8] = b"[login] shadow entry migrated to iterated $5$ format\n";
+            syscalls::write(1, MIG_MSG.as_ptr(), MIG_MSG.len());
         }
 
         fails = 0;

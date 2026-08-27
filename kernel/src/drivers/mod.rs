@@ -1,35 +1,31 @@
-// pub mod canaan_eth; // replaced by gmac
-pub mod cpufreq;
-pub mod display;
-pub mod dma;
-pub mod edid;
+//! Device drivers, grouped by subsystem:
+//! - `bus`      — transport controllers (PCIe, I2C, SPI, GPIO, SDHCI, USB)
+//! - `video`    — framebuffer/panel/display stack
+//! - `net`      — Ethernet MACs
+//! - `platform` — SoC platform devices (clocks, power, DMA, PLIC, ...)
+//! - `entropy`  — entropy sources
+//! - `input`    — human input devices
+//! - `virtio`   — virtio core and device drivers
+//!
+//! Every driver is re-exported here so the historical
+//! `crate::drivers::<name>` paths keep working unchanged.
+pub mod bus;
 pub mod entropy;
-pub mod fb;
-pub mod fb_term;
-pub mod gmac;
-pub mod gpio;
-pub mod hwrand;
-pub mod i2c;
 pub mod input;
-pub mod led;
-pub mod mipi_dsi;
-pub mod otp;
-pub mod pci;
-pub mod pcie;
-pub mod plic;
-pub mod power;
-pub mod ps2;
-pub mod rtc;
-pub mod sdhci;
-pub mod spi;
-pub mod syscon;
+pub mod net;
+pub mod platform;
 pub mod uart;
-pub mod usb;
+pub mod video;
 pub mod virtio;
 pub mod virtio_console;
 pub mod virtio_gpu;
 pub mod virtio_input;
 pub mod virtio_net;
-pub mod virtio_req;
-pub mod virtio_rng;
-pub mod watchdog;
+
+pub use bus::{gpio, i2c, pci, pcie, sdhci, spi, usb};
+pub use entropy::hwrand;
+pub use input::ps2;
+pub use net::gmac;
+pub use platform::{cpufreq, dma, led, otp, plic, power, rtc, syscon, watchdog};
+pub use video::{display, edid, fb, fb_term, mipi_dsi};
+pub use virtio::{virtio_req, virtio_rng};

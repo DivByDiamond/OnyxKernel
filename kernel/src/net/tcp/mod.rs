@@ -2,6 +2,8 @@
 // tcp_checksum_ok directly.
 pub(crate) mod conn;
 mod handle;
+#[cfg(test)]
+mod tests;
 
 pub use handle::handle_tcp;
 pub use handle::{tcp_close, tcp_connect, tcp_recv, tcp_send};

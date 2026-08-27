@@ -12,6 +12,18 @@ fn test_slab_sizes() {
 }
 
 #[test]
+fn test_slab_class_idx() {
+    // Boundary behaviour of the pure class-selection logic: exact class
+    // sizes map to their own class, one byte over spills to the next.
+    assert_eq!(pmm::slab::class_idx(1), Some(0));
+    assert_eq!(pmm::slab::class_idx(64), Some(0));
+    assert_eq!(pmm::slab::class_idx(65), Some(1));
+    assert_eq!(pmm::slab::class_idx(256), Some(1));
+    assert_eq!(pmm::slab::class_idx(1024), Some(2));
+    assert_eq!(pmm::slab::class_idx(1025), None);
+}
+
+#[test]
 fn test_kernel_heap_reserve() {
     assert_eq!(KERNEL_HEAP_RESERVE, 4 * 1024 * 1024);
 }

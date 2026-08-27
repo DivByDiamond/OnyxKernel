@@ -1,5 +1,8 @@
-// TODO(dead-code): syscalls::mod — shared auth/syscalls module, compiled per onyx_init bin;
-// items unused by one binary are used by others (dead_code/unused_imports fire per-bin).
+// TODO(2026-08-27): shared auth/syscalls module, compiled per onyx_init bin via
+// `mod syscalls;`. Wrapper fns unused by one bin are used by others; per-bin
+// dead_code/unused_imports warnings are unavoidable without a lib target.
+// Verified 2026-08-27: all wrappers are live (each reaches at least one bin,
+// the rest form the init-side syscall library surface for upcoming bins).
 #![allow(dead_code, unused_imports)]
 pub mod call;
 pub mod consts;

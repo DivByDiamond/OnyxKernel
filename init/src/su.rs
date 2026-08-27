@@ -1,6 +1,8 @@
 #![no_std]
 #![no_main]
-#![allow(unsafe_op_in_unsafe_fn, non_snake_case, clippy::missing_safety_doc)]
+// TODO(2026-08-27): bin-root allow — raw syscall asm runs inside `unsafe fn`
+// wrappers (no_std, per-bin compile); re-evaluate on toolchain/edition bump.
+#![allow(unsafe_op_in_unsafe_fn)]
 
 use core::arch::asm;
 
@@ -12,6 +14,10 @@ const TIOCSRAW: u64 = 0x5421;
 const TIOCRRAW: u64 = 0x5422;
 
 #[unsafe(no_mangle)]
+/// # Safety
+///
+/// Process entry point: called directly by the kernel from the ELF entry
+/// address; the stack is freshly initialized per the RISC-V calling convention.
 pub unsafe extern "C" fn _start(argc: usize, argv: *const u64, _envp: *const u64) -> ! {
     let mut target_user = [0u8; 32];
     let mut target_len = 0usize;

@@ -188,10 +188,18 @@ pub unsafe fn free(pa: u64) {
 ///
 /// Same as [`free`] plus: caller must hold `pmm_lock()`.
 pub(super) unsafe fn free_unlocked(pa: u64) {
-    // SAFETY: `pa_to_idx` only reads `G_PMM` fields; the index is
-    // range-checked against `total_pages` before the bit is cleared.
+    // SAFETY: the address is page-aligned and at or above `G_PMM.base`
+    // before `pa_to_idx` runs, so the index computation cannot underflow;
+    // the index is range-checked against `total_pages` before the bit is
+    // cleared.
     unsafe {
-        let idx = pa_to_idx(pa as usize);
+        let pa = pa as usize;
+        // Refuse non-page-aligned or below-base addresses: pa_to_idx would
+        // either round down onto a neighbouring live page or underflow.
+        if pa & (PAGE_SIZE - 1) != 0 || pa < G_PMM.base {
+            return;
+        }
+        let idx = pa_to_idx(pa);
         if idx < G_PMM.total_pages && bm_get(idx) {
             bm_clr(idx);
         }

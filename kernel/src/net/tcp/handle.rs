@@ -16,6 +16,10 @@ const ACK: u8 = 0x10;
 /// Total inbound segments dropped for a bad checksum (logged once).
 static BAD_CKSUM: AtomicU32 = AtomicU32::new(0);
 
+/// Segment commands the pure transition core can request from the caller.
+pub(super) const SEG_ACK: u8 = 1;
+pub(super) const SEG_FIN_ACK: u8 = 2;
+
 pub unsafe fn tcp_connect(dst_ip: [u8; 4], port: u16) -> KResult<usize> {
     unsafe {
         let cid = alloc_conn().ok_or(Errno::Busy)?;
@@ -100,7 +104,7 @@ pub unsafe fn tcp_close(cid: usize) {
 /// Free acked bytes from the send window: advance snd_una and drop the
 /// leading `acked` bytes of send_buf. A bogus ACK (outside
 /// [snd_una, snd_nxt]) is ignored.
-fn drain_acked(c: &mut super::conn::TcpConn, ack: u32) {
+pub(super) fn drain_acked(c: &mut super::conn::TcpConn, ack: u32) {
     let outstanding = c.snd_nxt.wrapping_sub(c.snd_una);
     let acked = ack.wrapping_sub(c.snd_una);
     if acked == 0 || acked > outstanding || acked as usize > c.send_len {
@@ -112,17 +116,29 @@ fn drain_acked(c: &mut super::conn::TcpConn, ack: u32) {
     c.snd_una = ack;
 }
 
-fn process_segment(c: &mut super::conn::TcpConn, seq: u32, ack: u32, flags: u8, payload: &[u8]) {
+/// Pure TCP state-machine transition core (no I/O, host-testable). Mutates
+/// the connection (state, seq vars, recv buffer) and returns up to two
+/// segment commands (SEG_ACK / SEG_FIN_ACK) the caller must emit in order.
+/// `now` is the uptime in microseconds, used for the TIMEWAIT deadline.
+pub(super) fn tcp_transition(
+    c: &mut super::conn::TcpConn,
+    seq: u32,
+    ack: u32,
+    flags: u8,
+    payload: &[u8],
+    now: u64,
+) -> [u8; 2] {
     match c.state {
         1 if (flags & (SYN | ACK)) == (SYN | ACK) => {
             c.state = 2;
             c.snd_nxt = ack;
             c.snd_una = ack;
             c.rcv_nxt = seq.wrapping_add(1);
-            send_tcp_seg(c, ACK, &[]);
+            [SEG_ACK, 0]
         }
         2 | 4 => {
             drain_acked(c, ack);
+            let mut out = [0u8; 2];
             // In-sequence data only.
             if seq == c.rcv_nxt && !payload.is_empty() {
                 let n = payload.len().min(BUF_SIZE - c.recv_len);
@@ -132,27 +148,40 @@ fn process_segment(c: &mut super::conn::TcpConn, seq: u32, ack: u32, flags: u8, 
                 }
                 c.recv_len += n;
                 c.rcv_nxt = c.rcv_nxt.wrapping_add(n as u32);
-                send_tcp_seg(c, ACK, &[]);
+                out[0] = SEG_ACK;
             }
             // FIN must land exactly at rcv_nxt to be accepted.
             if flags & FIN != 0 && seq.wrapping_add(payload.len() as u32) == c.rcv_nxt {
                 c.rcv_nxt = c.rcv_nxt.wrapping_add(1);
                 if c.state == 2 {
                     c.state = 4;
-                    send_tcp_seg(c, FIN | ACK, &[]);
+                    out[1] = SEG_FIN_ACK;
                 } else {
                     // Retransmitted FIN during TIMEWAIT: re-ACK it.
-                    send_tcp_seg(c, ACK, &[]);
+                    out[1] = SEG_ACK;
                 }
-                c.tw_deadline_us = now_us() + TIMEWAIT_US;
+                c.tw_deadline_us = now + TIMEWAIT_US;
             }
+            out
         }
         3 if flags & ACK != 0 => {
             drain_acked(c, ack);
             c.state = 4;
-            c.tw_deadline_us = now_us() + TIMEWAIT_US;
+            c.tw_deadline_us = now + TIMEWAIT_US;
+            [0, 0]
         }
-        _ => {}
+        _ => [0, 0],
+    }
+}
+
+fn process_segment(c: &mut super::conn::TcpConn, seq: u32, ack: u32, flags: u8, payload: &[u8]) {
+    let out = tcp_transition(c, seq, ack, flags, payload, now_us());
+    for cmd in out {
+        match cmd {
+            SEG_ACK => send_tcp_seg(c, ACK, &[]),
+            SEG_FIN_ACK => send_tcp_seg(c, FIN | ACK, &[]),
+            _ => {}
+        }
     }
 }
 

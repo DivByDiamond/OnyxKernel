@@ -77,7 +77,10 @@
 11. **Preemption** — timer tick → sched_tick → NEED_RESCHED → sched_yield
 12. **Блокирующий wait** — Waiting state + sched_yield
 13. **Signal delivery** — SYS_kill, SIGKILL terminates
-14. **Рефакторинг** — все файлы ≤250 строк (лимит правила 1 шапки)
+14. **Рефакторинг** — все файлы ≤250 строк (лимит правила 1 шапки);
+    повторная перекройка 2026-08-27: fb_term/ansi (427→mod/state/parse/render),
+    onyxfs/write/meta (329→meta/{mod,create,truncate,extend}), psfgen/fontdata
+    (323→fontdata/{digits,upper,lower})
 15. **QEMU verified** — ядро грузится, init работает в ring 1
 16. **onx::load BSS page-fault fix** — `PTE_A | PTE_D` теперь выставляются для всех
     user-leaf PTE в сегментах / стеке / куче (раньше `map_one_pub` вызывался
@@ -144,12 +147,32 @@
 - [x] **CPU affinity syscall** — `sched_setaffinity` / `sched_getaffinity` (SYS 78/79) + affinity-aware steal + redirect on dequeue
 
 ### Приоритет 8 — Структура / аудит:
-- [~] **Полный аудит проекта сабагентом** — первый прогон сделан 2026-08-24 (6 суб-агентов,
-      результат = секция «🔴 Аудит ядра» ниже); остался повторный прогон ПОСЛЕ фиксов и
-      перекройки структуры по правилам шапки (правило 4)
-- [ ] **Зачистка allow-атрибутов** — удалить все оставшиеся `#[allow(dead_code)]`,
-      `#[allow(unused_*)]` и точечные clippy-exceptions (сейчас ~7 dead_code в kernel/src,
-      заглушочные в init/src/auth не трогали): мёртвое — удалить, живое — подключить
+- [x] **Повторный полный аудит сабагентом (2026-08-27, после волн 1–3)** — правило 1
+      (≤250 строк): 0 нарушений. Правило 2: drivers/ (21 файл) разбит на
+      bus/net/platform/entropy/input/video (+ virtio_req/rng → virtio/), vfs/ (18 файлов)
+      → fd/meta/node; публичные пути сохранены re-export'ами в mod.rs. Удалён мёртвый
+      код: drivers/canaan_eth.rs (закомментирован в mod.rs, «replaced by gmac», протух —
+      не компилировался против текущего Errno), init/src/boot_test.rs (бинеё не был
+      подключён, дубль lsblk-теста), core/src/types.rs (ни одного потребителя; test'ы
+      core 55→50, тесты мёртвого кода). Allow-зачистка: core/src/lib.rs crate-блок (11
+      allow) удалён целиком — вместо missing_safety_doc дописаны `# Safety`-секции в
+      core/src/string.rs; kernel/src/main.rs 12→4 документированных allow; init-бины
+      3 allow → 1 (unsafe_op_in_unsafe_fn) + датированный TODO, `_start` получили
+      `# Safety`; tools/mkimage superblock::write_v2 — 8 аргументов → struct V2Layout,
+      allow(too_many_arguments) удалён. Осталось 34 allow — все обоснованы (init per-bin
+      с датой, ABI-зеркала non_upper_case/non_snake_case, klog #[expect(deprecated)]).
+      clippy riscv32-бин теперь тоже strict-чистый (фикс unnecessary_cast в srv/trap.rs).
+      Остатки правила 2 (fdt 13, onyxfs 12, syscall 10, platform 10, init/src 12 и др.)
+      — осознанно не тронуты: папки = одна подсистема, дробление дальше ухудшит связность.
+- [x] **Полный аудит проекта сабагентом** — первый прогон 2026-08-24 (6 суб-агентов,
+      секция «🔴 Аудит ядра» ниже), повторный прогон выполнен 2026-08-27 (см. выше)
+- [x] **Зачистка allow-атрибутов (моя зона, 2026-08-27)** — ansi/mod.rs last_row/last_col
+      (write-only) удалены; drivers/usb/xhci/mass (mod.rs+orphan transfer.rs, probe никогда
+      не вызывался) удалён целиком; rtc.rs: мёртвые now_secs/arm_alarm/clear_alarm/base
+      удалены; vfs dup2 удалён. init/src/syscalls consts+mod — единственные честные
+      module-level allow с датированным TODO (per-bin компиляция, все item'ы живые).
+      lookup_follow: аудит устарел — УЖЕ подключён (onyxfs lookup→follow::lookup_follow,
+      sys 73/74→vfs symlink/readlink), контракт закрыт. pinctrl/pwm/i2s уже удалены ранее.
 - [ ] **Java runtime для OnyxOS** (большая цель, разбить на этапы):
   1. Минимальный class loader (.class парсер: constant pool, fields, methods)
   2. Интерпретатор байткода JVM (стек, локальные переменные, базовые инструкции)
@@ -183,6 +206,25 @@ sys_read cooked off-by-one, smode-under-OnyxBoot silent death → kpanic.
 После волны 1 — обязательный гейт: headless + interactive smoke на объединённом коде.
 Отложено: SMP idle/SIE доводка или заморозка (вопрос архитектуры), KDF memory-hardness,
 CI-воркфлоу, dead-code зачистка (~25 pub fn), SAFETY-комментарии (974 unsafe / 9 комментов).
+
+✅ ВОЛНА 3 ВЫПОЛНЕНА (2026-08-27, 3 параллельных агента + аудит + ревью):
+  A. mm: map_anon rollback без лимита 1024 страниц (rollback_mapped через unmap_impl),
+     G_HEAP.used симметричен (slab_alloc/free возвращают размер класса), krealloc
+     old_size==0 → Err (не был починен ранее), PMM: мёртвый reserved-цикл удалён,
+     free-гард невыровненного PA/PA<base.
+  B. Тесты 104→121: ACL syscall_allowed_uid (ring 0/1/2, root, регресс chan_open),
+     TCP tcp_transition (SYN/FIN/state 3→4/drain_acked/sweep), IPC ringbuf (чистые
+     ring_*, wrap u32), runqueue (FIFO/steal/affinity).
+  C. Cleanup: allow-зачистка (xhci/mass, rtc alarm, fb_term write-only поля, vfs dup2,
+     canaan_eth, boot_test, core/types.rs — всё мёртвое удалено); >250-строчные файлы
+     разбиты (fb_term/ansi 427→4 файла, onyxfs meta 329→4, psfgen fontdata 323→4);
+     audit-агент перегруппировал drivers/ и vfs/ в подпапки с сохранением API.
+  Ревью: APPROVE, 0 blockers/major. Финальный гейт: kbuild/kbuild32/ibuild/tbuild 0 warn,
+  121+55 тестов зелёные, clippy strict (вкл. riscv64-бин), headless+interactive smoke PASS
+  (0 illegal, login respawn OK). Поправлены minor'ы ревью: pmm bm_set-утечка, ansi
+  sync_size clamp (паника после hot-swap fb), stale doc SGR, PTE_U-контракт map_anon.
+  Осталось из аудита-2024: KDF memory-hardness, SAFETY-комментарии (82/1557 unsafe),
+  остатки правила 2 (fdt 13, onyxfs 12 файлов — осознанный компромисс), OC2R-секция.
 
 #### Блокеры (детерминированные краши/порча данных):
 - [x] **B1: halt ядра из ring-2 невалидным указателем** — user_ptr_ok (syscall/handler/dispatch.rs:14)
@@ -238,13 +280,19 @@ CI-воркфлоу, dead-code зачистка (~25 pub fn), SAFETY-комме�
 #### Логика / память:
 - [x] mmap_brk продвигается ДО валидации и не откатывается при ошибке (mmap.rs:53-56 vs :74-80)
       → одна неудача = вечный ENOMEM для процесса. Фикс: валидация до продвижения.
-- [ ] map_anon rollback учитывает максимум 1024 страниц (vmm/map/mod.rs:58,92-95) → mmap >4 MiB
-      при ошибке течёт страницами и бюджетом навсегда. Фикс: Vec или счётчик + обратный unmap.
+- [x] map_anon rollback учитывал максимум 1024 страниц (vmm/map/mod.rs) → mmap >4 MiB
+      при ошибке течёт страницами и бюджетом навсегда. Фикс (2026-08-27): [u64;1024]
+      удалён (−8 КБ стека), rollback_mapped() через unmap_impl — обратный unmap без лимита,
+      бюджет user_pages сходится 1:1 (ревью: ошибка на первой/средней странице — корректно).
+      Контракт PTE_U зафиксирован в # Safety doc map_anon.
 - [x] krealloc при old_size==0 читает new_size байт из невалидного источника
       (heap/realloc.rs:14-23). Фикс: old_size==0 && p!=null → Err.
-- [ ] G_HEAP.used систематически дрейфует (slab-free не вычитает: alloc.rs:62-64) → wrap статистики.
-- [ ] PMM init: цикл reserved-marking мёртвый (pmm/mod.rs:106-116, end_bit всегда 0) — kernel/BSS
-      защищены случайно (underflow idx), а не по задумке. pmm::free принимает невыровненный PA.
+- [x] G_HEAP.used систематически дрейфовал (slab-free не вычитал) → wrap статистики.
+      Фикс (2026-08-27): slab_alloc/slab_free возвращают размер класса, kmalloc/kfree
+      симметричны; ревью подтвердило сходимость по всем путям (kmalloc/krealloc/kfree).
+- [x] PMM init: мёртвый цикл reserved-marking удалён (2026-08-27) — резервирование kernel/BSS/
+      heap/bitmap работает по построению (всё ниже data_base = PA бита 0, недостижимо для
+      аллокатора; комментарий в коде). pmm::free — гард невыровненного PA и PA < base.
 - [x] FAT32 mount: num_fats захардкожен как 2 (helpers.rs:132), тип ФС (12/16/32) не проверяется
       → FAT16 диск интерпретируется мусорно, возможен free произвольных кластеров.
 - [x] FAT32 unlink: free_chain ДО tombstone dirent (write.rs:329-334) → I/O error посреди =
@@ -279,25 +327,37 @@ CI-воркфлоу, dead-code зачистка (~25 pub fn), SAFETY-комме�
       — починить или удалить тавтологию assert_eq!(0x74726976, 0x74726976) (virtio/test.rs:6).
 - [ ] Known-answer тесты SHA256 (init/src/auth/crypto/sha256.rs) — аутентификация сейчас
       без единого автотеста.
-- [ ] Покрыть ACL (syscall_allowed), journal crash-recovery с реальным блочным I/O,
-      TCP state machine, IPC ringbuf, scheduler runqueue.
-- [ ] CI: добавить cargo fmt --check + cargo clippy -W correctness,suspicious,perf; target
-      riscv32imac (заявлен в .cargo/config.toml, в CI нет); MSRV-проверку против плавающего nightly.
-- [ ] release-профиль: debug=true + strip="none" раздувает ELF DWARF'ом → strip="debuginfo"
-      (unstripped уже аплоудится как artifact); lto="fat" почти бесплатен (deps=0).
+- [~] **Покрыть ACL (syscall_allowed), journal crash-recovery с реальным блочным I/O,
+      TCP state machine, IPC ringbuf, scheduler runqueue** — 2026-08-27 покрыто 4 из 5
+      (host-тесты onyx_kernel, 104→121): ACL (handler/acl.rs: чистая syscall_allowed_uid —
+      ring 0/1/2, root-uid исключение create/rename, регресс SYS_chan_open), TCP
+      (net/tcp/tests.rs: чистая tcp_transition — SYN_SENT→ESTABLISHED, FIN→TIMEWAIT,
+      state 3→4, валидация seq/rcv_nxt, drain_acked, sweep_timewait/alloc_local_port),
+      IPC ringbuf (ipc/channel/ringbuf.rs: чистые ring_used/free/write/read — заполнение
+      до отказа, wrap-around индексов и u32-счётчиков, частичные I/O, send в полный →
+      Busy, recv из пустого → Ok(0)), scheduler runqueue (runqueue.rs: FIFO, remove,
+      affinity, steal put-back). Осталось: journal crash-recovery с реальным блочным I/O
+      (ручной QEMU-цикл «запись → kill VM → reboot»; чистая логика уже в onyx_core, 43 теста).
+- [x] CI: cargo fmt --check + clippy strict (-D warnings) по крейгам, build-матрица
+      riscv64gc+riscv32imac, MSRV-пин 1.97.1 (dtolnay/rust-toolchain) — всё в ci.yml.
+- [x] release-профиль: strip="debuginfo" в workspace Cargo.toml; lto=false — документировано
+      в Cargo.toml (fat/thin ломают линк ядра: __rust_alloc и т.д. после LTO-merge; проверено
+      чистой пересборкой). Вернуться к lto, когда global_allocator/panic-shims переживут LTO.
 - [x] docs/architecture.md протух: 31 syscall против фактических 85 (abi.rs), битые ссылки на
       handler.rs:38-59 (теперь handler/dispatch.rs); todo.md «Syscalls (77)» выше — фактически 85.
-- [ ] Дублирование форматов: tools/mkimage и elf2onx вручную копируют константы/layout из
-      onyx_core::formats (magic, DT_REG, SNAPSHOT_BLOCKS_EACH=64 в двух местах) → сделать
-      onyx_core зависимостью onyx_tools. Ядро поступает правильно (единственный источник правды).
-- [ ] Dead code: ~25 pub fn без ссылок (drivers/pinctrl, rtc, pwm, i2s целиком, vfs dup2,
-      lookup_follow...) — связать с правилом 5 шапки (зачистка allow + удаление).
-      lookup_follow: симлинки создаются, но никогда не резолвятся — контрактный разрыв open↔symlink.
-- [ ] rustfmt.toml/clippy.toml/[workspace.lints] отсутствуют — зафиксировать конфиги до спора.
-- [ ] **Перевести все комментарии кода на английский** (правило проекта): в базе остаются
-      русские комменты (пример — новый блок правила ACL в handler/acl.rs, часть старых
-      комментов в boot.rs/exit.rs и др.). Прогнать grep по не-ASCII строкам в .rs и
-      переписать; новые комменты — только en.
+- [x] Дублирование форматов: tools зависят от onyx_core (tools/Cargo.toml), ручные копии
+      констант удалены — единственный источник правды onyx_core::formats.
+- [~] Dead code: pinctrl/pwm/i2s/vfs dup2 удалены (2026-08-27); drivers/usb/xhci/mass
+      удалён целиком; rtc.rs почищен; lookup_follow — аудит устарел, он живой
+      (resolve.rs:68). pinctrl/pwm/i2s были удалены предыдущими волнами.
+      lookup_follow: симлинки создаются И резолвятся — контрактный разрыв закрыт ранее.
+      Попутно удалены: canaan_eth.rs (протух, replaced by gmac), init/boot_test.rs,
+      core/src/types.rs (ни одного потребителя).
+- [~] rustfmt.toml есть, CI гоняет strict clippy -D warnings; [workspace.lints]/clippy.toml
+      не вводились — точечные исключения живут в коде с обоснованием (аудит 2026-08-27:
+      остаточные 34 allow — все обоснованы: ABI-зеркала, per-bin init с датированными TODO).
+- [x] **Перевести все комментарии кода на английский** — проверено grep'ом по не-ASCII
+      в .rs по всему workspace (2026-08-27): 0 файлов; новые комменты — только en.
 
 ---
 

@@ -136,6 +136,8 @@ pub unsafe fn dev(idx: usize) -> *mut VirtioBlkDev {
 }
 
 pub mod queue;
+pub mod virtio_req;
+pub mod virtio_rng;
 
 pub use queue::{init, probe};
 

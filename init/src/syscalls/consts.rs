@@ -1,5 +1,8 @@
-// TODO(dead-code): syscalls::consts — syscall numbers shared across onyx_init bins;
-// only a subset is referenced by any single binary.
+// TODO(2026-08-27): syscall-number table shared by every onyx_init bin via
+// `mod syscalls;`. Each bin is compiled separately and uses only a subset,
+// so per-bin dead_code warnings on the rest are unavoidable without a lib
+// target. Verified 2026-08-27: every const is used by at least one bin —
+// nothing here is dead. Revisit if init gains a shared [lib] target.
 #![allow(dead_code)]
 
 pub const SYS_WRITE: u64 = 1;

@@ -1,0 +1,14 @@
+use crate::fs::onyxfs;
+use crate::fs::vfs::{FdToken, Fs, fd_check, fd_get};
+use onyx_core::errno::{Errno, KResult};
+
+pub unsafe fn fsync(token: FdToken) -> KResult<()> {
+    unsafe {
+        let idx = fd_check(token)?;
+        let fd = fd_get(idx);
+        match fd.fs {
+            Fs::Onyx => onyxfs::fsync(fd.ino),
+            _ => Err(Errno::NoSys),
+        }
+    }
+}

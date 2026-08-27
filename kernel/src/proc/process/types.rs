@@ -1,5 +1,6 @@
 use crate::arch::trap_frame::TrapFrame;
 
+#[cfg(test)]
 use core::ptr;
 
 pub const PROC_RING_KERNEL: u8 = 0;
@@ -99,8 +100,10 @@ pub struct Proc {
 }
 
 impl Proc {
-    #[expect(dead_code)]
-    const fn new() -> Self {
+    /// Test-only zero constructor: host unit-tests need bare Proc nodes
+    /// (e.g. for runqueue tests) without the full spawn/lifecycle path.
+    #[cfg(test)]
+    pub(crate) const fn new() -> Self {
         Self {
             pid: 0,
             ring: PROC_RING_KERNEL,
