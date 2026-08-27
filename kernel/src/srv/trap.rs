@@ -144,7 +144,7 @@ pub unsafe fn handle(tf: &mut TrapFrame) {
                             onyx_core::fmt::Arg::from(cur_ring as u32),
                             onyx_core::fmt::Arg::from(gc as u64),
                             onyx_core::fmt::Arg::from(tf.ra),
-                            onyx_core::fmt::Arg::from(tf.a7 as u32)
+                            onyx_core::fmt::Arg::from(reg_widen(tf.a7))
                         );
                         crate::srv::klog::halt();
                     }

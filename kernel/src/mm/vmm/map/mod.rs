@@ -73,7 +73,9 @@ unsafe fn map_impl(root_pa: u64, vaddr: u64, paddr: u64, size: usize, flags: u64
 /// # Safety
 ///
 /// `root_pa` must be a live root table; `vaddr` must be page-aligned and
-/// free of existing user mappings. Interrupts disabled.
+/// free of existing user mappings. `flags` must include `PTE_U`: rollback
+/// and the budget refund in `unmap_impl` only release frames charged to the
+/// user budget for user pages. Interrupts disabled.
 pub unsafe fn map_anon(root_pa: u64, vaddr: u64, size: usize, flags: u64) -> KResult<()> {
     // SAFETY: lock acquisition itself is safe; the impl upholds the
     // contract above under the VMM lock.
@@ -98,49 +100,55 @@ unsafe fn map_anon_impl(root_pa: u64, vaddr: u64, size: usize, flags: u64) -> KR
         let mut va = vaddr;
         let size_aligned = (size + 4095) & !4095;
         let mut remaining = size_aligned as u64;
-        let mut allocated: [u64; 1024] = [0; 1024];
-        let mut n_allocated: usize = 0;
-        // Pages accounted against the system-wide user-memory budget so far.
-        let mut n_counted: usize = 0;
         while remaining > 0 {
             // Reserve against USER_MEM_MAX_BYTES before touching the PMM so a
             // runaway mmap fails cleanly with ENOMEM instead of draining RAM.
             if let Err(e) = crate::proc::limits::user_page_take() {
-                for &pa in &allocated[..n_allocated] {
-                    pmm::free(pa);
-                }
-                crate::proc::limits::user_pages_release(n_counted);
+                rollback_mapped(root_pa, vaddr, va);
                 return Err(e);
             }
             let page_pa = match pmm::alloc_zero() {
                 Ok(pa) => pa,
                 Err(e) => {
                     // The take above succeeded but no page was mapped — undo it
-                    // along with every previously counted page of this call.
-                    crate::proc::limits::user_pages_release(n_counted + 1);
-                    for &pa in &allocated[..n_allocated] {
-                        pmm::free(pa);
-                    }
+                    // along with every previously mapped page of this call.
+                    crate::proc::limits::user_pages_release(1);
+                    rollback_mapped(root_pa, vaddr, va);
                     return Err(e);
                 }
             };
             if let Err(e) = map_one(root_pa, va, page_pa, flags | PTE_A | PTE_D, 0) {
                 pmm::free(page_pa);
-                crate::proc::limits::user_pages_release(n_counted + 1);
-                for &pa in &allocated[..n_allocated] {
-                    pmm::free(pa);
-                }
+                crate::proc::limits::user_pages_release(1);
+                rollback_mapped(root_pa, vaddr, va);
                 return Err(e);
             }
-            if n_allocated < allocated.len() {
-                allocated[n_allocated] = page_pa;
-                n_allocated += 1;
-            }
-            n_counted += 1;
             va += 1u64 << 12;
             remaining -= 1u64 << 12;
         }
         Ok(())
+    }
+}
+
+/// Unwind the `[start, end)` prefix of a failed `map_anon` call. The range
+/// was mapped page-by-page at level 0, so unwinding through the unmap path
+/// releases both the frames and the per-page user-memory budget exactly as
+/// a successful `unmap` would — for any number of pages, with no fixed
+/// tracking limit.
+///
+/// # Safety
+///
+/// Caller must hold the VMM lock; `[start, end)` must only contain pages
+/// mapped by the current `map_anon` call.
+unsafe fn rollback_mapped(root_pa: u64, start: u64, end: u64) {
+    if end > start {
+        // SAFETY: VMM lock held; the whole range was mapped by this call
+        // at level 0 with user flags, matching the `unmap_impl` contract.
+        // The result is always `Ok` (per-page walk failures are skipped
+        // inside), so discarding it is safe.
+        unsafe {
+            let _ = super::unmap::unmap_impl(root_pa, start, (end - start) as usize);
+        };
     }
 }
 

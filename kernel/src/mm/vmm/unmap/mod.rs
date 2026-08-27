@@ -29,12 +29,16 @@ pub unsafe fn unmap(root_pa: u64, vaddr: u64, size: usize) -> KResult<()> {
 
 /// Locking variant of [`unmap`]. Caller MUST hold the VMM lock.
 ///
+/// Also used as the rollback path for `map_anon` failures: the pages it
+/// retires release both their frames and the user-memory budget exactly
+/// as a successful unmap does, for any number of pages.
+///
 /// # Safety
 ///
 /// Same as [`unmap`] plus: caller must hold the VMM lock so PTE reads,
 /// page frees and the clearing write below are atomic with respect to
 /// other mappers.
-unsafe fn unmap_impl(root_pa: u64, vaddr: u64, size: usize) -> KResult<()> {
+pub(super) unsafe fn unmap_impl(root_pa: u64, vaddr: u64, size: usize) -> KResult<()> {
     // SAFETY: VMM lock held. Each `walk(.., false)` returns a live PTE
     // slot per its contract; the volatile read/write pair plus sfence_vma
     // atomically retire one mapping, and `pmm::free` is only called for

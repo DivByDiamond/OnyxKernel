@@ -1,6 +1,8 @@
 #![no_std]
 #![no_main]
-#![allow(clippy::missing_safety_doc, non_snake_case, unsafe_op_in_unsafe_fn)]
+// TODO(2026-08-27): bin-root allow — raw syscall asm runs inside `unsafe fn`
+// wrappers (no_std, per-bin compile); re-evaluate on toolchain/edition bump.
+#![allow(unsafe_op_in_unsafe_fn)]
 
 mod syscalls;
 
@@ -59,6 +61,10 @@ fn dec_u64(val: u64, out: &mut [u8; 21]) -> usize {
 }
 
 #[unsafe(no_mangle)]
+/// # Safety
+///
+/// Process entry point: called directly by the kernel from the ELF entry
+/// address; the stack is freshly initialized per the RISC-V calling convention.
 pub unsafe extern "C" fn _start() -> ! {
     let blk_path = b"/dev/blk0\0";
     let fd = syscalls::open(blk_path.as_ptr(), 0, 0);

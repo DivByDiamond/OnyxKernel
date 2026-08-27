@@ -1,4 +1,4 @@
-use onyx_core::errno::KResult;
+use onyx_core::errno::{Errno, KResult};
 
 use super::Block;
 use crate::mm::pmm;
@@ -23,12 +23,14 @@ pub unsafe fn krealloc(p: *mut u8, new_size: usize) -> KResult<*mut u8> {
             return Ok(core::ptr::null_mut());
         }
         let old_size = alloc_size(p);
-        let copy_n = if old_size == 0 {
-            new_size
-        } else {
-            old_size.min(new_size)
-        };
-        if old_size > 0 && new_size <= old_size {
+        // A non-null pointer whose usable size reads as 0 is not a live
+        // allocation from this heap (foreign pointer) — copying from it
+        // would read out of bounds, so refuse instead.
+        if old_size == 0 {
+            return Err(Errno::Inval);
+        }
+        let copy_n = old_size.min(new_size);
+        if new_size <= old_size {
             return Ok(p);
         }
         let new = super::kmalloc(new_size)?;

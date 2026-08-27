@@ -30,17 +30,28 @@ pub fn write_v1(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-pub fn write_v2(
-    img: &mut [u8],
-    total_blocks: u32,
-    inode_count: u32,
-    inode_table_start: u32,
-    data_blocks_start: u32,
-    snapshot_area_start: u32,
-    journal_start: u32,
-    journal_size: u32,
-) {
+/// Layout values for the v2 superblock, grouped so `write_v2` takes a
+/// single parameter instead of seven scalars.
+pub struct V2Layout {
+    pub total_blocks: u32,
+    pub inode_count: u32,
+    pub inode_table_start: u32,
+    pub data_blocks_start: u32,
+    pub snapshot_area_start: u32,
+    pub journal_start: u32,
+    pub journal_size: u32,
+}
+
+pub fn write_v2(img: &mut [u8], layout: &V2Layout) {
+    let V2Layout {
+        total_blocks,
+        inode_count,
+        inode_table_start,
+        data_blocks_start,
+        snapshot_area_start,
+        journal_start,
+        journal_size,
+    } = *layout;
     let feature_flags: u32 = ONYFS_FEAT_TIMESTAMPS | ONYFS_FEAT_SNAPSHOTS | ONYFS_FEAT_JOURNAL;
     let mut sb = [0u8; V2_SUPERBLOCK_SIZE];
     sb[0..4].copy_from_slice(&ONYFS_MAGIC.to_le_bytes());

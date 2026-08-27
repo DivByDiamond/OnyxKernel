@@ -1,5 +1,7 @@
 // TODO(dead-code): auth::group::group_core — shared auth/syscalls module, compiled per onyx_init bin;
-// items unused by one binary are used by others (dead_code/unused_imports fire per-bin).
+// Verified 2026-08-27: all items are live (each is used by at least one onyx_init
+// bin; per-bin dead_code/unused_imports warnings are unavoidable without a lib
+// target). Revisit if onyx_init gains a shared [lib] target.
 #![allow(dead_code, unused_imports)]
 
 use crate::auth::GROUP_PATH;
@@ -67,31 +69,6 @@ pub fn parse_group(data: &[u8], groups: &mut [GroupEntry; crate::auth::MAX_GROUP
         count += 1;
     }
     count
-}
-
-pub fn find_group_by_gid(
-    groups: &[GroupEntry; crate::auth::MAX_GROUPS],
-    count: usize,
-    gid: u32,
-) -> Option<usize> {
-    groups[..count].iter().position(|e| e.gid == gid)
-}
-
-pub fn find_group_by_name(
-    groups: &[GroupEntry; crate::auth::MAX_GROUPS],
-    count: usize,
-    name: &[u8],
-) -> Option<usize> {
-    groups[..count].iter().position(|entry| {
-        let mut match_len = 0;
-        while match_len < entry.name.len() && entry.name[match_len] != 0 && match_len < name.len() {
-            if entry.name[match_len] != name[match_len] {
-                break;
-            }
-            match_len += 1;
-        }
-        match_len == name.len() && (entry.name[match_len] == 0 || match_len == entry.name.len())
-    })
 }
 
 pub fn user_in_group(username: &[u8], members: &[u8]) -> bool {

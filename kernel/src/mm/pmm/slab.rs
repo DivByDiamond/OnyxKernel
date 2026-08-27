@@ -19,27 +19,21 @@ pub(super) const fn size_of_slab_header() -> usize {
     32
 }
 
-/// # Safety
-///
-/// `SLAB_SIZES` is a compile-time constant and the loop only reads it by
-/// index; no actual unsafety is exercised — this is `unsafe` for signature
-/// symmetry with its callers.
-unsafe fn slab_class_for(size: usize) -> Option<usize> {
-    for (i, &s) in SLAB_SIZES.iter().enumerate() {
-        if size <= s {
-            return Some(i);
-        }
-    }
-    None
+/// Index of the SLAB size class serving `size`, if any.
+pub fn class_idx(size: usize) -> Option<usize> {
+    SLAB_SIZES.iter().position(|&s| size <= s)
 }
 
-/// Allocate a `size`-byte object from a SLAB pool.
+/// Allocate a `size`-byte object from a SLAB pool. On success returns the
+/// pointer plus the object size of the serving class — the value callers
+/// must use for usage accounting so it matches what [`slab_free`] reports
+/// back on release.
 ///
 /// # Safety
 ///
 /// PMM must be initialised and interrupts disabled (spinlock invariant).
 /// The returned pointer (if any) is valid until passed to [`slab_free`].
-pub unsafe fn slab_alloc(size: usize) -> Option<*mut u8> {
+pub unsafe fn slab_alloc(size: usize) -> Option<(*mut u8, usize)> {
     unsafe {
         super::pmm_lock();
         let r = slab_alloc_unlocked(size);
@@ -56,13 +50,13 @@ pub unsafe fn slab_alloc(size: usize) -> Option<*mut u8> {
 /// slot lies inside a PMM page whose header was validated by `SLAB_MAGIC`
 /// at creation, and `slot < capacity <= 64` keeps the free-bit shifts in
 /// range.
-unsafe fn slab_alloc_unlocked(size: usize) -> Option<*mut u8> {
+unsafe fn slab_alloc_unlocked(size: usize) -> Option<(*mut u8, usize)> {
     // SAFETY: raw-pointer traversal of the per-class slab list; headers
     // were fully initialised when the page entered the list, `slot` is
     // bounded by `hdr.capacity` (<= 64), and new-page setup writes every
     // header field before publishing the page on the list.
     unsafe {
-        let class = slab_class_for(size)?;
+        let class = class_idx(size)?;
         let obj_size = SLAB_SIZES[class];
         let hdr_size = size_of_slab_header();
         if PAGE_SIZE - hdr_size < obj_size {
@@ -79,9 +73,10 @@ unsafe fn slab_alloc_unlocked(size: usize) -> Option<*mut u8> {
                     if hdr.free_bits & (1u64 << slot) != 0 {
                         hdr.free_bits &= !(1u64 << slot);
                         hdr.free_count -= 1;
-                        return Some(
+                        return Some((
                             (page as usize + hdr_size + slot as usize * obj_size) as *mut u8,
-                        );
+                            obj_size,
+                        ));
                     }
                     slot += 1;
                 }
@@ -110,18 +105,21 @@ unsafe fn slab_alloc_unlocked(size: usize) -> Option<*mut u8> {
         G_PMM.slab_heads[class] = new_page;
         hdr.free_bits &= !1;
         hdr.free_count -= 1;
-        Some((new_page as usize + hdr_size) as *mut u8)
+        Some(((new_page as usize + hdr_size) as *mut u8, obj_size))
     }
 }
 
-/// Free an object previously returned by [`slab_alloc`].
+/// Free an object previously returned by [`slab_alloc`]. Returns the
+/// object size of the freed class so the caller can keep usage accounting
+/// symmetric with allocation; `None` means the pointer was not a live
+/// slab object and nothing was freed.
 ///
 /// # Safety
 ///
 /// PMM initialised, interrupts disabled. `ptr` must come from
 /// [`slab_alloc`] and must not be freed twice; foreign pointers are
 /// rejected by the magic/alignment checks inside.
-pub unsafe fn slab_free(ptr: *mut u8) -> bool {
+pub unsafe fn slab_free(ptr: *mut u8) -> Option<usize> {
     unsafe {
         super::pmm_lock();
         let r = slab_free_unlocked(ptr);
@@ -135,7 +133,7 @@ pub unsafe fn slab_free(ptr: *mut u8) -> bool {
 /// # Safety
 ///
 /// Same as [`slab_free`] plus: caller must hold `pmm_lock()`.
-unsafe fn slab_free_unlocked(ptr: *mut u8) -> bool {
+unsafe fn slab_free_unlocked(ptr: *mut u8) -> Option<usize> {
     // SAFETY: the page pointer is derived by masking to a page boundary;
     // every dereference below is guarded by the magic check, size_idx
     // bounds check, header-offset check, alignment check and slot <
@@ -144,11 +142,11 @@ unsafe fn slab_free_unlocked(ptr: *mut u8) -> bool {
         let page_addr = (ptr as usize) & !(PAGE_SIZE - 1);
         let page = page_addr as *mut SlabHeader;
         if page.is_null() {
-            return false;
+            return None;
         }
         let hdr = &mut *page;
         if hdr.magic != SLAB_MAGIC {
-            return false;
+            return None;
         }
         // Bug (mm SERIOUS #2): bounds-check hdr.size_idx before indexing
         // SLAB_SIZES. A corrupted header (e.g. from a wild pointer free or
@@ -156,7 +154,7 @@ unsafe fn slab_free_unlocked(ptr: *mut u8) -> bool {
         // would index out of bounds on the next line and panic the kernel.
         let class = hdr.size_idx as usize;
         if class >= SLAB_SIZES.len() {
-            return false;
+            return None;
         }
         let obj_size = SLAB_SIZES[class];
         let hdr_size = size_of_slab_header();
@@ -167,22 +165,22 @@ unsafe fn slab_free_unlocked(ptr: *mut u8) -> bool {
         // be UB. Reject anything that doesn't sit above the header.
         let ptr_usize = ptr as usize;
         if ptr_usize < page_addr + hdr_size {
-            return false;
+            return None;
         }
         let offset = ptr as usize - page_addr - hdr_size;
         if !offset.is_multiple_of(obj_size) {
-            return false;
+            return None;
         }
         let slot = (offset / obj_size) as u32;
         if slot >= hdr.capacity {
-            return false;
+            return None;
         }
         // Bug #3 fix (extra top-30): detect double-free. Without this check,
         // a double-free would re-set the already-free bit, bump free_count
         // past capacity, and cause the slab page to be returned to the bitmap
         // while slots are still referenced — leading to UAF.
         if hdr.free_bits & (1u64 << slot) != 0 {
-            return false;
+            return None;
         }
         hdr.free_bits |= 1u64 << slot;
         hdr.free_count += 1;
@@ -191,8 +189,6 @@ unsafe fn slab_free_unlocked(ptr: *mut u8) -> bool {
         // pointer to stale data from a previous allocation, which is an
         // info-leak and can cause subtle bugs if the caller assumed zeroed
         // memory (e.g. allocating a struct and only initializing some fields).
-        let obj_size = SLAB_SIZES[class];
-        let hdr_size = size_of_slab_header();
         let slot_ptr = (page_addr + hdr_size + slot as usize * obj_size) as *mut u8;
         ptr::write_bytes(slot_ptr, 0, obj_size);
         if hdr.free_count == hdr.capacity {
@@ -213,6 +209,6 @@ unsafe fn slab_free_unlocked(ptr: *mut u8) -> bool {
             // Use the unlocked variant — we already hold pmm_lock.
             super::bitmap::free_unlocked(page_addr as u64);
         }
-        true
+        Some(obj_size)
     }
 }

@@ -39,8 +39,11 @@ unsafe fn kmalloc_locked(size: usize) -> KResult<*mut u8> {
     // SAFETY: heap lock held; free-list nodes and slab headers are only
     // ever mutated under this lock, so the pointer walk is exclusive.
     unsafe {
-        if let Some(p) = pmm::slab_alloc(size) {
-            G_HEAP.used += size;
+        if let Some((p, sz)) = pmm::slab_alloc(size) {
+            // Account the class object size — the exact value `slab_free`
+            // reports back on release, keeping `used` balanced across
+            // alloc/free pairs.
+            G_HEAP.used += sz;
             return Ok(p);
         }
         let needed = (size + 15) & !15;
@@ -105,7 +108,10 @@ unsafe fn kfree_locked(p: *mut u8) {
     // free-list blocks the alignment/size checks below gate every Block
     // dereference and coalescing step.
     unsafe {
-        if pmm::slab_free(p) {
+        // Slab release reports the class object size it actually freed —
+        // subtract exactly that so `used` does not drift upward.
+        if let Some(sz) = pmm::slab_free(p) {
+            G_HEAP.used -= sz;
             return;
         }
         if (p as usize) < Block::hdr_size() || (p as usize) & 15 != 0 {

@@ -23,15 +23,7 @@
     static_mut_refs,
     clippy::too_many_arguments,
     clippy::type_complexity,
-    clippy::missing_safety_doc,
-    clippy::missing_errors_doc,
-    clippy::missing_panics_doc,
-    clippy::must_use_candidate,
-    clippy::module_name_repetitions,
-    clippy::similar_names,
-    clippy::cast_possible_truncation,
-    clippy::cast_possible_wrap,
-    clippy::cast_sign_loss
+    clippy::missing_safety_doc
 )]
 
 extern crate alloc;

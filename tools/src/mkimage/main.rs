@@ -164,13 +164,15 @@ fn main() {
     } else {
         superblock::write_v2(
             &mut img,
-            total_blocks,
-            total_inodes,
-            inode_table_start,
-            data_blocks_start,
-            snapshot_start,
-            journal_start,
-            journal_blocks,
+            &superblock::V2Layout {
+                total_blocks,
+                inode_count: total_inodes,
+                inode_table_start,
+                data_blocks_start,
+                snapshot_area_start: snapshot_start,
+                journal_start,
+                journal_size: journal_blocks,
+            },
         );
     }
     inode::write_bitmaps(&mut img, total_inodes, data_blocks_needed);
