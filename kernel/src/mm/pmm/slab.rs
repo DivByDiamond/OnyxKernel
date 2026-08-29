@@ -34,6 +34,8 @@ pub fn class_idx(size: usize) -> Option<usize> {
 /// PMM must be initialised and interrupts disabled (spinlock invariant).
 /// The returned pointer (if any) is valid until passed to [`slab_free`].
 pub unsafe fn slab_alloc(size: usize) -> Option<(*mut u8, usize)> {
+    // SAFETY: lock acquisition is safe; `slab_alloc_unlocked` upholds the
+    // `# Safety` contract above under the PMM lock (`G_PMM_LOCK`).
     unsafe {
         super::pmm_lock();
         let r = slab_alloc_unlocked(size);
@@ -120,6 +122,8 @@ unsafe fn slab_alloc_unlocked(size: usize) -> Option<(*mut u8, usize)> {
 /// [`slab_alloc`] and must not be freed twice; foreign pointers are
 /// rejected by the magic/alignment checks inside.
 pub unsafe fn slab_free(ptr: *mut u8) -> Option<usize> {
+    // SAFETY: lock acquisition is safe; `slab_free_unlocked` upholds the
+    // `# Safety` contract above under the PMM lock (`G_PMM_LOCK`).
     unsafe {
         super::pmm_lock();
         let r = slab_free_unlocked(ptr);

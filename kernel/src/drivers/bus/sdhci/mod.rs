@@ -24,7 +24,10 @@ pub(crate) static mut G_SDHCI: SdhciDev = SdhciDev {
     irq: PLIC_PRIO_SDHCI,
 };
 
+/// # Safety
+/// `base` must be the MMIO base of an SDHCI controller, valid and identity-mapped.
 pub unsafe fn probe(base: usize) -> bool {
+    // SAFETY: probed controller base; register offsets within the file per regs.rs.
     unsafe {
         let version = reg_r16(base, 0xFE);
         if version == 0 {
@@ -40,7 +43,10 @@ pub unsafe fn probe(base: usize) -> bool {
     }
 }
 
+/// # Safety
+/// `base` must be a valid probed SDHCI MMIO base; must run before concurrent users of `G_SDHCI` (single-threaded init).
 pub unsafe fn init(base: usize, irq: u32) -> bool {
+    // SAFETY: probed controller base; offsets within the register file per regs.rs.
     unsafe {
         reset(base, SW_RESET_ALL);
         reg_w(base, NORMAL_INT_STATUS_ENABLE, 0xFFFF);
@@ -58,6 +64,7 @@ pub unsafe fn init(base: usize, irq: u32) -> bool {
         };
 
         let p = &raw mut G_SDHCI;
+        // SAFETY: single-threaded init before secondary harts start; sole mutation path for G_SDHCI.
         (*p).base = base;
         (*p).rca = rca;
         (*p).initialized = true;
@@ -70,7 +77,10 @@ pub unsafe fn init(base: usize, irq: u32) -> bool {
     }
 }
 
+/// # Safety
+/// IRQ context; `init` must have run and stored a valid controller base.
 pub unsafe fn irq_handler() {
+    // SAFETY: read-only access to G_SDHCI written only by single-threaded init; offsets per regs.rs.
     unsafe {
         let p = &raw const G_SDHCI;
         if !(*p).initialized {
@@ -87,14 +97,20 @@ pub unsafe fn irq_handler() {
 }
 
 pub fn is_initialized() -> bool {
+    // SAFETY: G_SDHCI is written only during single-threaded init; plain
+    // bool/usize reads of it here are benign on this single-hart init path.
     unsafe { (G_SDHCI).initialized }
 }
 
 pub fn base_addr() -> usize {
+    // SAFETY: G_SDHCI is written only during single-threaded init; see above.
     unsafe { (G_SDHCI).base }
 }
 
+/// # Safety
+/// `base` must be a valid SDHCI MMIO base; spins bounded by SDHCI_TIMEOUT.
 pub(super) unsafe fn wait_idle(base: usize) {
+    // SAFETY: probed controller base; PRESENT_STATE offset per regs.rs.
     unsafe {
         let mut timeout = SDHCI_TIMEOUT;
         while timeout > 0 {
@@ -107,7 +123,10 @@ pub(super) unsafe fn wait_idle(base: usize) {
     }
 }
 
+/// # Safety
+/// `base` must be a valid SDHCI MMIO base.
 pub(super) unsafe fn wait_state(base: usize, flag: u32) -> bool {
+    // SAFETY: probed controller base; PRESENT_STATE offset per regs.rs.
     unsafe {
         let mut timeout = SDHCI_TIMEOUT;
         while timeout > 0 {
@@ -120,7 +139,10 @@ pub(super) unsafe fn wait_state(base: usize, flag: u32) -> bool {
     }
 }
 
+/// # Safety
+/// `base` must be a valid SDHCI MMIO base.
 pub(super) unsafe fn reset(base: usize, bits: u32) {
+    // SAFETY: probed controller base; SOFTWARE_RESET offset per regs.rs.
     unsafe {
         reg_w(base, SOFTWARE_RESET, bits);
         let mut timeout = SDHCI_TIMEOUT;
@@ -133,7 +155,10 @@ pub(super) unsafe fn reset(base: usize, bits: u32) {
     }
 }
 
+/// # Safety
+/// `base` must be a valid SDHCI MMIO base.
 pub(super) unsafe fn clear_interrupts(base: usize) {
+    // SAFETY: probed controller base; int status offsets per regs.rs.
     unsafe {
         let norm = reg_r(base, NORMAL_INT_STATUS);
         reg_w(base, NORMAL_INT_STATUS, norm);
@@ -142,7 +167,10 @@ pub(super) unsafe fn clear_interrupts(base: usize) {
     }
 }
 
+/// # Safety
+/// `base` must be a valid SDHCI MMIO base.
 pub(super) unsafe fn init_clock(base: usize) {
+    // SAFETY: probed controller base; CLOCK_CONTROL/caps offsets per regs.rs.
     unsafe {
         let caps0 = reg_r(base, 0x40);
         let base_clk_mhz = (caps0 >> 8) & 0xFF;
@@ -172,7 +200,10 @@ pub(super) unsafe fn init_clock(base: usize) {
     }
 }
 
+/// # Safety
+/// `base` must be a valid SDHCI MMIO base.
 pub(super) unsafe fn set_power(base: usize) {
+    // SAFETY: probed controller base; POWER_CONTROL offset per regs.rs.
     unsafe {
         reg_w(base, POWER_CONTROL, PWR_3_3V);
         let mut delay = 1000u32;
@@ -183,13 +214,19 @@ pub(super) unsafe fn set_power(base: usize) {
     }
 }
 
+/// # Safety
+/// `base` must be a valid SDHCI MMIO base; `addr` must be a DMA-capable, physically contiguous buffer address.
 pub(super) unsafe fn set_sdma_addr(base: usize, addr: u64) {
+    // SAFETY: probed controller base; SDMAS_SYS_ADDR offset per regs.rs.
     unsafe {
         reg_w(base, SDMAS_SYS_ADDR, addr as u32);
     }
 }
 
+/// # Safety
+/// `base` must be a valid SDHCI MMIO base.
 pub(super) unsafe fn wait_transfer_complete(base: usize) -> bool {
+    // SAFETY: probed controller base; int status offsets per regs.rs.
     unsafe {
         let mut timeout = SDHCI_TIMEOUT;
         while timeout > 0 {

@@ -16,6 +16,7 @@ fn rotl(x: u64, k: u32) -> u64 {
 /// Seed the PRNG from the active hardware entropy source. Safe to call
 /// multiple times — the state is replaced wholesale.
 pub fn seed() {
+    // SAFETY: G_STATE/G_SEEDED are static muts written only from kernel context, which never runs with SIE set (see crate::sync); seeding replaces the state wholesale at boot.
     unsafe {
         let mut state = [0u64; 4];
         for v in &mut state {
@@ -39,6 +40,7 @@ pub fn seed() {
 
 /// Ensure the PRNG has been seeded. Called lazily by `next_u64`.
 fn ensure_seeded() {
+    // SAFETY: G_SEEDED is a boot-only flag accessed from kernel context, which never runs with SIE set (see crate::sync).
     unsafe {
         if !G_SEEDED {
             seed();
@@ -49,6 +51,7 @@ fn ensure_seeded() {
 /// Generate the next 64-bit pseudo-random value.
 pub fn next_u64() -> u64 {
     ensure_seeded();
+    // SAFETY: raw pointer to the static 4-word xoshiro state; every index is within 0..4, and kernel context never runs with SIE set (see crate::sync) so the update is not preempted mid-sequence.
     unsafe {
         let s = &raw mut G_STATE;
         let result = rotl((*s)[1].wrapping_mul(5), 7).wrapping_mul(9);
@@ -105,6 +108,7 @@ pub fn below(bound: u32) -> u32 {
 
 /// Has the PRNG been seeded yet?
 pub fn is_seeded() -> bool {
+    // SAFETY: bool read of the boot-time seeded flag; kernel code never runs with SIE set (see crate::sync).
     unsafe { G_SEEDED }
 }
 

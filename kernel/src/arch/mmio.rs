@@ -20,12 +20,24 @@ impl<T: MmioReg> Mmio<T> {
             _p: core::marker::PhantomData,
         }
     }
+    /// # Safety
+    ///
+    /// `self.addr` must be a naturally-aligned, mapped, device-backed MMIO
+    /// address of matching width (`T`), and the device must tolerate a
+    /// volatile read at this moment.
     #[inline]
     pub unsafe fn read(self) -> T {
+        // SAFETY: caller guarantees an aligned, mapped, device-backed MMIO address of width `T`.
         unsafe { read_volatile(self.addr as *const T) }
     }
+    /// # Safety
+    ///
+    /// `self.addr` must be a naturally-aligned, mapped, device-backed MMIO
+    /// address of matching width (`T`), and the device must tolerate a
+    /// volatile write of `v` at this moment.
     #[inline]
     pub unsafe fn write(self, v: T) {
+        // SAFETY: caller guarantees an aligned, mapped, device-backed MMIO address of width `T`.
         unsafe {
             write_volatile(self.addr as *mut T, v);
         }

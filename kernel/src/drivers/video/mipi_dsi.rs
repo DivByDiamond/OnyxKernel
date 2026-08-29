@@ -36,12 +36,22 @@ static mut G_DSI: usize = DSI_BASE;
 static mut G_DPHY: usize = DPHY_BASE;
 
 #[inline]
+/// # Safety
+///
+/// `G_DSI` must hold a mapped DW-MIPI-DSI base (the `DSI_BASE` constant or a
+/// base validated by `init`); `off` is a datasheet register offset.
 unsafe fn rd(off: u32) -> u32 {
+    // SAFETY: volatile read at G_DSI + off, a datasheet offset in the controller MMIO window (identity-mapped at boot).
     unsafe { Mmio::<u32>::at(G_DSI + off as usize).read() }
 }
 
 #[inline]
+/// # Safety
+///
+/// Same contract as [`rd`]: `G_DSI` must be a mapped DSI controller base;
+/// `off` is a datasheet register offset.
 unsafe fn wr(off: u32, v: u32) {
+    // SAFETY: volatile write at G_DSI + off, a datasheet offset in the controller MMIO window.
     unsafe {
         Mmio::<u32>::at(G_DSI + off as usize).write(v);
     }
@@ -49,7 +59,14 @@ unsafe fn wr(off: u32, v: u32) {
 
 /// Initialise the DSI link for a 480x854 24bpp panel running at 60 Hz.
 /// `lane_mbps` selects the per-lane bit rate (typically 500..1000).
+///
+/// # Safety
+///
+/// `base`/`dphy` must be the real DW-MIPI-DSI and D-PHY MMIO bases in the
+/// identity-mapped device window; must run once during single-threaded
+/// panel setup (SIE=0) since it mutates `G_DSI`/`G_DPHY`.
 pub unsafe fn init(base: usize, dphy: usize, lane_mbps: u32) -> KResult<()> {
+    // SAFETY: G_DSI/G_DPHY are written once here during single-threaded init (SIE=0, see crate::sync); all wr() calls hit datasheet offsets in the caller-validated window.
     unsafe {
         if base == 0 {
             return Err(Errno::Inval);
@@ -85,6 +102,7 @@ pub unsafe fn init(base: usize, dphy: usize, lane_mbps: u32) -> KResult<()> {
 
 /// Send a DCS short command (1 byte payload).
 pub fn send_cmd(cmd: u8) -> KResult<()> {
+    // SAFETY: wr() targets G_DSI + datasheet offsets; G_DSI is the constant DSI_BASE or a base validated by init().
     unsafe {
         wr(R_DSI_CMD_PKT, (cmd as u32) << 8 | 0x05);
         // Wait for command to drain (no dedicated status bit in our
@@ -101,6 +119,7 @@ pub fn send_data(cmd: u8, payload: &[u8]) -> KResult<()> {
     if payload.is_empty() || payload.len() > 32 {
         return Err(Errno::Inval);
     }
+    // SAFETY: wr() targets G_DSI + datasheet offsets; G_DSI is the constant DSI_BASE or a base validated by init(); payload length was checked above.
     unsafe {
         wr(R_DSI_CMD_PAYLOAD, payload[0] as u32);
         for &b in &payload[1..] {
@@ -116,5 +135,6 @@ pub fn send_data(cmd: u8, payload: &[u8]) -> KResult<()> {
 
 /// Read back the controller's version register (sanity check).
 pub fn version() -> u32 {
+    // SAFETY: rd() reads the version register at G_DSI (constant or init()-validated base) + datasheet offset.
     unsafe { rd(R_DSI_VERSION) }
 }

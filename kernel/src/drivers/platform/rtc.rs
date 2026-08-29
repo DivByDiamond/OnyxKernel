@@ -28,7 +28,12 @@ enum RtcKind {
 }
 
 #[inline]
+/// # Safety
+///
+/// Caller contract: `base` must be an RTC MMIO base (probed/FDT-provided)
+/// and `off` an RTC register offset for that device.
 unsafe fn rd32(base: usize, off: u32) -> u32 {
+    // SAFETY: `base` is either an FDT-probed RTC base or one of the fixed SoC constants below; `off` is a datasheet register offset within the RTC MMIO window.
     unsafe { Mmio::<u32>::at(base + off as usize).read() }
 }
 
@@ -37,6 +42,7 @@ unsafe fn rd32(base: usize, off: u32) -> u32 {
 /// OC2R/sedna the RTC lives at the FDT address and the hardcoded QEMU
 /// goldfish base (0x10100000) is not a real device there (load access fault).
 pub unsafe fn probe(fdt_base: usize) -> bool {
+    // SAFETY: only known RTC bases are dereferenced (FDT base when provided, else the fixed GOLDFISH/SIFIVE constants); writes G_BASE/G_KIND single-threaded.
     unsafe {
         if fdt_base != 0 {
             return probe_at(fdt_base, RtcKind::Goldfish);
@@ -48,7 +54,13 @@ pub unsafe fn probe(fdt_base: usize) -> bool {
     }
 }
 
+/// # Safety
+///
+/// Caller contract: `base` must be a real RTC MMIO base matching `kind`
+/// (within the device MMIO window); runs single-threaded before harts
+/// publish the global base.
 unsafe fn probe_at(base: usize, kind: RtcKind) -> bool {
+    // SAFETY: read_kind reads only `base` + datasheet offsets; G_BASE/G_KIND writes happen in single-threaded probe context.
     unsafe {
         let t1 = read_kind(base, kind);
         if t1 == 0 {
@@ -66,7 +78,12 @@ unsafe fn probe_at(base: usize, kind: RtcKind) -> bool {
     }
 }
 
+/// # Safety
+///
+/// Caller contract: `base` must be a real RTC MMIO base matching `kind`
+/// (within the device MMIO window).
 unsafe fn read_kind(base: usize, kind: RtcKind) -> u64 {
+    // SAFETY: rd32 reads `base` + fixed datasheet offsets (0x00/0x04) for the given RTC kind; `base` lies in the device MMIO window.
     unsafe {
         match kind {
             RtcKind::Goldfish => {
@@ -86,5 +103,6 @@ unsafe fn read_kind(base: usize, kind: RtcKind) -> u64 {
 
 /// Wall-clock nanoseconds since Unix epoch (0 if no RTC was probed).
 pub fn now_nanos() -> u64 {
+    // SAFETY: G_BASE/G_KIND were set by probe() to a validated RTC base; read_kind reads only fixed datasheet offsets there.
     unsafe { read_kind(G_BASE, G_KIND) }
 }

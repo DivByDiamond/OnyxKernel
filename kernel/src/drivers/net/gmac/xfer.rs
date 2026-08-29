@@ -4,7 +4,12 @@ use super::{G_GMAC, GMAC_BUF_SIZE, TX_RING_SIZE};
 use core::ptr;
 use onyx_core::errno::{Errno, KResult};
 
+/// # Safety
+///
+/// `gmac::init` must have completed (descriptor rings allocated, DMA
+/// engine started); `data.len()` is checked against GMAC_BUF_SIZE inside.
 pub unsafe fn send(data: &[u8]) -> KResult<()> {
+    // SAFETY: rings/buffers were allocated by dma::init_tx_rings; idx = G_GMAC.tx_cur < TX_RING_SIZE (wrapped below); data.len() <= GMAC_BUF_SIZE (checked above) fits the buffer page; descriptor stores are volatile with a fence before the poll-demand kick.
     unsafe {
         if data.is_empty() || data.len() > GMAC_BUF_SIZE {
             return Err(Errno::Inval);
@@ -44,7 +49,12 @@ pub unsafe fn send(data: &[u8]) -> KResult<()> {
     }
 }
 
+/// # Safety
+///
+/// `gmac::init` must have completed (RX ring allocated, DMA engine
+/// running); `buf` receives at most `buf.len()` bytes.
 pub unsafe fn recv_into(buf: &mut [u8]) -> KResult<usize> {
+    // SAFETY: RX ring from dma::init_rx_rings; idx = G_GMAC.rx_cur < 16 (wrapped below); ownership flag checked before use; len = min(frame_len, buf.len()) bounds the destination write; src is the RX buffer page held by the descriptor.
     unsafe {
         let idx = G_GMAC.rx_cur;
         let desc = rx_desc_vaddr(idx);
@@ -70,7 +80,11 @@ pub unsafe fn recv_into(buf: &mut [u8]) -> KResult<usize> {
     }
 }
 
+/// # Safety
+///
+/// `base` must be a mapped GMAC MMIO base (as accepted by `probe`).
 pub unsafe fn get_mac(base: usize) -> [u8; 6] {
+    // SAFETY: reads base + MAC_ADDR0_* datasheet offsets inside the caller-validated GMAC MMIO window.
     unsafe {
         let hi = regs::reg_r(base, regs::MAC_ADDR0_HI);
         let lo = regs::reg_r(base, regs::MAC_ADDR0_LO);

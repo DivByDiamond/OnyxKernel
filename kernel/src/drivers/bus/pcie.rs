@@ -34,8 +34,13 @@ static mut G_DEVS: [PciDev; MAX_RESULTS] = [PciDev {
 }; MAX_RESULTS];
 static mut G_N: usize = 0;
 
+/// # Safety
+/// Caller contract: (bus, dev, func) must be within 0..MAX_BUSES/0..MAX_DEVS/0..MAX_FUNCS and `off` a valid 32-bit config offset.
 #[inline]
 unsafe fn cfg_rd(bus: u8, dev: u8, func: u8, off: u32) -> u32 {
+    // SAFETY: addr is an ECAM address computed from bus:dev:fn within the
+    // ECAM window (ECAM_BASE, MAX_BUSES/MAX_DEVS/MAX_FUNCS), identity-mapped
+    // at boot; off is a 4-byte-aligned config offset.
     unsafe {
         let addr = ECAM_BASE
             + ((bus as usize) << 20)
@@ -46,8 +51,12 @@ unsafe fn cfg_rd(bus: u8, dev: u8, func: u8, off: u32) -> u32 {
     }
 }
 
+/// # Safety
+/// Caller contract: (bus, dev, func) must be within 0..MAX_BUSES/0..MAX_DEVS/0..MAX_FUNCS and `off` a valid 32-bit config offset.
 #[inline]
 unsafe fn cfg_wr(bus: u8, dev: u8, func: u8, off: u32, v: u32) {
+    // SAFETY: same ECAM window contract as cfg_rd; addr is derived from a
+    // valid bus:dev:fn and a 4-byte-aligned config offset.
     unsafe {
         let addr = ECAM_BASE
             + ((bus as usize) << 20)
@@ -58,7 +67,11 @@ unsafe fn cfg_wr(bus: u8, dev: u8, func: u8, off: u32, v: u32) {
     }
 }
 
+/// # Safety
+/// Caller contract: (bus, dev, func) within ECAM bounds; `bar_idx` must be 0..6.
 unsafe fn read_bar(bus: u8, dev: u8, func: u8, bar_idx: u32) -> u64 {
+    // SAFETY: ECAM address derived from a valid bus:dev:fn; offsets 0x10 +
+    // 4*bar_idx (and +4 for 64-bit) are standard config-space BAR registers.
     unsafe {
         let off = 0x10 + bar_idx * 4;
         let lo = cfg_rd(bus, dev, func, off);
@@ -80,7 +93,12 @@ unsafe fn read_bar(bus: u8, dev: u8, func: u8, bar_idx: u32) -> u64 {
 
 /// Scan buses 0..MAX_BUSES and collect up to MAX_RESULTS devices.
 /// Returns the number found. Each device's BAR0 is also read.
+/// # Safety
+/// Caller contract: single-threaded init before secondary harts start; must not race `count`/`get`.
 pub unsafe fn scan() -> usize {
+    // SAFETY: G_DEVS/G_N are only mutated here, on the single-threaded boot
+    // scan path before secondary harts start; G_N is bounds-checked
+    // (G_N < MAX_RESULTS) before each G_DEVS slot write.
     unsafe {
         G_N = 0;
         for bus in 0..MAX_BUSES {
@@ -124,11 +142,14 @@ pub unsafe fn scan() -> usize {
 
 /// Number of devices found in the last `scan()`.
 pub fn count() -> usize {
+    // SAFETY: G_N is written only by single-threaded scan(); a plain read here races nothing on the boot path.
     unsafe { G_N }
 }
 
 /// Borrow a device entry by index.
 pub fn get(idx: usize) -> KResult<PciDev> {
+    // SAFETY: idx is bounds-checked against G_N before indexing G_DEVS;
+    // scan() is the sole writer and runs single-threaded before this.
     unsafe {
         if idx >= G_N {
             return Err(Errno::Range);
@@ -138,13 +159,19 @@ pub fn get(idx: usize) -> KResult<PciDev> {
 }
 
 /// Write a 32-bit value to a config register. Used by IRQ routing.
+/// # Safety
+/// Caller contract: (bus, dev, func) within ECAM bounds; caller owns device config space.
 pub unsafe fn cfg_write(bus: u8, dev: u8, func: u8, off: u32, v: u32) {
+    // SAFETY: forwards to cfg_wr with the same ECAM window contract.
     unsafe {
         cfg_wr(bus, dev, func, off, v);
     }
 }
 
 /// Read a 32-bit value from a config register.
+/// # Safety
+/// Caller contract: (bus, dev, func) within ECAM bounds.
 pub unsafe fn cfg_read(bus: u8, dev: u8, func: u8, off: u32) -> u32 {
+    // SAFETY: forwards to cfg_rd with the same ECAM window contract.
     unsafe { cfg_rd(bus, dev, func, off) }
 }

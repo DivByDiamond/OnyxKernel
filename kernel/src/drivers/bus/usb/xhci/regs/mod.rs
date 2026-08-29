@@ -68,79 +68,160 @@ pub const RTS_ERDP: u32 = 0x18;
 pub const IMAN_IP: u32 = 1 << 0;
 pub const IMAN_IE: u32 = 1 << 1;
 
+/// # Safety
+///
+/// `base` must lie within the xHCI capability register file of a controller base validated at driver init; `off` must be a valid register offset.
 unsafe fn cap_r8(base: usize, off: u32) -> u8 {
+    // SAFETY: caller-validated MMIO base; offset within cap register file.
     unsafe { Mmio::<u8>::at(base + off as usize).read() }
 }
 
+/// # Safety
+///
+/// `base` must lie within the xHCI capability register file of a controller base validated at driver init; `off` must be a valid register offset.
 unsafe fn cap_r16(base: usize, off: u32) -> u16 {
+    // SAFETY: caller-validated MMIO base; offset within cap register file.
     unsafe { Mmio::<u16>::at(base + off as usize).read() }
 }
 
+/// # Safety
+///
+/// `base` must lie within the xHCI capability register file of a controller base validated at driver init; `off` must be a valid register offset.
 unsafe fn cap_r32(base: usize, off: u32) -> u32 {
+    // SAFETY: caller-validated MMIO base; offset within cap register file.
     unsafe { Mmio::<u32>::at(base + off as usize).read() }
 }
 
+/// # Safety
+///
+/// `base` must be the MMIO base of an xHCI controller validated at driver init and identity-mapped at boot; the offset is a fixed register-file offset per the constants in this file.
 pub unsafe fn read_caplength(base: usize) -> u8 {
+    // SAFETY: same contract as cap_r*: caller-validated base, fixed
+    // register-file offset.
     unsafe { cap_r8(base, CAPLENGTH) }
 }
 
+/// # Safety
+///
+/// `base` must be the MMIO base of an xHCI controller validated at driver init and identity-mapped at boot; the offset is a fixed register-file offset per the constants in this file.
 pub unsafe fn read_hciversion(base: usize) -> u16 {
+    // SAFETY: same contract as cap_r*: caller-validated base, fixed
+    // register-file offset.
     unsafe { cap_r16(base, HCIVERSION) }
 }
 
+/// # Safety
+///
+/// `base` must be the MMIO base of an xHCI controller validated at driver init and identity-mapped at boot; the offset is a fixed register-file offset per the constants in this file.
 pub unsafe fn read_hcsparams1(base: usize) -> u32 {
+    // SAFETY: same contract as cap_r*: caller-validated base, fixed
+    // register-file offset.
     unsafe { cap_r32(base, HCSPARAMS1) }
 }
 
+/// # Safety
+///
+/// `base` must be the MMIO base of an xHCI controller validated at driver init and identity-mapped at boot; the offset is a fixed register-file offset per the constants in this file.
 pub unsafe fn read_hcsparams2(base: usize) -> u32 {
+    // SAFETY: same contract as cap_r*: caller-validated base, fixed
+    // register-file offset.
     unsafe { cap_r32(base, HCSPARAMS2) }
 }
 
+/// # Safety
+///
+/// `base` must be the MMIO base of an xHCI controller validated at driver init and identity-mapped at boot; the offset is a fixed register-file offset per the constants in this file.
 pub unsafe fn read_hccparams1(base: usize) -> u32 {
+    // SAFETY: same contract as cap_r*: caller-validated base, fixed
+    // register-file offset.
     unsafe { cap_r32(base, HCCPARAMS1) }
 }
 
+/// # Safety
+///
+/// `base` must be the MMIO base of an xHCI controller validated at driver init and identity-mapped at boot; the offset is a fixed register-file offset per the constants in this file.
 pub unsafe fn read_dboff(base: usize) -> u32 {
+    // SAFETY: same contract as cap_r*: caller-validated base, fixed
+    // register-file offset.
     unsafe { cap_r32(base, DBOFF) }
 }
 
+/// # Safety
+///
+/// `base` must be the MMIO base of an xHCI controller validated at driver init and identity-mapped at boot; the offset is a fixed register-file offset per the constants in this file.
 pub unsafe fn read_rtsoff(base: usize) -> u32 {
+    // SAFETY: same contract as cap_r*: caller-validated base, fixed
+    // register-file offset.
     unsafe { cap_r32(base, RTSOFF) }
 }
 
+/// # Safety
+///
+/// `base` must be the MMIO base of an xHCI controller validated at driver init and identity-mapped at boot; the offset is a fixed register-file offset per the constants in this file.
 pub unsafe fn op_r32(obase: usize, off: u32) -> u32 {
+    // SAFETY: caller-validated MMIO base; offset is a register-file constant.
     unsafe { Mmio::<u32>::at(obase + off as usize).read() }
 }
 
+/// # Safety
+///
+/// `base` must be the MMIO base of an xHCI controller validated at driver init and identity-mapped at boot; the offset is a fixed register-file offset per the constants in this file.
 pub unsafe fn op_w32(obase: usize, off: u32, v: u32) {
+    // SAFETY: base was validated at driver init and lies inside the
+    // controller MMIO window; offset is within the register file.
     unsafe {
         Mmio::<u32>::at(obase + off as usize).write(v);
     }
 }
 
+/// # Safety
+///
+/// `base` must be the MMIO base of an xHCI controller validated at driver init and identity-mapped at boot; the offset is a fixed register-file offset per the constants in this file.
 pub unsafe fn op_w64(obase: usize, off: u32, v: u64) {
+    // SAFETY: base was validated at driver init and lies inside the
+    // controller MMIO window; offset is within the register file.
     unsafe {
         Mmio::<u64>::at(obase + off as usize).write(v);
     }
 }
 
+/// # Safety
+///
+/// `base` must be the MMIO base of an xHCI controller validated at driver init and identity-mapped at boot; the offset is a fixed register-file offset per the constants in this file.
 pub unsafe fn doorbell_w32(dboff: usize, slot: u8, target: u8) {
+    // SAFETY: base was validated at driver init and lies inside the
+    // controller MMIO window; offset is within the register file.
     unsafe {
         Mmio::<u32>::at(dboff + (slot as usize) * 4).write(target as u32);
     }
 }
 
+/// # Safety
+///
+/// `base` must be the MMIO base of an xHCI controller validated at driver init and identity-mapped at boot; the offset is a fixed register-file offset per the constants in this file.
 pub unsafe fn rt_r32(rtoff: usize, intr: u32, off: u32) -> u32 {
+    // SAFETY: caller-validated MMIO base; intr*0x20 + off stays in the
+    // runtime register set for intr 0.
     unsafe { Mmio::<u32>::at(rtoff + (intr as usize) * 0x20 + off as usize).read() }
 }
 
+/// # Safety
+///
+/// `base` must be the MMIO base of an xHCI controller validated at driver init and identity-mapped at boot; the offset is a fixed register-file offset per the constants in this file.
 pub unsafe fn rt_w32(rtoff: usize, intr: u32, off: u32, v: u32) {
+    // SAFETY: base was validated at driver init and lies inside the
+    // controller MMIO window; offset is within the register file.
     unsafe {
         Mmio::<u32>::at(rtoff + (intr as usize) * 0x20 + off as usize).write(v);
     }
 }
 
+/// # Safety
+///
+/// `base` must be the MMIO base of an xHCI controller validated at driver init and identity-mapped at boot; the offset is a fixed register-file offset per the constants in this file.
 pub unsafe fn rt_w64(rtoff: usize, intr: u32, off: u32, v: u64) {
+    // SAFETY: base was validated at driver init and lies inside the
+    // controller MMIO window; offset is within the register file.
     unsafe {
         Mmio::<u64>::at(rtoff + (intr as usize) * 0x20 + off as usize).write(v);
     }

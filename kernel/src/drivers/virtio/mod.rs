@@ -108,22 +108,39 @@ pub(crate) static mut G_DEVS: [VirtioBlkDev; VIRTIO_MAX_DEVS] = [VirtioBlkDev {
 }; VIRTIO_MAX_DEVS];
 pub(crate) static mut G_NDEVS: usize = 0;
 
+/// # Safety
+///
+/// `base` must be a virtio-mmio device base from the FDT probe or the fixed
+/// QEMU virt constants (identity-mapped at boot); `off` a spec register offset.
 #[inline]
 pub(crate) unsafe fn reg_w(base: usize, off: u32, v: u32) {
+    // SAFETY: base is a probed virtio-mmio base (FDT node / QEMU virt const) and off a spec register offset.
     unsafe {
         Mmio::<u32>::at(base + off as usize).write(v);
     }
 }
+/// # Safety
+///
+/// `base` must be a virtio-mmio device base from the FDT probe or the fixed
+/// QEMU virt constants (identity-mapped at boot); `off` a spec register offset.
 #[inline]
 pub(crate) unsafe fn reg_r(base: usize, off: u32) -> u32 {
+    // SAFETY: base is a probed virtio-mmio base (FDT node / QEMU virt const) and off a spec register offset.
     unsafe { Mmio::<u32>::at(base + off as usize).read() }
 }
 
 pub fn count() -> usize {
+    // SAFETY: plain usize read of boot-probe state; kernel code never runs with SIE set (see crate::sync).
     unsafe { G_NDEVS }
 }
 
+/// # Safety
+///
+/// `idx` need not be valid: out-of-range indices yield a null pointer.
+/// Callers must only dereference the result for a device fully initialized
+/// by `init`, and only from kernel context (SIE=0, see crate::sync).
 pub unsafe fn dev(idx: usize) -> *mut VirtioBlkDev {
+    // SAFETY: G_NDEVS/G_DEVS written only during single-threaded boot probe; idx is bounds-checked against G_NDEVS and out-of-range values return null without touching the array.
     unsafe {
         let pn = &raw const G_NDEVS;
         if idx < *pn {

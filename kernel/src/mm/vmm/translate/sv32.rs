@@ -17,7 +17,11 @@ pub unsafe fn translate(root_pa: u64, vaddr: u64) -> u64 {
 }
 
 /// See [`translate`] for the safety contract.
+/// # Safety
+///
+/// Same contract as [`translate`].
 unsafe fn translate_impl(root_pa: u64, vaddr: u64) -> u64 {
+    // SAFETY: read-only volatile walk; slot addresses come from the valid root or validated non-leaf PTEs per the fn contract.
     unsafe {
         if root_pa == 0 {
             return 0;
@@ -61,7 +65,11 @@ pub unsafe fn translate_user(root_pa: u64, vaddr: u64) -> u64 {
 }
 
 /// See [`translate_user`] for the safety contract.
+/// # Safety
+///
+/// Same contract as [`translate_user`].
 unsafe fn translate_user_impl(root_pa: u64, vaddr: u64) -> u64 {
+    // SAFETY: read-only volatile walk as in `translate_impl`; table PAs come from the valid root or validated non-leaf PTEs per the fn contract.
     unsafe {
         if root_pa == 0 {
             return 0;
@@ -108,7 +116,11 @@ pub unsafe fn translate_user_write(root_pa: u64, vaddr: u64) -> u64 {
 }
 
 /// See [`translate_user_write`] for the safety contract.
+/// # Safety
+///
+/// Same contract as [`translate_user_write`].
 unsafe fn translate_user_write_impl(root_pa: u64, vaddr: u64) -> u64 {
+    // SAFETY: read-only volatile walk as in `translate_impl`; table PAs come from the valid root or validated non-leaf PTEs per the fn contract.
     unsafe {
         if root_pa == 0 {
             return 0;
@@ -155,7 +167,11 @@ pub unsafe fn pte_user_flags(root_pa: u64, vaddr: u64) -> u64 {
 }
 
 /// See [`pte_user_flags`] for the safety contract.
+/// # Safety
+///
+/// Same contract as [`pte_user_flags`].
 unsafe fn pte_user_flags_impl(root_pa: u64, vaddr: u64) -> u64 {
+    // SAFETY: read-only volatile walk as in `translate_impl`; table PAs come from the valid root or validated non-leaf PTEs per the fn contract.
     unsafe {
         let mut pa = root_pa;
         for level in (0..=1).rev() {
@@ -196,7 +212,11 @@ pub unsafe fn update_user_pte(root_pa: u64, vaddr: u64, add_flags: u64) -> bool 
 }
 
 /// See [`update_user_pte`] for the safety contract.
+/// # Safety
+///
+/// Same contract as [`update_user_pte`] (VMM lock held).
 unsafe fn update_user_pte_impl(root_pa: u64, vaddr: u64, add_flags: u64) -> bool {
+    // SAFETY: volatile RMW of a level-0 user leaf slot validated by this walk; serialised by the VMM lock per the fn contract.
     unsafe {
         let mut pa = root_pa;
         for level in (0..=1).rev() {

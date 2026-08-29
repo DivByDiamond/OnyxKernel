@@ -7,6 +7,9 @@ pub fn write(addr: u8, data: &[u8]) -> KResult<()> {
     if data.is_empty() {
         return Err(Errno::Inval);
     }
+    // SAFETY: calls the unsafe bus primitives (start/write_byte), which
+    // require G_BASE to be a valid probed I2C base set by i2c::init; no
+    // concurrent I2C bus users during this transaction.
     unsafe {
         start(addr, false)?;
         for (i, &b) in data.iter().enumerate() {
@@ -23,6 +26,8 @@ pub fn read(addr: u8, reg: Option<u8>, buf: &mut [u8]) -> KResult<()> {
     if buf.is_empty() {
         return Err(Errno::Inval);
     }
+    // SAFETY: calls the unsafe bus primitives; requires G_BASE to be a valid
+    // probed I2C base set by i2c::init; no concurrent I2C bus users.
     unsafe {
         if let Some(r) = reg {
             start(addr, false)?;
@@ -48,8 +53,10 @@ pub fn scan(out: &mut [u8]) -> usize {
         if n >= out.len() {
             break;
         }
+        // SAFETY: bus probe via start(); G_BASE is a valid probed I2C base set by i2c::init.
         let ok = unsafe { start(addr, false).is_ok() };
         if ok {
+            // SAFETY: issues STOP on the controller; offsets within register file.
             unsafe {
                 wr(R_CMD_STATUS, STO);
             }

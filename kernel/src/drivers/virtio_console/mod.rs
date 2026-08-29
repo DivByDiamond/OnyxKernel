@@ -45,7 +45,12 @@ pub(crate) static mut G_CON: ConDev = ConDev {
     rx_buf: ptr::null_mut(),
 };
 
+/// # Safety
+///
+/// `base` must be a candidate virtio-mmio base from the FDT probe or the
+/// QEMU virt fallback constants (identity-mapped at boot).
 pub unsafe fn probe(base: usize) -> bool {
+    // SAFETY: base is a candidate virtio-mmio base from the boot-time probe; reg_r reads only spec offsets (magic, device ID).
     unsafe {
         if reg_r(base, R_MAGIC_VALUE) != 0x7472_6976 {
             return false;
@@ -54,7 +59,12 @@ pub unsafe fn probe(base: usize) -> bool {
     }
 }
 
+/// # Safety
+///
+/// `base` must be a probed virtio-console MMIO base; must be called during
+/// the single-threaded boot-time device probe, once per base.
 pub unsafe fn init(base: usize) -> KResult<()> {
+    // SAFETY: boot-time single-threaded probe (SIE=0, see crate::sync) on a probed base, Busy-guarded so G_CON is written at most once; offsets are spec constants.
     unsafe {
         if G_CON.base != 0 {
             return Err(Errno::Busy);
@@ -88,7 +98,12 @@ pub unsafe fn init(base: usize) -> KResult<()> {
     }
 }
 
+/// # Safety
+///
+/// Must be called from `init` with G_CON.base set to a probed base;
+/// `qidx` selects the RX (0) or TX (1) queue.
 unsafe fn setup_queue(qidx: u32, is_rx: bool) -> KResult<()> {
+    // SAFETY: called from init on a probed base during single-threaded boot; rings and RX buffer are fresh contiguous PMM pages stored into G_CON and registered with the device before use; RX descriptor posted at slot 0.
     unsafe {
         let base = G_CON.base;
         reg_w(base, R_QUEUE_SEL, qidx);
@@ -129,7 +144,12 @@ unsafe fn setup_queue(qidx: u32, is_rx: bool) -> KResult<()> {
     }
 }
 
+/// # Safety
+///
+/// The avail ring of the selected queue must have been initialized by
+/// `init` (non-null); `idx` must be a valid descriptor index for it.
 pub(crate) unsafe fn push(idx: usize, is_rx: bool) {
+    // SAFETY: G_CON.{rx,tx}_avail are PMM rings set up by init; ring slot masked % VIRTQ_SIZE per spec; volatile write + SeqCst fence order entry before idx bump.
     unsafe {
         let avail = if is_rx {
             G_CON.rx_avail

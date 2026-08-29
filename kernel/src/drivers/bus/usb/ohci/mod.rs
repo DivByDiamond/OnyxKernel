@@ -102,24 +102,44 @@ static mut G_OHCI_TD_COUNT: usize = 0;
 static mut G_OHCI_ED_OFFSETS: [usize; MAX_OHCI_ED] = [0; MAX_OHCI_ED];
 static mut G_OHCI_TD_OFFSETS: [usize; MAX_OHCI_TD] = [0; MAX_OHCI_TD];
 
+/// # Safety
+///
+/// `G_OHCI_BASE` must have been set by `init_ohci` and `reg` must be a
+/// register offset from this file's constants.
 #[inline]
 pub(super) unsafe fn ohci_rd(reg: u32) -> u32 {
+    // SAFETY: G_OHCI_BASE was set by init_ohci from the probed controller base; reg is an in-file register offset, so the MMIO read stays in the device window.
     unsafe { Mmio::<u32>::at(G_OHCI_BASE + reg as usize).read() }
 }
 
+/// # Safety
+///
+/// Same contract as `ohci_rd`; the write targets an in-file register offset
+/// within the controller's MMIO window.
 #[inline]
 pub(super) unsafe fn ohci_wr(reg: u32, v: u32) {
+    // SAFETY: G_OHCI_BASE was set by init_ohci from the probed controller base; reg is an in-file register offset, so the MMIO write stays in the device window.
     unsafe {
         Mmio::<u32>::at(G_OHCI_BASE + reg as usize).write(v);
     }
 }
 
+/// # Safety
+///
+/// `off` must be an offset previously returned by `ohci_alloc_dma` (bounded
+/// by `OHCI_DMA_POOL_SIZE`) so pool_va + off stays inside the pool.
 unsafe fn ohci_pool_phys(off: usize) -> u32 {
     let pool_va = &raw const G_OHCI_DMA as usize;
     (pool_va + off) as u32
 }
 
+/// # Safety
+///
+/// Call from the driver's single-threaded USB path with SIE=0 (see
+/// `crate::sync`); the aligned request must fit `OHCI_DMA_POOL_SIZE`
+/// (checked below).
 unsafe fn ohci_alloc_dma(size: usize) -> KResult<usize> {
+    // SAFETY: G_OHCI_DMA_USED is only mutated here under the single-threaded (SIE=0) contract; bounds checked against OHCI_DMA_POOL_SIZE and write_bytes stays inside the aligned pool.
     unsafe {
         let aligned = (size + 15) & !15;
         let off = G_OHCI_DMA_USED;
@@ -132,7 +152,12 @@ unsafe fn ohci_alloc_dma(size: usize) -> KResult<usize> {
     }
 }
 
+/// # Safety
+///
+/// Call from the driver's single-threaded USB path with SIE=0 (see
+/// `crate::sync`); ED table state is only mutated through this helper.
 pub(super) unsafe fn ohci_alloc_ed() -> KResult<usize> {
+    // SAFETY: G_OHCI_ED_COUNT is bounded by the MAX_OHCI_ED check and mutated only here (SIE=0 per crate::sync); ohci_alloc_dma's offset is bounds-checked.
     unsafe {
         if G_OHCI_ED_COUNT >= MAX_OHCI_ED {
             return Err(Errno::NoMem);
@@ -145,7 +170,12 @@ pub(super) unsafe fn ohci_alloc_ed() -> KResult<usize> {
     }
 }
 
+/// # Safety
+///
+/// Call from the driver's single-threaded USB path with SIE=0 (see
+/// `crate::sync`); TD table state is only mutated through this helper.
 pub(super) unsafe fn ohci_alloc_td() -> KResult<usize> {
+    // SAFETY: G_OHCI_TD_COUNT is bounded by the MAX_OHCI_TD check and mutated only here (SIE=0 per crate::sync); ohci_alloc_dma's offset is bounds-checked.
     unsafe {
         if G_OHCI_TD_COUNT >= MAX_OHCI_TD {
             return Err(Errno::NoMem);
@@ -158,23 +188,42 @@ pub(super) unsafe fn ohci_alloc_td() -> KResult<usize> {
     }
 }
 
+/// # Safety
+///
+/// `idx` must be an ED index previously returned by `ohci_alloc_ed` (its
+/// pool offset recorded in `G_OHCI_ED_OFFSETS`).
 pub(super) unsafe fn ohci_ed_ptr(idx: usize) -> *mut OhciED {
+    // SAFETY: idx from ohci_alloc_ed means G_OHCI_ED_OFFSETS[idx] is a checked in-pool offset; the cast stays inside the 4096-byte aligned pool.
     unsafe { G_OHCI_DMA.data.as_mut_ptr().add(G_OHCI_ED_OFFSETS[idx]) as *mut OhciED }
 }
 
+/// # Safety
+///
+/// `idx` must be a TD index previously returned by `ohci_alloc_td` (its
+/// pool offset recorded in `G_OHCI_TD_OFFSETS`).
 pub(super) unsafe fn ohci_td_ptr(idx: usize) -> *mut OhciTD {
+    // SAFETY: idx from ohci_alloc_td means G_OHCI_TD_OFFSETS[idx] is a checked in-pool offset; the cast stays inside the 4096-byte aligned pool.
     unsafe { G_OHCI_DMA.data.as_mut_ptr().add(G_OHCI_TD_OFFSETS[idx]) as *mut OhciTD }
 }
 
+/// # Safety
+///
+/// `idx` must be an ED index previously returned by `ohci_alloc_ed`.
 pub(super) unsafe fn ohci_ed_phys(idx: usize) -> u32 {
+    // SAFETY: idx from ohci_alloc_ed means the offset is a checked in-pool offset; the pool base is the static G_OHCI_DMA address.
     unsafe { ohci_pool_phys(G_OHCI_ED_OFFSETS[idx]) }
 }
 
+/// # Safety
+///
+/// `idx` must be a TD index previously returned by `ohci_alloc_td`.
 pub(super) unsafe fn ohci_td_phys(idx: usize) -> u32 {
+    // SAFETY: idx from ohci_alloc_td means the offset is a checked in-pool offset; the pool base is the static G_OHCI_DMA address.
     unsafe { ohci_pool_phys(G_OHCI_TD_OFFSETS[idx]) }
 }
 
 pub(super) fn ohci_n_ports() -> u8 {
+    // SAFETY: plain read of G_OHCI_N_PORTS, written once by init_ohci during single-threaded boot init.
     unsafe { G_OHCI_N_PORTS }
 }
 

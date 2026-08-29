@@ -14,6 +14,12 @@ use super::{
     ohci_wr,
 };
 
+/// # Safety
+///
+/// Requires `init_ohci` to have run (controller operational) and the caller
+/// to serialize USB access (single-threaded path, SIE=0 per `crate::sync`).
+/// `data` must remain valid and DMA-addressable for the duration of the
+/// transfer.
 pub unsafe fn ohci_bulk_transfer(
     dev_addr: u8,
     mut data: Option<&mut [u8]>,
@@ -21,6 +27,7 @@ pub unsafe fn ohci_bulk_transfer(
     max_pkt: u32,
     speed: u8,
 ) -> KResult<u32> {
+    // SAFETY: ED/TD indices from ohci_alloc_ed/ohci_alloc_td so all raw-pointer writes land inside the G_OHCI_DMA pool; MMIO via ohci_rd/ohci_wr on in-file offsets (G_OHCI_BASE set by init_ohci); the data buffer is caller-provided and valid for the transfer.
     unsafe {
         let data_len = data.as_ref().map(|d| d.len() as u32).unwrap_or(0);
         if data_len == 0 {
@@ -100,7 +107,13 @@ pub unsafe fn ohci_bulk_transfer(
     }
 }
 
+/// # Safety
+///
+/// Must run once on the boot hart during single-threaded early boot before
+/// secondary harts start, with `base` equal to the controller's MMIO base
+/// (identity-mapped at boot; `probe_ohci` is re-checked inside).
 pub unsafe fn init_ohci(base: usize) -> KResult<()> {
+    // SAFETY: probe_ohci re-validates base before any register access and all offsets are in-file constants; G_OHCI_* globals are written here during single-threaded init before secondary harts start; the HCCA comes from pmm::alloc_zero (zeroed PMM-owned frame).
     unsafe {
         if !super::probe_ohci(base) {
             return Err(Errno::NoEnt);

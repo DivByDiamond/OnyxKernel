@@ -19,6 +19,7 @@ impl AnsiTerm {
         for row in self.top..self.bot {
             let dst = base + row * row_bytes;
             let src = base + (row + 1) * row_bytes;
+            // SAFETY: base/pitch come from fb::info() (validated fb geometry), rows stay inside top..=bot < fb height, and dst/src are exactly one row apart so the copy is non-overlapping within the mapped framebuffer.
             unsafe {
                 core::ptr::copy_nonoverlapping(src as *const u8, dst as *mut u8, row_bytes);
             }
@@ -39,6 +40,7 @@ impl AnsiTerm {
         while row > self.top {
             let dst = base + row * row_bytes;
             let src = base + (row - 1) * row_bytes;
+            // SAFETY: same fb::info()-validated geometry; rows descend with src one row above dst, so the copy is non-overlapping within the mapped framebuffer.
             unsafe {
                 core::ptr::copy_nonoverlapping(src as *const u8, dst as *mut u8, row_bytes);
             }
@@ -145,6 +147,7 @@ fn fb_info() -> (usize, usize, usize, usize, usize) {
 
 pub(super) fn clear_row_bytes(dst: usize, len: usize, color: u32) {
     let bytes = color.to_le_bytes();
+    // SAFETY: callers pass dst = base + row*pitch*FONT_H inside the fb::info()-validated framebuffer with len = pitch*FONT_H, so the byte stores stay within the mapped FB.
     unsafe {
         let d = dst as *mut u8;
         for i in 0..len {

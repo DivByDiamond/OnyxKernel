@@ -12,7 +12,12 @@ use crate::mm::pmm;
 use core::ptr;
 use onyx_core::errno::{Errno, KResult};
 
+/// # Safety
+///
+/// `base` must be a candidate virtio-mmio base from the FDT probe or the
+/// QEMU virt fallback constants (identity-mapped at boot).
 pub unsafe fn probe(base: usize) -> bool {
+    // SAFETY: base is a candidate virtio-mmio base from the boot-time probe; reg_r reads only spec offsets (magic, device ID).
     unsafe {
         let magic = reg_r(base, R_MAGIC_VALUE);
         if magic != 0x7472_6976 {
@@ -22,7 +27,12 @@ pub unsafe fn probe(base: usize) -> bool {
     }
 }
 
+/// # Safety
+///
+/// `base` must be a probed virtio-blk MMIO base; must be called during the
+/// single-threaded boot-time device probe, once per base.
 pub unsafe fn init(base: usize) -> KResult<usize> {
+    // SAFETY: boot-time single-threaded probe on a probed base; G_DEVS/G_NDEVS touched only here (SIE=0, see crate::sync), slot bounded by VIRTIO_MAX_DEVS.
     unsafe {
         let pn = &raw const G_NDEVS;
         if *pn >= VIRTIO_MAX_DEVS {
@@ -79,7 +89,12 @@ pub unsafe fn init(base: usize) -> KResult<usize> {
     }
 }
 
+/// # Safety
+///
+/// `idx` must be the slot just stored by `init` (so `idx < G_NDEVS`) and the
+/// call must happen during single-threaded boot-time probe.
 unsafe fn setup_queue(idx: usize) -> KResult<()> {
+    // SAFETY: idx < G_NDEVS guaranteed by init; rings/req buffer are fresh contiguous PMM pages stored into the device before it is told the addresses.
     unsafe {
         let pd = &raw mut G_DEVS;
         let dev = &mut (*pd)[idx];

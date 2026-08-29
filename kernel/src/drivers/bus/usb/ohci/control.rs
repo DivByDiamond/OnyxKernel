@@ -11,6 +11,12 @@ use super::{
     ohci_td_phys, ohci_td_ptr, ohci_wr,
 };
 
+/// # Safety
+///
+/// Requires `init_ohci` to have run (controller operational, HCCA
+/// programmed) and the caller to serialize USB access (single-threaded
+/// path, SIE=0 per `crate::sync`). `setup_pkt` and `data` must remain
+/// valid and DMA-addressable for the duration of the transfer.
 pub unsafe fn ohci_control_transfer(
     dev_addr: u8,
     setup_pkt: &[u8; 8],
@@ -19,6 +25,7 @@ pub unsafe fn ohci_control_transfer(
     max_pkt: u32,
     speed: u8,
 ) -> KResult<u32> {
+    // SAFETY: ED/TD indices from ohci_alloc_ed/ohci_alloc_td so all raw-pointer writes land inside the G_OHCI_DMA pool; MMIO via ohci_rd/ohci_wr on in-file offsets (G_OHCI_BASE set by init_ohci); setup/data buffers are caller-provided and valid for the transfer.
     unsafe {
         let data_len = data.as_ref().map(|d| d.len() as u32).unwrap_or(0);
 
@@ -148,7 +155,12 @@ pub unsafe fn ohci_control_transfer(
     }
 }
 
+/// # Safety
+///
+/// `base` must be the MMIO base of an OHCI controller identity-mapped at
+/// boot (init_usb passes the hardcoded SG2000 `OHCI_BASE`).
 pub unsafe fn probe_ohci(base: usize) -> bool {
+    // SAFETY: base is the platform-constant OHCI_BASE, identity-mapped on SG2000 (probing is skipped elsewhere); single read at the HCRev offset, an in-file constant.
     unsafe {
         if base == 0 {
             return false;
@@ -158,7 +170,12 @@ pub unsafe fn probe_ohci(base: usize) -> bool {
     }
 }
 
+/// # Safety
+///
+/// Requires a prior `init_ohci` (G_OHCI_BASE/G_OHCI_N_PORTS set); `idx` is
+/// bounds-checked below against G_OHCI_N_PORTS.
 pub unsafe fn ohci_port_status(idx: u8) -> KResult<u32> {
+    // SAFETY: init_ohci set G_OHCI_BASE and G_OHCI_N_PORTS; idx is bounds-checked above, so the port-status offset stays within the register file.
     unsafe {
         if idx >= G_OHCI_N_PORTS {
             return Err(Errno::Range);
@@ -168,7 +185,12 @@ pub unsafe fn ohci_port_status(idx: u8) -> KResult<u32> {
     }
 }
 
+/// # Safety
+///
+/// Requires a prior `init_ohci` (G_OHCI_BASE/G_OHCI_N_PORTS set); `idx` is
+/// bounds-checked below against G_OHCI_N_PORTS.
 pub unsafe fn ohci_port_reset(idx: u8) -> KResult<()> {
+    // SAFETY: init_ohci set G_OHCI_BASE and G_OHCI_N_PORTS; idx is bounds-checked above, so the port-status offset stays within the register file.
     unsafe {
         if idx >= G_OHCI_N_PORTS {
             return Err(Errno::Range);
@@ -188,7 +210,12 @@ pub unsafe fn ohci_port_reset(idx: u8) -> KResult<()> {
     }
 }
 
+/// # Safety
+///
+/// Requires a prior `init_ohci` (G_OHCI_BASE/G_OHCI_N_PORTS set); `idx` is
+/// bounds-checked below against G_OHCI_N_PORTS.
 pub unsafe fn ohci_port_enable(idx: u8) -> KResult<()> {
+    // SAFETY: init_ohci set G_OHCI_BASE and G_OHCI_N_PORTS; idx is bounds-checked above, so the port-status offset stays within the register file.
     unsafe {
         if idx >= G_OHCI_N_PORTS {
             return Err(Errno::Range);
@@ -199,7 +226,12 @@ pub unsafe fn ohci_port_enable(idx: u8) -> KResult<()> {
     }
 }
 
+/// # Safety
+///
+/// Requires a prior `init_ohci`; `idx` must be below the port count
+/// (enforced by the bounds check inside `ohci_port_status`).
 pub unsafe fn ohci_port_speed(idx: u8) -> KResult<u8> {
+    // SAFETY: read-only query forwarded to ohci_port_status, which bounds-checks idx against G_OHCI_N_PORTS before its MMIO read.
     unsafe {
         let ps = ohci_port_status(idx)?;
         Ok(if (ps & RH_PS_LSDA) != 0 { 1 } else { 0 })

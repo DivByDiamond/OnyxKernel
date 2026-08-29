@@ -8,6 +8,7 @@ use onyx_core::errno::{Errno, KResult};
 /// Poll for a received Ethernet frame. Copies up to `out.len()` bytes.
 /// Returns the number of bytes received, or `Err(NoEnt)` if no frame is ready.
 pub fn recv_into(out: &mut [u8]) -> KResult<usize> {
+    // SAFETY: valid only after init() completed (guarded here); slot/buf_idx masked % RX_DESCS keep used-ring and rx_bufs accesses in bounds; the device only writes HDR_LEN+NET_MTU-byte RX buffers and the copy length is clamped to out.len().
     unsafe {
         if G_NET.base == 0 || G_NET.avail.is_null() || G_NET.used.is_null() {
             return Err(Errno::Io);
@@ -33,6 +34,7 @@ pub fn send(frame: &[u8]) -> KResult<()> {
     if frame.is_empty() || frame.len() > NET_MTU {
         return Err(Errno::Inval);
     }
+    // SAFETY: valid only after init() completed (guarded below); desc slots 0/1 < VIRTQ_SIZE reference fresh PMM pages; frame.len() <= NET_MTU checked above; buffers freed only after used idx advances (leaked on timeout to avoid device-side use-after-free).
     unsafe {
         // Never dereference a half-initialized device: init() exposes the
         // global only after the queues are up, but keep the guard as defense

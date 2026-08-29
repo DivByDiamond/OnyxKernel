@@ -74,6 +74,8 @@ fn idx_to_pa(idx: usize) -> usize {
 /// `pmm::init` must have completed. Interrupts must be disabled (spinlock
 /// invariant).
 pub unsafe fn alloc() -> KResult<u64> {
+    // SAFETY: lock acquisition is safe; `alloc_unlocked` upholds the
+    // `# Safety` contract above under the PMM lock (`G_PMM_LOCK`).
     unsafe {
         super::pmm_lock();
         let r = alloc_unlocked();
@@ -115,6 +117,8 @@ pub(super) unsafe fn alloc_unlocked() -> KResult<u64> {
 ///
 /// Same as [`alloc`]: PMM initialised, interrupts disabled.
 pub unsafe fn alloc_n(n: usize) -> KResult<u64> {
+    // SAFETY: lock acquisition is safe; `alloc_n_unlocked` upholds the
+    // `# Safety` contract above under the PMM lock (`G_PMM_LOCK`).
     unsafe {
         super::pmm_lock();
         let r = alloc_n_unlocked(n);
@@ -175,6 +179,8 @@ pub(super) unsafe fn alloc_n_unlocked(n: usize) -> KResult<u64> {
 /// previous allocation and is not in use; PMM must be initialised and
 /// interrupts disabled.
 pub unsafe fn free(pa: u64) {
+    // SAFETY: lock acquisition is safe; `free_unlocked` upholds the
+    // `# Safety` contract above under the PMM lock (`G_PMM_LOCK`).
     unsafe {
         super::pmm_lock();
         free_unlocked(pa);
@@ -212,6 +218,8 @@ pub(super) unsafe fn free_unlocked(pa: u64) {
 ///
 /// Same as [`alloc`].
 pub unsafe fn alloc_zero() -> KResult<u64> {
+    // SAFETY: `alloc` self-locks and upholds its own `# Safety` contract;
+    // this wrapper touches no additional raw state.
     unsafe {
         // alloc() already acquires pmm_lock; no extra locking needed here.
         alloc()

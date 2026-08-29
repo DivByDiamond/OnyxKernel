@@ -23,6 +23,7 @@ pub fn init(base: usize) {
 
 /// Power off the machine cleanly (QEMU exits with code 0).
 pub fn poweroff() -> ! {
+    // SAFETY: FINISHER_BASE is a fixed SoC/QEMU device base defined in this file; the single u32 write is within its one-word MMIO window.
     unsafe {
         Mmio::<u32>::at(FINISHER_BASE).write(FINISHER_SHUTDOWN);
         // If the device didn't accept the command, fall back to a hard loop.
@@ -34,6 +35,7 @@ pub fn poweroff() -> ! {
 
 /// Reboot the machine (QEMU resets).
 pub fn reboot() -> ! {
+    // SAFETY: FINISHER_BASE is a fixed SoC/QEMU device base defined in this file; the u32 writes are within its one-word MMIO window.
     unsafe {
         Mmio::<u32>::at(FINISHER_BASE).write(FINISHER_REBOOT);
         // Some platforms use a different reset register; try the older
@@ -47,6 +49,7 @@ pub fn reboot() -> ! {
 
 /// Halt the machine and signal a clean exit (test PASS).
 pub fn exit_pass() -> ! {
+    // SAFETY: FINISHER_BASE is a fixed SoC/QEMU device base defined in this file; the single u32 write is within its one-word MMIO window.
     unsafe {
         Mmio::<u32>::at(FINISHER_BASE).write(FINISHER_PASS);
         loop {
@@ -57,6 +60,7 @@ pub fn exit_pass() -> ! {
 
 /// Halt the machine and signal a failure exit code.
 pub fn exit_fail(code: u32) -> ! {
+    // SAFETY: FINISHER_BASE is a fixed SoC/QEMU device base defined in this file; the single u32 write is within its one-word MMIO window.
     unsafe {
         let v = FINISHER_FAIL | ((code & 0xFFFF) << 16);
         Mmio::<u32>::at(FINISHER_BASE).write(v);

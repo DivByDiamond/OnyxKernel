@@ -71,11 +71,20 @@ pub const MODES: &[DisplayMode] = &[
     },
 ];
 
+/// # Safety
+///
+/// Stub: performs no unsafe operations; the unsafe marker is reserved for a
+/// future device-probing implementation.
 pub unsafe fn probe_all() -> KResult<()> {
     Err(Errno::NoEnt)
 }
 
+/// # Safety
+///
+/// Must run during single-threaded display setup (SIE=0) since it mutates
+/// `G_DISPLAY`; `mode` is trusted driver-side geometry.
 pub unsafe fn set_mode(mode: &DisplayMode) -> KResult<()> {
+    // SAFETY: G_DISPLAY is only mutated here during single-threaded setup (SIE=0, see crate::sync); fb_pa comes from pmm::alloc_n and fb::init validates the address.
     unsafe {
         if !G_DISPLAY.enabled {
             return Err(Errno::NoSys);
@@ -103,7 +112,12 @@ pub unsafe fn set_mode(mode: &DisplayMode) -> KResult<()> {
     }
 }
 
+/// # Safety
+///
+/// Must run once during single-threaded boot init (SIE=0); `_fdt_addr` is
+/// currently unused and probing uses the fixed platform MMIO bases below.
 pub unsafe fn init_display(_fdt_addr: usize) -> KResult<()> {
+    // SAFETY: G_DISPLAY is written once here during single-threaded boot (SIE=0); virtio bases are the fixed platform MMIO constants in this function, the fallback fb_pa comes from pmm::alloc_n.
     unsafe {
         let mut found_virtio_gpu = false;
         let virtio_bases = [
@@ -149,5 +163,6 @@ pub unsafe fn init_display(_fdt_addr: usize) -> KResult<()> {
 }
 
 pub fn current_mode() -> &'static DisplayMode {
+    // SAFETY: read-only borrow of G_DISPLAY.mode, written only during single-threaded init (SIE=0, see crate::sync).
     unsafe { &G_DISPLAY.mode }
 }

@@ -4,7 +4,12 @@ use super::{
     clear_interrupts, reset, set_sdma_addr, wait_idle, wait_state, wait_transfer_complete,
 };
 
+/// # Safety
+/// Driver must be initialized (`crate::drivers::sdhci::init`); `lba` must be a valid sector.
 pub unsafe fn read(lba: u64, buf: &mut [u8; 512]) -> bool {
+    // SAFETY: G_SDHCI was filled by single-threaded init with a probed MMIO
+    // base; register offsets per regs.rs; buf is a 512-byte buffer handed to
+    // the SDMA engine and polled to completion.
     unsafe {
         let p = &raw const crate::drivers::sdhci::G_SDHCI;
         if !(*p).initialized {
@@ -53,7 +58,12 @@ pub unsafe fn read(lba: u64, buf: &mut [u8; 512]) -> bool {
     }
 }
 
+/// # Safety
+/// Driver must be initialized; `lba` must be a valid sector.
 pub unsafe fn write(lba: u64, buf: &[u8; 512]) -> bool {
+    // SAFETY: G_SDHCI was filled by single-threaded init with a probed MMIO
+    // base; register offsets per regs.rs; buf stays valid for the polled
+    // SDMA transfer of one 512-byte sector.
     unsafe {
         let p = &raw const crate::drivers::sdhci::G_SDHCI;
         if !(*p).initialized {
@@ -99,13 +109,18 @@ pub unsafe fn write(lba: u64, buf: &[u8; 512]) -> bool {
     }
 }
 
+/// # Safety
+/// Caller contract: `buf` must be writable for `n_sectors * 512` bytes; driver must be initialized.
 pub unsafe fn read_multi(lba: u64, n_sectors: u32, buf: *mut u8) -> bool {
+    // SAFETY: per-iteration offset i*512 is within the caller's buffer, which
+    // must hold n_sectors*512 bytes (caller contract); copy is non-overlapping.
     unsafe {
         let mut sector_buf = [0u8; SDHCI_SECTOR_SIZE];
         for i in 0u32..n_sectors {
             if !read(lba + i as u64, &mut sector_buf) {
                 return false;
             }
+            // SAFETY: dest offset i*512 is bounded by the n_sectors*512 caller contract.
             core::ptr::copy_nonoverlapping(
                 sector_buf.as_ptr(),
                 buf.add((i as usize) * SDHCI_SECTOR_SIZE),
@@ -116,10 +131,15 @@ pub unsafe fn read_multi(lba: u64, n_sectors: u32, buf: *mut u8) -> bool {
     }
 }
 
+/// # Safety
+/// Caller contract: `buf` must be readable for `n_sectors * 512` bytes; driver must be initialized.
 pub unsafe fn write_multi(lba: u64, n_sectors: u32, buf: *const u8) -> bool {
+    // SAFETY: per-iteration offset i*512 is within the caller's buffer, which
+    // must hold n_sectors*512 bytes (caller contract); copy is non-overlapping.
     unsafe {
         let mut sector_buf = [0u8; SDHCI_SECTOR_SIZE];
         for i in 0u32..n_sectors {
+            // SAFETY: source offset i*512 is bounded by the n_sectors*512 caller contract.
             core::ptr::copy_nonoverlapping(
                 buf.add((i as usize) * SDHCI_SECTOR_SIZE),
                 sector_buf.as_mut_ptr(),

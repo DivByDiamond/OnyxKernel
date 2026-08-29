@@ -49,7 +49,12 @@ pub(crate) static mut G_IN: InDev = InDev {
     _head: 0,
 };
 
+/// # Safety
+///
+/// `base` must be a candidate virtio-mmio base from the FDT probe or the
+/// QEMU virt fallback constants (identity-mapped at boot).
 pub unsafe fn probe(base: usize) -> bool {
+    // SAFETY: base is a candidate virtio-mmio base from the boot-time probe; reg_r reads only spec offsets (magic, device ID).
     unsafe {
         if reg_r(base, R_MAGIC_VALUE) != 0x7472_6976 {
             return false;
@@ -58,7 +63,12 @@ pub unsafe fn probe(base: usize) -> bool {
     }
 }
 
+/// # Safety
+///
+/// `base` must be a probed virtio-input MMIO base; must be called during
+/// the single-threaded boot-time device probe, once per base.
 pub unsafe fn init(base: usize) -> KResult<()> {
+    // SAFETY: boot-time single-threaded probe (SIE=0, see crate::sync) on a probed base, Busy-guarded so G_IN is written at most once; offsets are spec constants.
     unsafe {
         if G_IN.base != 0 {
             return Err(Errno::Busy);
@@ -91,7 +101,12 @@ pub unsafe fn init(base: usize) -> KResult<()> {
     }
 }
 
+/// # Safety
+///
+/// Must be called from `init` with G_IN.base set to a probed base, during
+/// single-threaded boot-time probe.
 unsafe fn setup_event_queue() -> KResult<()> {
+    // SAFETY: called from init on a probed base during single-threaded boot; rings and the N_EVENTS-entry buffer are fresh contiguous PMM pages stored into G_IN and registered before use; desc slots 0..N_EVENTS pre-posted, N_EVENTS < VIRTQ_SIZE.
     unsafe {
         let base = G_IN.base;
         reg_w(base, R_QUEUE_SEL, 0);
@@ -126,7 +141,12 @@ unsafe fn setup_event_queue() -> KResult<()> {
     }
 }
 
+/// # Safety
+///
+/// G_IN.avail must have been initialized by `init` (non-null); `idx` must
+/// be a valid descriptor index (< N_EVENTS).
 unsafe fn push(idx: usize) {
+    // SAFETY: G_IN.avail is a PMM ring set up by init; ring slot masked % VIRTQ_SIZE per spec; volatile write + SeqCst fence order entry before idx bump.
     unsafe {
         let i = ptr::read_volatile(ptr::addr_of!((*G_IN.avail).idx));
         ptr::write_volatile(

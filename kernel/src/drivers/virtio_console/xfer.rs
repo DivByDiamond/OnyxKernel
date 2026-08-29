@@ -7,6 +7,7 @@ use onyx_core::errno::KResult;
 
 /// Poll for one received byte, or `None` if no data is available.
 pub fn getc() -> Option<u8> {
+    // SAFETY: valid only after init completed: rx_used/rx_buf then point at PMM rings/page; single volatile u16/u8 reads, then the descriptor is recycled via push().
     unsafe {
         let used_idx = ptr::read_volatile(ptr::addr_of!((*G_CON.rx_used).idx));
         if used_idx == G_CON.rx_last {
@@ -24,6 +25,7 @@ pub fn getc() -> Option<u8> {
 /// TX payload — virtio-console expects the descriptor address to be a
 /// physical address, so we use PMM directly.
 pub fn putc(b: u8) -> KResult<()> {
+    // SAFETY: valid only after init completed: tx_desc/tx_used are PMM rings; buf_pa is a fresh PMM page holding the byte, freed only after tx_used.idx advances past our entry.
     unsafe {
         let buf_pa = pmm::alloc_zero()? as *mut u8;
         *buf_pa = b;

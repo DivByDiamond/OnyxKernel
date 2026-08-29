@@ -7,7 +7,12 @@ use super::{
     QH_TERMINATE, STS_ASYNC_ADVANCE, STS_HCHALTED, alloc_qh, op_rd, op_wr, qh_phys, qh_ptr,
 };
 
+/// # Safety
+///
+/// Must be called after `init_ehci` has set `G_OP_BASE`, from the driver's
+/// single-threaded USB path with SIE=0 (see `crate::sync`).
 pub(super) unsafe fn init_async_list() -> KResult<()> {
+    // SAFETY: runs after init_ehci with SIE=0 (see crate::sync); the head QH comes from alloc_qh so every raw-pointer write below lands inside the G_DMA pool; op_rd/op_wr target in-file register offsets.
     unsafe {
         if G_ASYNCLIST_ENABLED {
             return Ok(());
@@ -33,7 +38,12 @@ pub(super) unsafe fn init_async_list() -> KResult<()> {
     }
 }
 
+/// # Safety
+///
+/// `idx` must be a QH index from `alloc_qh`, called after `init_ehci` from
+/// the driver's single-threaded USB path with SIE=0.
 pub(super) unsafe fn qh_insert(idx: usize) {
+    // SAFETY: qh_ptr(idx) is inside the G_DMA pool (idx from alloc_qh); head_phys read back from OP_ASYNCLISTADDR was previously programmed from qh_phys, i.e. an in-pool address; MMIO offsets are in-file constants.
     unsafe {
         if !G_ASYNCLIST_ENABLED {
             return;
@@ -50,7 +60,12 @@ pub(super) unsafe fn qh_insert(idx: usize) {
     }
 }
 
+/// # Safety
+///
+/// Same contract as `qh_insert`: `idx` from `alloc_qh`, async list
+/// initialized, single-threaded USB path with SIE=0.
 pub(super) unsafe fn qh_remove(idx: usize) {
+    // SAFETY: the list walk only follows physical addresses previously written from qh_phys (all inside the G_DMA pool) and qh_ptr(idx) is in-pool; MMIO offsets are in-file constants; SIE=0 per crate::sync.
     unsafe {
         if !G_ASYNCLIST_ENABLED {
             return;
@@ -76,7 +91,13 @@ pub(super) unsafe fn qh_remove(idx: usize) {
     }
 }
 
+/// # Safety
+///
+/// Must run once on the boot hart during single-threaded early boot before
+/// secondary harts start, with `base` equal to the controller's MMIO base
+/// (identity-mapped at boot and validated by `probe_ehci`).
 pub unsafe fn init_ehci(base: usize) -> KResult<()> {
+    // SAFETY: base is the platform constant passed by init_usb after probe_ehci validated it, identity-mapped at boot; G_OP_BASE/G_N_PORTS/G_ACTIVE are written here during single-threaded init before secondary harts start; register offsets are in-file constants.
     unsafe {
         let cap_len = Mmio::<u32>::at(base).read() & 0xFF;
         G_OP_BASE = base + cap_len as usize;

@@ -44,10 +44,16 @@ pub(crate) static mut G_NET: NetDev = NetDev {
 
 /// True once a virtio-net device has been fully initialized (queues up).
 pub fn present() -> bool {
+    // SAFETY: reads of base/desc written together by single-threaded boot init; kernel code never runs with SIE set (see crate::sync).
     unsafe { G_NET.base != 0 && !G_NET.desc.is_null() }
 }
 
+/// # Safety
+///
+/// `base` must be a candidate virtio-mmio base from the FDT probe or the
+/// QEMU virt fallback constants (identity-mapped at boot).
 pub unsafe fn probe(base: usize) -> bool {
+    // SAFETY: base is a candidate virtio-mmio base from the boot-time probe; reg_r reads only spec offsets (magic, device ID).
     unsafe {
         if reg_r(base, R_MAGIC_VALUE) != 0x7472_6976 {
             return false;
@@ -56,7 +62,12 @@ pub unsafe fn probe(base: usize) -> bool {
     }
 }
 
+/// # Safety
+///
+/// `base` must be a probed virtio-net MMIO base; must be called during the
+/// single-threaded boot-time device probe, once per base.
 pub unsafe fn init(base: usize) -> KResult<()> {
+    // SAFETY: boot-time single-threaded probe (SIE=0, see crate::sync) on a probed base, Busy-guarded so G_NET is written at most once; offsets are spec constants and MAC reads target the device config region at 0x100 (legacy MMIO layout).
     unsafe {
         if G_NET.base != 0 {
             return Err(Errno::Busy);
@@ -110,7 +121,13 @@ pub unsafe fn init(base: usize) -> KResult<()> {
     }
 }
 
+/// # Safety
+///
+/// `base` must be the probed virtio-net base already reset/ack'd by `init`;
+/// must be called during single-threaded boot-time probe before G_NET.base
+/// is published.
 unsafe fn setup_rx_queue(base: usize) -> KResult<()> {
+    // SAFETY: called from init on a probed base; rings and RX_DESCS RX buffers are fresh contiguous PMM pages registered with the device (LOW+HIGH / QUEUE_READY) before use; desc slots 0..RX_DESCS < VIRTQ_SIZE.
     unsafe {
         reg_w(base, R_QUEUE_SEL, 0);
         reg_w(base, R_QUEUE_NUM, VIRTQ_SIZE as u32);
@@ -142,7 +159,12 @@ unsafe fn setup_rx_queue(base: usize) -> KResult<()> {
     }
 }
 
+/// # Safety
+///
+/// The avail ring must have been set up by `init` (null-checked inside);
+/// `idx` must be a valid descriptor index for that queue (< RX_DESCS for RX).
 pub(crate) unsafe fn push_avail(idx: usize) {
+    // SAFETY: G_NET.avail is a PMM ring set up by setup_rx_queue; ring slot masked % VIRTQ_SIZE per spec; volatile write + SeqCst fence order entry before idx bump.
     unsafe {
         if G_NET.avail.is_null() {
             return;
@@ -158,6 +180,7 @@ pub(crate) unsafe fn push_avail(idx: usize) {
 }
 
 pub fn mac() -> [u8; 6] {
+    // SAFETY: copy of the 6-byte MAC written during single-threaded boot init; kernel code never runs with SIE set (see crate::sync).
     unsafe { G_NET.mac }
 }
 

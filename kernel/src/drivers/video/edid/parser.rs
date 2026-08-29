@@ -27,6 +27,11 @@ fn edid_checksum(data: &[u8; 128]) -> bool {
     data.iter().fold(0u8, |acc, &b| acc.wrapping_add(b)) == 0
 }
 
+/// # Safety
+///
+/// No unsafe operations inside; the unsafe marker records the caller
+/// contract that `block` is a complete 18-byte EDID detailed-timing
+/// descriptor (shorter slices panic on indexing).
 unsafe fn parse_detailed_timing(block: &[u8]) -> EdidTiming {
     let w = ((block[4] as u16) >> 4) | ((block[2] as u16) << 4);
     let h = ((block[7] as u16) >> 4) | ((block[5] as u16) << 4);
@@ -49,6 +54,10 @@ unsafe fn parse_detailed_timing(block: &[u8]) -> EdidTiming {
     }
 }
 
+/// # Safety
+///
+/// No unsafe operations inside; caller contract: `n` must be <= 8 on entry
+/// (the body re-checks `*n < 8` before every write into `timings`).
 unsafe fn parse_established(data: &[u8; 128], timings: &mut [EdidTiming; 8], n: &mut usize) {
     let est = [data[35], data[36], data[37]];
     let tbl: &[(u8, u8, u16, u16)] = &[
@@ -82,7 +91,12 @@ unsafe fn parse_established(data: &[u8; 128], timings: &mut [EdidTiming; 8], n: 
     }
 }
 
+/// # Safety
+///
+/// `data` must be a full 128-byte EDID block; header and checksum are
+/// validated inside and all accesses are bounds-checked indexing.
 pub unsafe fn parse_edid(data: &[u8; 128]) -> KResult<EdidInfo> {
+    // SAFETY: only bounds-checked indexing of the caller's fixed 128-byte EDID buffer happens inside; no unsafe operations are performed.
     unsafe {
         if data[0] != 0x00
             || data[1] != 0xFF

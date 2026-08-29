@@ -66,7 +66,14 @@ pub struct TrbRing {
     pub cycle: bool,
 }
 
+/// # Safety
+///
+/// `nentries` must be >= 2 and the resulting ring must be used with a
+/// controller base validated at init; PMM must be initialized.
 pub unsafe fn alloc_ring(nentries: u16) -> KResult<TrbRing> {
+    // SAFETY: pa is a physically contiguous PMM allocation of
+    // nentries*16 bytes; the link TRB write targets index nentries-1,
+    // the last entry of that buffer.
     unsafe {
         let n = nentries as usize;
         let bytes = n * 16;
@@ -79,6 +86,8 @@ pub unsafe fn alloc_ring(nentries: u16) -> KResult<TrbRing> {
             enqueue: 0,
             cycle: true,
         };
+        // SAFETY: base was allocated with nentries entries; index
+        // nentries-1 is the last valid entry.
         let link = &mut *ring.base.add((nentries - 1) as usize);
         link.params[0] = pa as u32;
         #[cfg(target_pointer_width = "64")]
@@ -96,9 +105,18 @@ pub unsafe fn alloc_ring(nentries: u16) -> KResult<TrbRing> {
     }
 }
 
+/// # Safety
+///
+/// `ring` must have been produced by `alloc_ring` (contiguous buffer of
+/// `size` TRB entries); the xHCI driver has no lock — the caller must keep
+/// a single-owner path per ring (no concurrent enqueue/dequeue).
 pub unsafe fn enqueue_trb(ring: &mut TrbRing, trb: &Trb) {
+    // SAFETY: enqueue is kept < ring.size by the wrap logic below and
+    // starts at 0, so base.add(enqueue) is always within the allocated
+    // ring; exclusive access held by caller.
     unsafe {
         let idx = ring.enqueue as usize;
+        // SAFETY: in-bounds per the enqueue < size invariant above.
         let dst = &mut *ring.base.add(idx);
         let mut t = *trb;
         t.set_cycle(ring.cycle);
@@ -111,6 +129,10 @@ pub unsafe fn enqueue_trb(ring: &mut TrbRing, trb: &Trb) {
     }
 }
 
+/// # Safety
+///
+/// Trivial field arithmetic on a caller-owned `Trb`; no memory effects —
+/// required unsafe only by project-wide convention for the xHCI module.
 pub unsafe fn setup_trb(trb: &mut Trb, req: u8, req_type: u8, val: u16, idx: u16, len: u16) {
     trb.params[0] = (req_type as u32) | ((req as u32) << 8) | ((val as u32) << 16);
     trb.params[1] = (idx as u32) | ((len as u32) << 16);
@@ -118,7 +140,16 @@ pub unsafe fn setup_trb(trb: &mut Trb, req: u8, req_type: u8, val: u16, idx: u16
     trb.params[3] = trb_type_flags(TRB_SETUP);
 }
 
+/// # Safety
+///
+/// G_XHCI must have been initialized by `init` (dboff valid); must be
+/// called from the single-owner driver path (single-threaded init with
+/// single-owner path (the driver has no lock: no other hart may touch
+/// this ring concurrently).
 pub unsafe fn ring_doorbell(slot: u8, target: u8) {
+    // SAFETY: G_XHCI.dboff was written by init from the validated
+    // controller base; doorbell_w32 computes the per-slot offset within
+    // the doorbell register area.
     unsafe {
         let ctx = &raw const crate::drivers::usb::xhci::G_XHCI;
         let dboff = (*ctx).dboff;
@@ -134,7 +165,14 @@ pub struct EventRing {
     pub cycle: bool,
 }
 
+/// # Safety
+///
+/// `nentries` must be >= 1; PMM must be initialized; caller must publish
+/// the result via ERST only after init.
 pub unsafe fn alloc_event_ring(nentries: u16) -> KResult<EventRing> {
+    // SAFETY: pa is a physically contiguous PMM allocation of
+    // nentries*16 bytes, referenced by base/phys with size set to
+    // nentries so all later indexing stays within it.
     unsafe {
         let n = nentries as usize;
         let bytes = n * 16;
@@ -150,12 +188,21 @@ pub unsafe fn alloc_event_ring(nentries: u16) -> KResult<EventRing> {
     }
 }
 
+/// # Safety
+///
+/// `er` must have been produced by `alloc_event_ring` (contiguous buffer
+/// of `size` TRB entries); caller must hold exclusive access (IRQ-context
+/// polling on the owning hart; no other hart may dequeue this ring).
 pub unsafe fn poll_event(er: &mut EventRing) -> Option<Trb> {
+    // SAFETY: dequeue is bounds-checked against size below and wraps at
+    // size, so base.add(dequeue) stays within the allocated ring;
+    // exclusive access held by caller.
     unsafe {
         let idx = er.dequeue as usize;
         if idx >= er.size as usize {
             return None;
         }
+        // SAFETY: idx < er.size checked above, base covers size entries.
         let ev = &*er.base.add(idx);
         let c = (ev.params[3] & TRB_C) != 0;
         if c != er.cycle {
@@ -171,7 +218,15 @@ pub unsafe fn poll_event(er: &mut EventRing) -> Option<Trb> {
     }
 }
 
+/// # Safety
+///
+/// Controller initialized and operational (cmd/event rings allocated by
+/// init); must be called from the single-owner driver path (single-threaded
+/// single-owner driver path) since it mutates G_XHCI rings.
 pub unsafe fn submit_command(trb: &Trb) -> KResult<Trb> {
+    // SAFETY: exclusive access to G_XHCI on this path; cmd_ring and
+    // event_ring were allocated by init with size-sized contiguous
+    // buffers, and enqueue_trb/poll_event keep indices in bounds.
     unsafe {
         let ctx = &raw mut crate::drivers::usb::xhci::G_XHCI;
         let cmd_ring = &mut (*ctx).cmd_ring;

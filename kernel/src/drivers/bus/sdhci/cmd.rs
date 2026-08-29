@@ -1,6 +1,8 @@
 use super::regs::*;
 use super::{clear_interrupts, reset, wait_idle};
 
+/// # Safety
+/// `base` must be a valid probed SDHCI MMIO base.
 pub(super) unsafe fn send_command(
     base: usize,
     cmd_idx: u16,
@@ -8,6 +10,9 @@ pub(super) unsafe fn send_command(
     resp_type: u16,
     has_data: bool,
 ) -> u32 {
+    // SAFETY: base is a probed SDHCI MMIO base; all offsets (ARGUMENT,
+    // COMMAND, NORMAL_INT_STATUS, RESPONSE0, ...) are within the controller
+    // register file per regs.rs datasheet constants.
     unsafe {
         wait_idle(base);
         clear_interrupts(base);
@@ -74,7 +79,11 @@ pub(super) unsafe fn send_command(
     }
 }
 
+/// # Safety
+/// `base` must be a valid probed SDHCI MMIO base with a card present.
 pub(super) unsafe fn card_init(base: usize) -> Option<u32> {
+    // SAFETY: base is a probed SDHCI MMIO base; all command/state offsets are
+    // within the controller register file per regs.rs datasheet constants.
     unsafe {
         send_command(base, CMD_GO_IDLE_STATE, 0, CMD_RESP_NONE, false);
 

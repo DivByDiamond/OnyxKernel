@@ -24,19 +24,36 @@ static mut G_ENABLED: bool = false;
 static mut G_TIMEOUT: u32 = 0;
 
 #[inline]
+/// # Safety
+///
+/// Caller contract: `off` must be a watchdog register offset and G_BASE
+/// must have been initialised (WDT_BASE default or a value from `init`).
 unsafe fn rd(off: u32) -> u32 {
+    // SAFETY: G_BASE is a fixed SoC/FDT watchdog base; `off` is a datasheet register offset, so the address lies in the device MMIO window.
     unsafe { Mmio::<u32>::at(G_BASE + off as usize).read() }
 }
 
 #[inline]
+/// # Safety
+///
+/// Caller contract: `off` must be a watchdog register offset and G_BASE
+/// must have been initialised (WDT_BASE default or a value from `init`).
 unsafe fn wr(off: u32, v: u32) {
+    // SAFETY: G_BASE is a fixed SoC/FDT watchdog base; `off` is a datasheet register offset, so the address lies in the device MMIO window.
     unsafe {
         Mmio::<u32>::at(G_BASE + off as usize).write(v);
     }
 }
 
 /// Initialise the watchdog base address without enabling it.
+///
+/// # Safety
+///
+/// Caller contract: `base` must be the validated watchdog MMIO base (FDT
+/// node or fixed SoC constant) and `init` must run once, on a single hart,
+/// before other watchdog calls.
 pub unsafe fn init(base: usize) {
+    // SAFETY: single-threaded init; G_BASE is only written here before watchdog use.
     unsafe {
         G_BASE = base;
     }
@@ -48,6 +65,7 @@ pub fn arm(timeout_ms: u32) -> KResult<()> {
     if timeout_ms == 0 || timeout_ms > TIMEOUT_MAX {
         return Err(Errno::Range);
     }
+    // SAFETY: wr() targets datasheet offsets in the watchdog MMIO window; statics are kernel-serialised (single-threaded arm path).
     unsafe {
         // SiFive watchdog runs off the 31.25 kHz RTC clock on real boards;
         // on QEMU virt the underlying clock is 10 MHz. We use a conservative
@@ -64,6 +82,7 @@ pub fn arm(timeout_ms: u32) -> KResult<()> {
 /// Disarm the watchdog. Real SiFive hardware cannot be disabled once armed,
 /// so we emulate disarm by pushing the comparator to the maximum.
 pub fn disarm() {
+    // SAFETY: wr() targets datasheet offsets in the watchdog MMIO window; static write is kernel-serialised.
     unsafe {
         wr(R_CMP, TIMEOUT_MAX * 1000);
         wr(R_KEY, KEY_VALID);
@@ -74,6 +93,7 @@ pub fn disarm() {
 /// Reset the watchdog counter ("kick the dog"). Must be called faster
 /// than the configured timeout.
 pub fn ping() {
+    // SAFETY: wr() targets the feed register (datasheet offset) in the watchdog MMIO window.
     unsafe {
         wr(R_FEED, FEED_MAGIC);
     }
@@ -81,17 +101,20 @@ pub fn ping() {
 
 /// Was the watchdog armed by `arm()`?
 pub fn is_armed() -> bool {
+    // SAFETY: G_ENABLED is a plain kernel-owned flag read without concurrency guarantees; kernel never runs with SIE set, so no data race.
     unsafe { G_ENABLED }
 }
 
 /// Current configured timeout in milliseconds (0 if disarmed).
 pub fn timeout_ms() -> u32 {
+    // SAFETY: G_TIMEOUT is a plain kernel-owned flag read without concurrency guarantees; kernel never runs with SIE set, so no data race.
     unsafe { G_TIMEOUT }
 }
 
 /// Read the free-running counter — useful as a high-resolution monotonic
 /// clock source independent of CLINT.
 pub fn counter() -> u64 {
+    // SAFETY: rd() targets the counter registers (datasheet offsets) in the watchdog MMIO window.
     unsafe {
         let lo = rd(R_LO) as u64;
         let hi = rd(R_HI) as u64;
@@ -101,7 +124,13 @@ pub fn counter() -> u64 {
 
 /// PLIC handler: ping the watchdog from a timer-tick context. Called by
 /// the scheduler every jiffie to keep the system alive.
+///
+/// # Safety
+///
+/// Caller contract: must be invoked from timer-tick context after `init`;
+/// it only reads G_ENABLED and pings via MMIO.
 pub unsafe fn tick() {
+    // SAFETY: G_ENABLED read and ping() MMIO write run in kernel context with SIE=0, so no concurrent access.
     unsafe {
         if G_ENABLED {
             ping();

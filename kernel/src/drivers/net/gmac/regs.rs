@@ -71,11 +71,21 @@ pub const RDES1_BS1_MASK: u32 = 0x1FFF;
 
 pub const RDES0_FL_MASK: u32 = 0x3FFF << 16;
 
+/// # Safety
+///
+/// `base + off` must lie inside a mapped device MMIO window (callers pass
+/// a device base validated at driver init).
 pub unsafe fn reg_r(base: usize, off: u32) -> u32 {
+    // SAFETY: volatile read at base + off, which the caller guarantees is a mapped MMIO register in the device window (identity-mapped at boot).
     unsafe { Mmio::<u32>::at(base + off as usize).read() }
 }
 
+/// # Safety
+///
+/// `base + off` must lie inside a mapped device MMIO window (callers pass
+/// a device base validated at driver init).
 pub unsafe fn reg_w(base: usize, off: u32, v: u32) {
+    // SAFETY: volatile write at base + off, which the caller guarantees is a mapped MMIO register in the device window (identity-mapped at boot).
     unsafe {
         Mmio::<u32>::at(base + off as usize).write(v);
     }

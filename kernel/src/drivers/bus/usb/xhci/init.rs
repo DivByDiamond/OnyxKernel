@@ -7,7 +7,17 @@ use super::XhciCtx;
 use super::regs;
 use super::ring;
 
+/// # Safety
+///
+/// `base` must be the MMIO base of an xHCI controller whose register file is
+/// identity-mapped and lies within the device's MMIO window (probed via FDT
+/// node / PCI BAR at driver init). Must run single-threaded before secondary
+/// harts start and before the controller IRQ is enabled.
 pub unsafe fn init(base: usize) -> KResult<()> {
+    // SAFETY: all MMIO accesses derive from the caller-validated `base`
+    // (obase = base + CAPLENGTH) and stay within the register file; static
+    // mut G_XHCI is initialized here single-threaded with SIE=0 before
+    // secondary harts start.
     unsafe {
         let cap_len = regs::read_caplength(base) as usize;
         let obase = base + cap_len;
@@ -60,6 +70,9 @@ pub unsafe fn init(base: usize) -> KResult<()> {
         }
         regs::op_w32(obase, regs::OP_CONFIG, max_slots as u32);
         let dcbaap_pa = pmm::alloc_zero()? as *mut u64;
+        // SAFETY: dcbaap_pa was just allocated via pmm::alloc_zero with
+        // room for max_slots+1 u64 entries (page-sized), so zeroing that
+        // many bytes stays in bounds.
         ptr::write_bytes(dcbaap_pa, 0, (max_slots as usize + 1) * 8);
         G_XHCI.dcbaap = dcbaap_pa;
         regs::op_w64(obase, regs::OP_DCBAAP, dcbaap_pa as u64);
@@ -69,6 +82,14 @@ pub unsafe fn init(base: usize) -> KResult<()> {
                 let sp = pmm::alloc_zero()? as *mut u8;
                 ptr::write_bytes(sp, 0, 4096);
                 let arr = dcbaap_pa;
+                // SAFETY: sp is a page-sized alloc; 1+i <= 32 is far below
+                // the 512 u64 slots of the page-sized DCBAA, so the store
+                // stays in bounds regardless of how sp_bufs maps to spec
+                // fields. SEMANTIC NOTE: sp_bufs is read from HCSPARAMS1
+                // (sparams1 >> 16), which is NOT the xHCI spec's
+                // MaxScratchpad field (HCSPARAMS2 bits [27:4]); on QEMU
+                // virt HCC_SPS is clear so the loop never runs. Tracked in
+                // todo.md (xHCI scratchpad count source).
                 ptr::write(arr.add(1 + i), sp as u64);
             }
         }

@@ -16,6 +16,7 @@ pub(crate) const COL_WHITE: u32 = 0xFFFFFF;
 
 /// (width, pitch, bpp, height, base) for ANSI scroll/erase fast paths.
 pub fn info() -> (usize, usize, usize, usize, usize) {
+    // SAFETY: read-only snapshot of G_FB fields, installed once at single-threaded init (SIE=0).
     unsafe {
         (
             G_FB.width,
@@ -52,39 +53,53 @@ pub struct Fb {
 }
 
 pub fn enabled() -> bool {
+    // SAFETY: plain read of the G_FB.enabled flag; no concurrent mutation (SIE=0, see crate::sync).
     unsafe { G_FB.enabled }
 }
 
 pub fn width() -> usize {
+    // SAFETY: plain read of the G_FB.width field, set once at single-threaded init (SIE=0).
     unsafe { G_FB.width }
 }
 
 pub fn height() -> usize {
+    // SAFETY: plain read of the G_FB.height field, set once at single-threaded init (SIE=0).
     unsafe { G_FB.height }
 }
 
 pub fn bpp() -> usize {
+    // SAFETY: plain read of the G_FB.bpp field, set once at single-threaded init (SIE=0).
     unsafe { G_FB.bpp }
 }
 
 pub fn pitch() -> usize {
+    // SAFETY: plain read of the G_FB.pitch field, set once at single-threaded init (SIE=0).
     unsafe { G_FB.pitch }
 }
 
 /// Total framebuffer size in bytes for the *current* mode.
 pub fn size_bytes() -> usize {
+    // SAFETY: arithmetic on G_FB fields set once at single-threaded init (SIE=0).
     unsafe { G_FB.pitch * G_FB.height }
 }
 
 pub fn fb_base_ptr() -> *mut u8 {
+    // SAFETY: plain read of the G_FB.base pointer, set once at single-threaded init (SIE=0).
     unsafe { G_FB.base }
 }
 
 pub fn fb_base_pa() -> usize {
+    // SAFETY: plain read of the G_FB.base pointer, set once at single-threaded init (SIE=0).
     unsafe { G_FB.base as usize }
 }
 
+/// # Safety
+///
+/// `paddr` must be a usable framebuffer base: pmm-managed RAM (range-checked
+/// here) or a device framebuffer from the FDT `simple-framebuffer` node;
+/// must run during single-threaded boot init (SIE=0).
 pub unsafe fn init(paddr: usize) -> KResult<()> {
+    // SAFETY: paddr is range-checked against pmm-managed RAM before delegation; G_FB is only installed via init_device during single-threaded init.
     unsafe {
         // Only accept pmm-managed RAM. On OC2R the ECAM PCI scan can report a
         // bogus display BAR in device space (e.g. 0x10100000) that is not backed
@@ -99,6 +114,12 @@ pub unsafe fn init(paddr: usize) -> KResult<()> {
 /// Init from a device-provided framebuffer (FDT `simple-framebuffer` on
 /// OC2R/sedna): the address is MMIO outside pmm-managed RAM, and the geometry
 /// comes from the device tree node, so both differ from the defaults above.
+///
+/// # Safety
+///
+/// `paddr` must be the real, identity-mapped framebuffer base reported by
+/// the device (FDT `simple-framebuffer` node); geometry is validated below
+/// before `G_FB` is installed.
 pub unsafe fn init_device(
     paddr: usize,
     width: usize,
@@ -106,6 +127,7 @@ pub unsafe fn init_device(
     stride: usize,
     bpp: usize,
 ) -> KResult<()> {
+    // SAFETY: geometry (non-zero dims, stride >= width*bpp/8) is validated above; G_FB is written once during single-threaded boot init (SIE=0, see crate::sync).
     unsafe {
         if paddr == 0 || width == 0 || height == 0 || bpp == 0 || stride < width * (bpp / 8) {
             return Err(onyx_core::errno::Errno::Inval);
@@ -124,6 +146,7 @@ pub unsafe fn init_device(
 }
 
 pub fn clear() {
+    // SAFETY: base/size come from the validated G_FB installed at init; vzero stays within pitch*height bytes of the mapped framebuffer.
     unsafe {
         if !G_FB.enabled {
             return;
@@ -135,6 +158,7 @@ pub fn clear() {
 }
 
 fn put_pixel(x: usize, y: usize, color: u32) {
+    // SAFETY: x/y are bounds-checked against width/height and off is derived from the validated pitch/bpp, so each volatile store stays inside the framebuffer set up at init.
     unsafe {
         if !G_FB.enabled || x >= G_FB.width || y >= G_FB.height {
             return;

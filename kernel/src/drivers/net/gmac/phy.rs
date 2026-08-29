@@ -32,7 +32,12 @@ pub struct PhyInfo {
     pub link_partner: u16,
 }
 
+/// # Safety
+///
+/// `G_GMAC.base` must be initialised by `super::init` (valid mapped GMAC
+/// base); `phy`/`reg` are masked to 5 bits internally.
 unsafe fn mdio_read(phy: u8, reg: u8) -> KResult<u16> {
+    // SAFETY: MMIO at G_GMAC.base + MII datasheet offsets; base was validated by gmac::init.
     unsafe {
         let base = G_GMAC.base;
         let v = ((phy as u32 & 0x1F) << 11) | ((reg as u32 & 0x1F) << 6) | regs::MII_CR_42;
@@ -49,7 +54,12 @@ unsafe fn mdio_read(phy: u8, reg: u8) -> KResult<u16> {
     }
 }
 
+/// # Safety
+///
+/// `G_GMAC.base` must be initialised by `super::init` (valid mapped GMAC
+/// base); `phy`/`reg` are masked to 5 bits internally.
 unsafe fn mdio_write(phy: u8, reg: u8, data: u16) -> KResult<()> {
+    // SAFETY: MMIO at G_GMAC.base + MII datasheet offsets; base was validated by gmac::init.
     unsafe {
         let base = G_GMAC.base;
         let v = ((phy as u32 & 0x1F) << 11) | ((reg as u32 & 0x1F) << 6) | regs::MII_CR_42;
@@ -67,7 +77,12 @@ unsafe fn mdio_write(phy: u8, reg: u8, data: u16) -> KResult<()> {
     }
 }
 
+/// # Safety
+///
+/// `gmac::init` must have completed (MDIO ready); `phy_addr` must be a
+/// valid PHY address on the MDIO bus.
 pub unsafe fn identify(phy_addr: u8) -> KResult<PhyInfo> {
+    // SAFETY: MDIO reads via mdio_read on the init-validated G_GMAC.base; no shared state mutated.
     unsafe {
         let id1 = mdio_read(phy_addr, PHY_ID1)?;
         let id2 = mdio_read(phy_addr, PHY_ID2)?;
@@ -82,7 +97,12 @@ pub unsafe fn identify(phy_addr: u8) -> KResult<PhyInfo> {
     }
 }
 
+/// # Safety
+///
+/// `gmac::init` must have completed; writes PHY registers over MDIO, so a
+/// PHY must respond at `phy_addr`.
 pub unsafe fn autoneg(phy_addr: u8) -> KResult<()> {
+    // SAFETY: MDIO accesses via mdio_read/mdio_write on the init-validated G_GMAC.base; no shared state mutated.
     unsafe {
         let adv = AN_ADV_100TX_FD | AN_ADV_100TX | AN_ADV_10T_FD | AN_ADV_10T;
         mdio_write(phy_addr, AN_ADV, adv)?;
@@ -92,7 +112,12 @@ pub unsafe fn autoneg(phy_addr: u8) -> KResult<()> {
     }
 }
 
+/// # Safety
+///
+/// `gmac::init` must have completed (MDIO ready); `phy_addr` must be a
+/// valid PHY address on the MDIO bus.
 pub unsafe fn wait_link(phy_addr: u8) -> bool {
+    // SAFETY: MDIO reads via mdio_read on the init-validated G_GMAC.base; read-only, no shared state mutated.
     unsafe {
         for _ in 0..500_000 {
             if let Ok(bmsr) = mdio_read(phy_addr, BMSR)
@@ -105,7 +130,12 @@ pub unsafe fn wait_link(phy_addr: u8) -> bool {
     }
 }
 
+/// # Safety
+///
+/// `gmac::init` must have completed (MDIO ready); `phy_addr` must be a
+/// valid PHY address on the MDIO bus.
 pub unsafe fn speed_duplex(phy_addr: u8) -> (u8, bool) {
+    // SAFETY: MDIO reads via mdio_read on the init-validated G_GMAC.base; read-only, no shared state mutated.
     unsafe {
         let lpa = mdio_read(phy_addr, LPA).unwrap_or(0);
         let adv = mdio_read(phy_addr, AN_ADV).unwrap_or(0);

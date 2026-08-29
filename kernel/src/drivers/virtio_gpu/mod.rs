@@ -68,12 +68,22 @@ pub(crate) static mut G_GPU: VirtioGpuDev = VirtioGpuDev {
     height: 0,
 };
 
+/// # Safety
+///
+/// `base` must be a candidate virtio-mmio base from the FDT probe or the
+/// QEMU virt fallback constants (identity-mapped at boot).
 pub unsafe fn probe(base: usize) -> bool {
+    // SAFETY: base is a candidate virtio-mmio base from the boot-time probe; reg_r reads only spec offsets (magic, device ID).
     unsafe {
         reg_r(base, R_MAGIC_VALUE) == 0x7472_6976 && reg_r(base, R_DEVICE_ID) == VIRTIO_ID_GPU
     }
 }
 
+/// # Safety
+///
+/// The body performs no unsafe operations, so the caller contract is empty;
+/// the function is marked `unsafe` for symmetry with the other raw-pointer
+/// GPU command helpers.
 unsafe fn hdr(t: u32) -> GpuCtrlHdr {
     GpuCtrlHdr {
         hdr_type: t,
@@ -84,7 +94,12 @@ unsafe fn hdr(t: u32) -> GpuCtrlHdr {
     }
 }
 
+/// # Safety
+///
+/// `base` must be a probed virtio-gpu MMIO base; must be called during the
+/// single-threaded boot-time device probe, once per base.
 pub unsafe fn init(base: usize, width: u32, height: u32) -> KResult<()> {
+    // SAFETY: boot-time single-threaded probe (SIE=0, see crate::sync) on a probed base, Busy-guarded so G_GPU is written at most once; raw pointers passed to xfer helpers point at 'static G_GPU fields; fb_pa is a pmm::alloc_n(fb_pages) framebuffer of width*height*4 bytes.
     unsafe {
         if G_GPU.base != 0 {
             return Err(Errno::Busy);
@@ -171,9 +186,11 @@ pub unsafe fn init(base: usize, width: u32, height: u32) -> KResult<()> {
 }
 
 pub fn fb_addr() -> *mut u8 {
+    // SAFETY: read of the fb pointer written during single-threaded boot init; kernel code never runs with SIE set (see crate::sync).
     unsafe { G_GPU.fb }
 }
 pub fn fb_size() -> usize {
+    // SAFETY: reads of width/height written during single-threaded boot init; kernel code never runs with SIE set (see crate::sync).
     unsafe { G_GPU.width as usize * G_GPU.height as usize * 4 }
 }
 
