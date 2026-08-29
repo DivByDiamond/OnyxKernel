@@ -12,11 +12,21 @@ use onyx_core::formats::{ONYFS_BLOCK_SIZE, ONYFS_DIRECT_BLKS, OnyfsInode};
 /// Ensure blocks [first_needed..=last_needed] exist on `inode`, freshly
 /// allocated ones zero-filled. `cur_size` is only used to compute the
 /// first block that may need allocation.
+///
+/// # Safety
+///
+/// Caller must not invoke onyxfs operations concurrently from multiple harts
+/// (shared G_BUF scratch global, journal head). `inode` must come from a
+/// successful read_inode; block indices are bounded by the direct range and
+/// entries_per_block().
 pub(super) unsafe fn extend_to_length(
     inode: &mut OnyfsInode,
     cur_size: u64,
     length: u64,
 ) -> KResult<()> {
+    // SAFETY: single-threaded onyxfs exclusion (see # Safety); all raw
+    // block-buffer access goes through the bounds-checked ind_entry/
+    // set_ind_entry helpers and validated read_block/write_block.
     unsafe {
         let bs = ONYFS_BLOCK_SIZE as u64;
         let first_new_block: u64 = if cur_size == 0 {
@@ -66,7 +76,14 @@ pub(super) unsafe fn extend_to_length(
 }
 
 /// Allocate a data block, zero-fill it and persist it through the journal.
+///
+/// # Safety
+///
+/// Caller must not invoke onyxfs operations concurrently from multiple harts
+/// (alloc_data_block and the shared G_BUF scratch global are unsynchronized).
 unsafe fn alloc_zero_block() -> KResult<u32> {
+    // SAFETY: single-threaded onyxfs exclusion (see # Safety); `pb` is the
+    // module-global G_BUF, valid for a full block, fully zeroed here.
     unsafe {
         let blk = alloc_data_block()?;
         let pb = &raw mut G_BUF;

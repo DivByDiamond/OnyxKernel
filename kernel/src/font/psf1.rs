@@ -1,6 +1,12 @@
 use super::shared::{G_FONT, PcfFont, uni_map_insert};
 use onyx_core::errno::{Errno, KResult};
 
+/// # Safety
+///
+/// Caller (font::init) must run once, single-threaded, during boot before
+/// secondary harts start; `data` must remain valid for the kernel's
+/// lifetime since G_FONT stores pointers into it. Glyph/unicode offsets are
+/// bounds-checked against data.len() before each as_ptr().add().
 pub(super) unsafe fn init_psf1(data: &[u8]) -> KResult<()> {
     unsafe {
         if data.len() < 4 {
@@ -39,6 +45,11 @@ pub(super) unsafe fn init_psf1(data: &[u8]) -> KResult<()> {
     }
 }
 
+/// # Safety
+///
+/// Caller must have validated the glyph area of `data`; the table start is
+/// re-checked here (`table_start + 2 > data.len()` bails out) and all reads
+/// index the `table` subslice with `i + 1 < table.len()` before i += 2.
 unsafe fn parse_psf1_unicode_table(data: &[u8], hdr_size: usize, num_glyphs: u32, charsize: u32) {
     unsafe {
         let glyph_bytes = (num_glyphs as usize) * (charsize as usize);

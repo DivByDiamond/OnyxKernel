@@ -13,6 +13,13 @@
 /// RLE-compress `src` into `dst`. Returns the compressed size, or 0 on
 /// overflow (`dst` too small). Caller must ensure `dst` is at least
 /// `src.len() + src.len()/128 + 2` bytes for incompressible input.
+///
+/// # Safety
+///
+/// The function performs no unsafe operations itself; it is `unsafe` only to
+/// encode the caller contract: `dst` must have the capacity documented above
+/// (writes are bounds-checked and return 0 on overflow) and callers must not
+/// invoke onyxfs snapshot code concurrently from multiple harts.
 pub(super) unsafe fn rle_compress(src: &[u8], dst: &mut [u8]) -> usize {
     let n = src.len();
     let mut i: usize = 0;
@@ -66,6 +73,13 @@ pub(super) unsafe fn rle_compress(src: &[u8], dst: &mut [u8]) -> usize {
 
 /// RLE-decompress `src` into `dst`. Returns the number of bytes written, or 0
 /// on overflow / truncated input.
+///
+/// # Safety
+///
+/// The function performs no unsafe operations itself; it is `unsafe` only to
+/// encode the caller contract: `dst` must be at least ONYFS_BLOCK_SIZE bytes
+/// (all writes are bounds-checked) and callers must not invoke onyxfs
+/// snapshot code concurrently from multiple harts.
 pub(super) unsafe fn rle_decompress(src: &[u8], dst: &mut [u8]) -> usize {
     let mut i: usize = 0;
     let mut out: usize = 0;

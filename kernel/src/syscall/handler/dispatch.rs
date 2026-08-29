@@ -15,7 +15,15 @@ pub fn user_ptr_ok(p: u64, len: u64) -> bool {
     p >= USER_BASE && p.checked_add(len).is_some_and(|end| end <= USER_TOP)
 }
 
+/// # Safety
+///
+/// `out` must be valid for writes of 256 bytes; `path` is an untrusted user
+/// value that is validated internally (range check plus per-page mapping)
+/// before any byte is read.
 pub unsafe fn parse_user_path(path: u64, out: &mut [u8; 256]) -> Option<usize> {
+    // SAFETY: `path` passed user_ptr_ok and the per-page check_user_range
+    // above, so the NUL scan and copy_nonoverlapping only read mapped user
+    // pages; `out` validity is the caller's contract documented above.
     unsafe {
         if !user_ptr_ok(path, 256)
             || crate::mm::vmm::check_user_range(crate::proc::current().root_pa, path, 256, false)
@@ -33,7 +41,16 @@ pub unsafe fn parse_user_path(path: u64, out: &mut [u8; 256]) -> Option<usize> {
     }
 }
 
+/// # Safety
+///
+/// `tf` must be this hart's live trap frame of the interrupted context;
+/// called exactly once per syscall from the trap path with a current process
+/// set and after the ACL check inside this function.
 pub unsafe fn handle(tf: &mut TrapFrame) -> i64 {
+    // SAFETY: the only unsafe operations are the calls to the sys_* handlers,
+    // each of which validates its own user-pointer arguments; a0..a5 are
+    // widened copies of the trap-frame registers and `tf` is live per the
+    // contract above.
     unsafe {
         // Syscall arguments are widened to u64 on every target so the ABI
         // layer stays pointer-width independent (on rv32 the raw registers

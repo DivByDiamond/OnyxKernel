@@ -77,19 +77,31 @@ pub unsafe fn init(base: usize) -> KResult<()> {
         G_XHCI.dcbaap = dcbaap_pa;
         regs::op_w64(obase, regs::OP_DCBAAP, dcbaap_pa as u64);
         if (hccparams1 & regs::HCC_SPS) != 0 {
-            let sp_bufs = ((sparams1 >> 16) & 0x1F) as usize;
+            // xHCI spec 5.3.4: MaxScratchpad Buffers = MSB:HCSPARAMS2[31:27]
+            // << 5 | LSB:HCSPARAMS2[8:4]. Do NOT read HCSPARAMS1 bits
+            // [23:16] here — that field is MaxPorts, and HCSPARAMS2
+            // bits [13:4] mixed ERST Max into the mask in an earlier
+            // (wrong) attempt.
+            let sparams2 = regs::read_hcsparams2(base);
+            let sp_lsb = ((sparams2 >> 4) & 0x1F) as usize;
+            let sp_msb = ((sparams2 >> 27) & 0x1F) as usize;
+            let sp_bufs = (sp_msb << 5) | sp_lsb;
             for i in 0..sp_bufs {
                 let sp = pmm::alloc_zero()? as *mut u8;
+                // SAFETY: sp is a page-sized alloc; zeroing 4096 bytes stays in bounds.
                 ptr::write_bytes(sp, 0, 4096);
                 let arr = dcbaap_pa;
-                // SAFETY: sp is a page-sized alloc; 1+i <= 32 is far below
-                // the 512 u64 slots of the page-sized DCBAA, so the store
-                // stays in bounds regardless of how sp_bufs maps to spec
-                // fields. SEMANTIC NOTE: sp_bufs is read from HCSPARAMS1
-                // (sparams1 >> 16), which is NOT the xHCI spec's
-                // MaxScratchpad field (HCSPARAMS2 bits [27:4]); on QEMU
-                // virt HCC_SPS is clear so the loop never runs. Tracked in
-                // todo.md (xHCI scratchpad count source).
+                // SAFETY: the guard above bounds 1+i < max_slots+1, and the
+                // DCBAA is a full page (512 u64 slots), so the store stays
+                // in bounds for any spec-legal MaxScratchpad (<= 1023).
+                // NOTE (semantic): spec-wise scratchpad pointers share
+                // DCBAA[1..] with device contexts only when the controller
+                // advertises few enough slots; the guard keeps the store on
+                // the page regardless. QEMU virt reports HCC_SPS=0, so the
+                // loop never runs there.
+                if 1 + i >= (max_slots as usize + 1) {
+                    break;
+                }
                 ptr::write(arr.add(1 + i), sp as u64);
             }
         }

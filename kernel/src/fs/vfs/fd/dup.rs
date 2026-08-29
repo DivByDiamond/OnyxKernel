@@ -3,7 +3,13 @@ use crate::fs::vfs::{
 };
 use onyx_core::errno::KResult;
 
+/// # Safety
+///
+/// Caller contract: token must be a live fd token of the calling context;
+/// dup only clones into a fresh slot of the same context's fd table.
 pub unsafe fn dup(token: FdToken) -> KResult<FdToken> {
+    // SAFETY: fd_check validates idx/epoch; alloc_fd claims a fresh slot in
+    // this context and fd_set fills exactly that slot.
     unsafe {
         let idx = fd_check(token)?;
         let fd = fd_get(idx);
@@ -14,7 +20,15 @@ pub unsafe fn dup(token: FdToken) -> KResult<FdToken> {
     }
 }
 
+/// # Safety
+///
+/// Caller contract: runs in the fd-owning context (kernel boot or the
+/// current process's syscall on this hart); allocates two slots plus one
+/// IPC channel, all owned by this context.
 pub unsafe fn create_pipe() -> KResult<(FdToken, FdToken)> {
+    // SAFETY: r_idx/w_idx come from alloc_fd in this context, so the direct
+    // G_KERNEL_FDS / p.fds writes below touch only slots this context owns
+    // (same contract as fd_set in ops.rs).
     unsafe {
         let r_idx = alloc_fd(PERM_READ)?;
         let w_idx = alloc_fd(PERM_WRITE)?;

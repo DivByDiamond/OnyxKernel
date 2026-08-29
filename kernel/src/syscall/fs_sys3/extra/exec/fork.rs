@@ -5,7 +5,14 @@ use crate::fs::vfs;
 use crate::proc;
 use crate::syscall::handler::parse_user_path;
 
+/// # Safety
+///
+/// Call only from handler::handle's syscall path: current process set, ACL
+/// checked; `path`/`argv`/`envp` are validated inside before use.
 pub unsafe fn sys_execve(tf: &mut TrapFrame, path: u64, argv: u64, envp: u64) -> i64 {
+    // SAFETY: parse_user_path validates the path internally; root_refcount
+    // is this process's own live heap u32 (null-checked) and the old root
+    // table is only destroyed once its refcount drops to zero.
     unsafe {
         let mut path_buf = [0u8; 256];
         let path_len = match parse_user_path(path, &mut path_buf) {
@@ -106,7 +113,17 @@ pub unsafe fn sys_execve(tf: &mut TrapFrame, path: u64, argv: u64, envp: u64) ->
     }
 }
 
+/// # Safety
+///
+/// Call only from handler::handle's syscall path with a live trap frame;
+/// the parent is the current process on this hart. The child is enqueued
+/// (and remotely stealable) inside proc::create_user BEFORE the fds/cwd/tf
+/// copies below run, so the caller relies on the child not being stolen
+/// mid-initialization (known race, reported in the audit).
 pub unsafe fn sys_fork(tf: &mut TrapFrame) -> i64 {
+    // SAFETY: parent is this hart's current process; the refcount cell is
+    // a live heap u32 owned by the shared root table; by_pid() takes
+    // proc_list_lock for the child lookup before the field copies.
     unsafe {
         let parent = proc::current();
         let parent_pid = parent.pid;

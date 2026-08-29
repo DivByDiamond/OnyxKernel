@@ -55,6 +55,7 @@ fn test_fat32_name_uppercase() {
 
 #[test]
 fn test_fat32_is_eoc() {
+    // SAFETY: pure predicates over u32 values; no globals or pointers touched.
     unsafe {
         assert!(is_eoc(0x0FFFFFF8));
         assert!(is_eoc(0x0FFFFFF9));
@@ -68,6 +69,7 @@ fn test_fat32_is_eoc() {
 
 #[test]
 fn test_fat32_valid_cluster() {
+    // SAFETY: pure predicates over u32 values; no globals or pointers touched.
     unsafe {
         assert!(is_valid_cluster(2));
         assert!(is_valid_cluster(100));

@@ -5,7 +5,15 @@ use crate::mm::vmm;
 use crate::proc;
 use crate::syscall::handler::user_ptr_ok;
 
+/// # Safety
+///
+/// Call only from handler::handle's syscall path: current process set, ACL
+/// checked; `buf`/`count` are validated inside before any write.
 pub unsafe fn sys_getdents64(fd: u64, buf: u64, count: u64) -> i64 {
+    // SAFETY: buf/count passed user_ptr_ok and the per-page writable
+    // check_user_range above; dirent records are built in a 288-byte stack
+    // buffer written strictly in-bounds (reclen_aligned <= 280), then
+    // copy_to_user re-validates each destination page before writing.
     unsafe {
         if !user_ptr_ok(buf, count) || count < 19 {
             return Errno::Inval.as_i64();
@@ -73,11 +81,26 @@ pub unsafe fn sys_getdents64(fd: u64, buf: u64, count: u64) -> i64 {
     }
 }
 
+/// # Safety
+///
+/// Call only from handler::handle's syscall path; arguments are forwarded
+/// unchanged to sys_getdents64, which validates them internally.
 pub unsafe fn sys_getdents(fd: u64, buf: u64, count: u64) -> i64 {
+    // SAFETY: the only unsafe operation is the call to sys_getdents64,
+    // which validates the user buffer (range + per-page mapping) before
+    // writing.
     unsafe { sys_getdents64(fd, buf, count) }
 }
 
+/// # Safety
+///
+/// Call only from handler::handle's syscall path: current process set, ACL
+/// checked; `buf`/`len` are validated inside before any write.
 pub unsafe fn sys_getentropy(buf: u64, len: u64) -> i64 {
+    // SAFETY: buf/len passed user_ptr_ok and the per-page writable
+    // check_user_range above; each chunk is filled in kernel memory by
+    // hwrand::fill and copy_to_user re-validates each destination page
+    // before writing.
     unsafe {
         if len > 256 || !user_ptr_ok(buf, len) {
             return Errno::Inval.as_i64();

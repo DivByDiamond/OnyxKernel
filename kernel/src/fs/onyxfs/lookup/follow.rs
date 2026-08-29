@@ -5,7 +5,16 @@ use super::lookup_in;
 use onyx_core::errno::{Errno, KResult};
 use onyx_core::formats::{ONYFS_DT_LNK, ONYFS_ROOT_INO};
 
+/// # Safety
+///
+/// Caller must not invoke onyxfs operations concurrently from multiple harts
+/// (shared G_BUF scratch global on every block read). `path` must be a
+/// kernel-owned byte string (the syscall layer parses user paths before
+/// reaching fs/); recursion is depth-capped at 8 below.
 pub unsafe fn lookup_follow(path: &[u8], out: &mut OnyfsStat, depth: u32) -> KResult<u32> {
+    // SAFETY: single-threaded onyxfs exclusion (see # Safety); all raw access
+    // goes through the bounds-checked lookup_in/stat/readlink helpers; the
+    // stack buffers are written only within their computed lengths.
     unsafe {
         if depth > 8 {
             return Err(Errno::Loop);

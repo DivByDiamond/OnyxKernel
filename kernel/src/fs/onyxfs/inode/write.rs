@@ -5,7 +5,16 @@ use crate::srv::timer;
 use onyx_core::errno::{Errno, KResult};
 use onyx_core::formats::{ONYFS_DIRECT_BLKS, OnyfsInode};
 
+/// # Safety
+///
+/// Caller must not invoke onyxfs operations concurrently from multiple harts:
+/// this uses the module-global G_BUF scratch block and reads G_SB/G_VERSION
+/// (set by mount()). v1 filesystems are rejected. `ino` must be a valid inode
+/// number; the slot offset is derived from the validated inode-table layout.
 pub unsafe fn write_inode(ino: u32, inode: &OnyfsInode) -> KResult<()> {
+    // SAFETY: single-threaded onyxfs exclusion (see # Safety); the slice
+    // written into G_BUF is exactly OnyfsInode::SIZE at a slot offset that
+    // fits because ONYFS_BLOCK_SIZE is a multiple of the inode size.
     unsafe {
         if G_VERSION == ONYFS_V1 {
             return Err(Errno::NoSys);
@@ -27,7 +36,13 @@ pub unsafe fn write_inode(ino: u32, inode: &OnyfsInode) -> KResult<()> {
     }
 }
 
+/// # Safety
+///
+/// Caller must not invoke onyxfs operations concurrently from multiple harts;
+/// `ino` must be a valid inode number (validated inside read_inode).
 pub unsafe fn update_mtime(ino: u32) -> KResult<()> {
+    // SAFETY: single-threaded onyxfs exclusion (see # Safety); ino is
+    // validated inside read_inode before any raw block access.
     unsafe {
         let mut inode = OnyfsInode {
             mode: 0,
@@ -51,7 +66,13 @@ pub unsafe fn update_mtime(ino: u32) -> KResult<()> {
     }
 }
 
+/// # Safety
+///
+/// Caller must not invoke onyxfs operations concurrently from multiple harts;
+/// `ino` must be a valid inode number (validated inside read_inode).
 pub unsafe fn set_mode(ino: u32, mode: u32) -> KResult<()> {
+    // SAFETY: single-threaded onyxfs exclusion (see # Safety); ino is
+    // validated inside read_inode before any raw block access.
     unsafe {
         if G_VERSION == ONYFS_V1 {
             return Err(Errno::NoSys);
@@ -80,7 +101,13 @@ pub unsafe fn set_mode(ino: u32, mode: u32) -> KResult<()> {
     }
 }
 
+/// # Safety
+///
+/// Caller must not invoke onyxfs operations concurrently from multiple harts;
+/// `ino` must be a valid inode number (validated inside read_inode).
 pub unsafe fn set_uid_gid(ino: u32, uid: u32, gid: u32) -> KResult<()> {
+    // SAFETY: single-threaded onyxfs exclusion (see # Safety); ino is
+    // validated inside read_inode before any raw block access.
     unsafe {
         if G_VERSION == ONYFS_V1 {
             return Err(Errno::NoSys);
@@ -110,7 +137,13 @@ pub unsafe fn set_uid_gid(ino: u32, uid: u32, gid: u32) -> KResult<()> {
     }
 }
 
+/// # Safety
+///
+/// Caller must not invoke onyxfs operations concurrently from multiple harts;
+/// `ino` must be a valid inode number (validated inside read_inode).
 pub unsafe fn set_timestamps(ino: u32, mtime: u64, atime: u64) -> KResult<()> {
+    // SAFETY: single-threaded onyxfs exclusion (see # Safety); ino is
+    // validated inside read_inode before any raw block access.
     unsafe {
         if G_VERSION == ONYFS_V1 {
             return Err(Errno::NoSys);

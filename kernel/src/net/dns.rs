@@ -32,7 +32,13 @@ fn dns_skip_name(msg: &[u8], mut off: usize) -> Option<usize> {
     }
 }
 
+/// # Safety
+///
+/// Blocking resolver: binds a temp UDP socket and spins on poll(); must
+/// run under the net single-poller contract and only where blocking is
+/// acceptable (boot / kernel threads), never in interrupt context.
 pub unsafe fn dns_resolve(hostname: &[u8], dns_server: [u8; 4]) -> KResult<[u8; 4]> {
+    // SAFETY: only calls the udp_*/poll wrappers; reply buffer is a fixed 512-byte stack array, all reads bounds-checked.
     unsafe {
         let encoded = dns_encode_name(hostname);
         let qlen = encoded.len() + 4;

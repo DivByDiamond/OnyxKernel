@@ -1,8 +1,19 @@
 use super::reader::rd32;
 use super::{FDT_BEGIN_NODE, FDT_END, FDT_END_NODE, FDT_NOP, FDT_PROP, G_STRUCT, G_STRUCT_SIZE};
 
+/// Walk the FDT struct block, invoking `cb` per node with its properties.
+///
+/// # Safety
+///
+/// `fdt::init()` must have succeeded (validating the magic) and must run
+/// once during single-threaded boot; the global struct-block pointer/size
+/// must still be untouched. The FDT itself is assumed well-formed per spec
+/// (4-byte-aligned tokens); individual token reads are bounded only by the
+/// `p < end` loop, so a truncated blob can read past `end`.
 pub unsafe fn walk(cb: &mut dyn FnMut(&str, &[(u32, &[u8])]) -> bool) {
     unsafe {
+        // SAFETY: caller contract: init() ran and validated the DTB, so
+        // G_STRUCT/G_STRUCT_SIZE describe the magic-checked blob.
         if G_STRUCT == 0 {
             return;
         }
@@ -17,6 +28,9 @@ pub unsafe fn walk(cb: &mut dyn FnMut(&str, &[(u32, &[u8])]) -> bool) {
             p = p.add(4);
             match tok {
                 FDT_BEGIN_NODE => {
+                    // SAFETY: p < end (loop guard) and the FDT struct block
+                    // is NUL-padded per spec; node names are trusted as
+                    // well-formed for a magic-validated blob.
                     let mut len = 0;
                     while *p.add(len) != 0 {
                         len += 1;
@@ -35,6 +49,9 @@ pub unsafe fn walk(cb: &mut dyn FnMut(&str, &[(u32, &[u8])]) -> bool) {
                     }
                 }
                 FDT_PROP => {
+                    // SAFETY: p < end; FDT_PROP headers are 8 bytes and the
+                    // blob is well-formed per the caller contract (validated
+                    // by init_from's magic check).
                     let prop_len = rd32(p) as usize;
                     p = p.add(4);
                     let name_off = rd32(p);

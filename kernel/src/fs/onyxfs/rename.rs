@@ -5,7 +5,16 @@ use super::lookup::{lookup, lookup_nofollow};
 use onyx_core::errno::{Errno, KResult};
 use onyx_core::formats::ONYFS_ROOT_INO;
 
+/// # Safety
+///
+/// Caller must not invoke onyxfs operations concurrently from multiple harts
+/// (shared G_BUF scratch global, journal head, dirent slots). `old_path` and
+/// `new_path` must be kernel-owned, absolute (leading '/'), NUL-free byte
+/// strings - the syscall layer parses user paths before reaching fs/.
 pub unsafe fn rename(old_path: &[u8], new_path: &[u8]) -> KResult<()> {
+    // SAFETY: single-threaded onyxfs exclusion (see # Safety); all raw access
+    // is delegated to the bounds-checked lookup/add_dirent/remove_dirent/
+    // journal helpers, and path slicing stays within path.len().
     unsafe {
         if old_path.is_empty() || old_path[0] != b'/' || new_path.is_empty() || new_path[0] != b'/'
         {

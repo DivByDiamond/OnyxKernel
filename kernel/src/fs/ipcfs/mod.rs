@@ -23,7 +23,14 @@ pub struct IpcfsStat {
     pub mode: u32,
 }
 
+/// # Safety
+///
+/// Caller contract: name comes from the syscall layer's parse_user_path
+/// (kernel-side slice); creates/connects an IPC channel owned by the
+/// calling process (ipc::open_by_name applies its own locking).
 pub unsafe fn lookup(name: &[u8]) -> KResult<u32> {
+    // SAFETY: name is a kernel-side slice; open_by_name performs its own
+    // channel-table lookup under the ipc module's discipline.
     unsafe {
         if name.is_empty() || name == b"" || name == b"." {
             return Ok(IPCFS_ROOT_INO);
@@ -34,6 +41,10 @@ pub unsafe fn lookup(name: &[u8]) -> KResult<u32> {
     }
 }
 
+/// # Safety
+///
+/// No unsafe operations inside; pure ino-to-stat match with an explicit
+/// chan_id bounds check (< 32). Kept unsafe for signature symmetry.
 pub unsafe fn stat(ino: u32) -> KResult<IpcfsStat> {
     if ino == IPCFS_ROOT_INO {
         return Ok(IpcfsStat {
@@ -57,7 +68,16 @@ pub unsafe fn stat(ino: u32) -> KResult<IpcfsStat> {
 }
 
 /// Read from a channel (non-blocking). `ino` is the channel ID + 2.
+///
+/// # Safety
+///
+/// Caller contract: `buf` must be writable for `len` bytes (validated and
+/// translated by the syscall layer for user callers); ipc::recv bounds-checks
+/// chan_id against CHAN_MAX before touching G_CHANNELS.
 pub unsafe fn read(ino: u32, buf: *mut u8, _offset: u32, len: u32) -> KResult<u32> {
+    // SAFETY: chan_id = ino - 2 is rejected for ino < 2, and ipc::recv
+    // re-checks chan_id < CHAN_MAX before indexing G_CHANNELS; buf covers
+    // `len` bytes per the caller contract.
     unsafe {
         if ino < 2 {
             return Err(Errno::Inval);
@@ -68,7 +88,16 @@ pub unsafe fn read(ino: u32, buf: *mut u8, _offset: u32, len: u32) -> KResult<u3
 }
 
 /// Write to a channel (non-blocking). `ino` is the channel ID + 2.
+///
+/// # Safety
+///
+/// Caller contract: `buf` must be readable for `len` bytes (validated and
+/// translated by the syscall layer for user callers); ipc::send bounds-checks
+/// chan_id against CHAN_MAX before touching G_CHANNELS.
 pub unsafe fn write(ino: u32, buf: *const u8, _offset: u32, len: u32) -> KResult<u32> {
+    // SAFETY: chan_id = ino - 2 is rejected for ino < 2, and ipc::send
+    // re-checks chan_id < CHAN_MAX before indexing G_CHANNELS; buf covers
+    // `len` readable bytes per the caller contract.
     unsafe {
         if ino < 2 {
             return Err(Errno::Inval);
@@ -78,7 +107,15 @@ pub unsafe fn write(ino: u32, buf: *const u8, _offset: u32, len: u32) -> KResult
     }
 }
 
+/// # Safety
+///
+/// Caller contract: name_out must be writable for name_len bytes (validated
+/// and translated by the syscall layer for user callers); idx is a plain
+/// cursor; the named-channel table walk is bounds-checked by ipc::
+/// named_by_index.
 pub unsafe fn readdir_entry(idx: u32, name_out: *mut u8, name_len: usize) -> Option<u32> {
+    // SAFETY: name writes go through copy_name, which clamps to
+    // name_len - 1 and NUL-terminates within name_len bytes.
     unsafe {
         match idx {
             0 => {
@@ -104,7 +141,14 @@ pub unsafe fn readdir_entry(idx: u32, name_out: *mut u8, name_len: usize) -> Opt
     }
 }
 
+/// # Safety
+///
+/// Caller contract: out must be writable for max_len bytes (guaranteed by
+/// the readdir_entry callers, which pass the syscall-validated buffer and
+/// its length); requires max_len >= 1 so the NUL fits.
 unsafe fn copy_name(name: &[u8], out: *mut u8, max_len: usize) {
+    // SAFETY: n = min(name.len(), max_len - 1) < max_len, so both the copy
+    // and the NUL store at index n stay within the max_len-byte buffer.
     unsafe {
         let n = name.len().min(max_len.saturating_sub(1));
         core::ptr::copy_nonoverlapping(name.as_ptr(), out, n);

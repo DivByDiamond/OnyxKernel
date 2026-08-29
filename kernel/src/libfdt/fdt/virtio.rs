@@ -2,8 +2,15 @@ use super::FdtMmio;
 use super::reader::{cstr_at, rd32, reg_base};
 use super::walk::walk;
 
+/// # Safety
+///
+/// `fdt::init()` must have succeeded; called once during single-threaded
+/// boot. `out` must have capacity >= `max`.
 pub unsafe fn find_virtio(out: &mut [FdtMmio], max: usize) -> usize {
     unsafe {
+        // SAFETY: caller contract: init() validated the DTB; walk only reads
+        // the magic-checked struct block single-threaded; writes to `out`
+        // are bounded by `count < max` checked against `out.len()`.
         let mut count = 0;
         walk(&mut |_name, props: &[(u32, &[u8])]| {
             if count >= max {

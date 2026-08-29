@@ -9,7 +9,13 @@ use super::super::{
 
 /// Total number of clusters in the FAT (data region capacity).
 /// Calculated from G_FAT_SZ, G_SPC, and 512-byte sectors.
+///
+/// # Safety
+///
+/// Reads only the mount-initialized G_FAT_SZ global; unsafe by convention
+/// to require the mounted context. No raw dereferences.
 unsafe fn total_clusters() -> u32 {
+    // SAFETY: only reads the G_FAT_SZ global set by mount().
     unsafe {
         // FAT32: each FAT entry is 4 bytes. A FAT sector holds 128 entries.
         // total entries = G_FAT_SZ * 128. This is an upper bound; the real
@@ -28,7 +34,16 @@ pub(super) fn patch_fat_value(existing: u32, value: u32) -> u32 {
 /// EVERY FAT copy on the volume (BPB_NumFATs). Each copy is read,
 /// patched, and written back independently so a stale mirror can never
 /// resurrect a freed cluster or drop a fresh allocation.
+///
+/// # Safety
+///
+/// Caller must not invoke FAT32 I/O concurrently from multiple harts;
+/// `cluster` must be a valid FAT index (callers check is_valid_cluster), so
+/// the byte offset stays within G_FAT_SZ sectors and off+3 < 512 because
+/// cluster*4 is 4-aligned relative to the sector size.
 pub(super) unsafe fn write_fat_entry(cluster: u32, value: u32) -> KResult<()> {
+    // SAFETY: single-threaded FAT32 exclusion (see # Safety); buf is a valid
+    // 512-byte stack buffer and the 4-byte patch is in-bounds per above.
     unsafe {
         let fat_off = cluster as u64 * 4;
         let sec_in_fat = fat_off / 512;
@@ -48,16 +63,32 @@ pub(super) unsafe fn write_fat_entry(cluster: u32, value: u32) -> KResult<()> {
 }
 
 /// Write a 512-byte sector to the disk.
+///
+/// # Safety
+///
+/// Caller must not invoke FAT32 I/O concurrently from multiple harts; mount()
+/// must have initialized G_DEV. `buf` is a caller-owned, fully initialized
+/// 512-byte buffer.
 pub(super) unsafe fn write_sec(lba: u64, buf: &[u8; 512]) -> KResult<()> {
+    // SAFETY: buf is a valid, initialized 512-byte buffer; G_DEV was set by
+    // mount() (single-threaded boot init).
     unsafe { crate::drivers::virtio_req::write(G_DEV, lba, buf.as_ptr()) }
 }
 
 /// Write `buf` to the given sector offset within a cluster's data area.
+///
+/// # Safety
+///
+/// Caller must not invoke FAT32 I/O concurrently from multiple harts;
+/// `cluster` must be a valid data cluster so cluster_to_lba cannot
+/// underflow, and `sector_in_cluster` must be < G_SPC (callers iterate
+/// 0..G_SPC). `buf` is a caller-owned 512-byte buffer.
 pub(super) unsafe fn write_cluster_sector(
     cluster: u32,
     sector_in_cluster: u32,
     buf: &[u8; 512],
 ) -> KResult<()> {
+    // SAFETY: see # Safety; buf is a valid 512-byte buffer.
     unsafe {
         let lba = super::super::cluster_to_lba(cluster) + sector_in_cluster as u64;
         write_sec(lba, buf)
@@ -66,7 +97,16 @@ pub(super) unsafe fn write_cluster_sector(
 
 /// Find a free cluster by scanning the FAT starting from cluster 2.
 /// Returns the cluster number, or Err(ENOSPC) if the FAT is full.
+///
+/// # Safety
+///
+/// Caller must not invoke FAT32 I/O concurrently from multiple harts:
+/// concurrent allocators could hand out the same free cluster twice.
+/// NOTE: no FS-level lock exists; the VFS layer does not serialize callers.
 pub(super) unsafe fn alloc_cluster() -> KResult<u32> {
+    // SAFETY: single-threaded FAT32 exclusion (see # Safety); the scan is
+    // bounded by total_clusters() and cluster indices are range-checked
+    // before each entry read (off = i*4 < 512 for i < 128).
     unsafe {
         let total = total_clusters();
         let mut buf = [0u8; 512];
@@ -99,14 +139,30 @@ pub(super) unsafe fn alloc_cluster() -> KResult<u32> {
 }
 
 /// Free a cluster (mark FAT entry as 0).
+///
+/// # Safety
+///
+/// Caller must not invoke FAT32 I/O concurrently from multiple harts;
+/// `cluster` must be a valid FAT index (delegated contract of
+/// write_fat_entry).
 pub(super) unsafe fn free_cluster(cluster: u32) -> KResult<()> {
+    // SAFETY: delegates entirely to write_fat_entry, whose contract covers
+    // the raw access for a validated cluster number.
     unsafe { write_fat_entry(cluster, 0) }
 }
 
 /// Extend the chain starting at `start_cluster` by allocating one new
 /// cluster and linking it from the current end-of-chain. Returns the new
 /// cluster number.
+///
+/// # Safety
+///
+/// Caller must not invoke FAT32 I/O concurrently from multiple harts
+/// (two racing extend_chain calls could allocate/link the same cluster).
+/// NOTE: no FS-level lock exists; the VFS layer does not serialize callers.
 pub(super) unsafe fn extend_chain(start_cluster: u32) -> KResult<u32> {
+    // SAFETY: single-threaded FAT32 exclusion (see # Safety); chain walking
+    // is hop-capped and every next-cluster value is validated before use.
     unsafe {
         let new_cluster = alloc_cluster()?;
         // Walk to the EOC of the existing chain.
@@ -137,7 +193,15 @@ pub(super) unsafe fn extend_chain(start_cluster: u32) -> KResult<u32> {
 }
 
 /// Free every cluster in the chain starting at `start_cluster`.
+///
+/// # Safety
+///
+/// Caller must not invoke FAT32 I/O concurrently from multiple harts;
+/// `start_cluster` must be a valid data cluster (callers check
+/// is_valid_cluster), and chain hops are validated and hop-capped below.
 pub(super) unsafe fn free_chain(start_cluster: u32) -> KResult<()> {
+    // SAFETY: single-threaded FAT32 exclusion (see # Safety); all raw access
+    // is delegated to fat_entry/free_cluster under validated cluster numbers.
     unsafe {
         let mut cur = start_cluster;
         let mut buf = [0u8; 512];

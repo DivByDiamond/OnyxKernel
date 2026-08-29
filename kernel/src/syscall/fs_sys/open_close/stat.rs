@@ -47,6 +47,10 @@ impl UserStat {
     };
 }
 
+/// # Safety
+///
+/// Caller must be on the syscall path with a live current-process root_pa;
+/// `out_va` is an untrusted user address validated here before any write.
 unsafe fn fill_user_stat(
     out_va: u64,
     ino: u32,
@@ -58,6 +62,9 @@ unsafe fn fill_user_stat(
     atime: u64,
     ctime: u64,
 ) -> onyx_core::errno::KResult<()> {
+    // SAFETY: out_va passed user_ptr_ok (sizeof UserStat) above and
+    // copy_to_user re-validates each page as a writable user mapping before
+    // writing; the source is a fully initialized stack UserStat.
     unsafe {
         if !user_ptr_ok(out_va, core::mem::size_of::<UserStat>() as u64) {
             return Err(Errno::Fault);
@@ -98,7 +105,14 @@ unsafe fn fill_user_stat(
 }
 
 #[inline(never)]
+/// # Safety
+///
+/// Call only from handler::handle's syscall path: current process set, ACL
+/// checked; `path`/`st_buf` are validated inside before use.
 pub unsafe fn sys_stat(path: u64, st_buf: u64) -> i64 {
+    // SAFETY: parse_user_path validates the user path internally; st_buf
+    // passed user_ptr_ok above and fill_user_stat re-validates every page
+    // via copy_to_user before writing the 128-byte record.
     unsafe {
         let mut path_buf = [0u8; 256];
         let path_len = match crate::syscall::handler::parse_user_path(path, &mut path_buf) {
@@ -149,7 +163,13 @@ pub unsafe fn sys_stat(path: u64, st_buf: u64) -> i64 {
     }
 }
 
+/// # Safety
+///
+/// Call only from handler::handle's syscall path: current process set, ACL
+/// checked; `st_buf` is validated inside before use.
 pub unsafe fn sys_fstat(token: u64, st_buf: u64) -> i64 {
+    // SAFETY: st_buf passed user_ptr_ok above and fill_user_stat re-validates
+    // every page via copy_to_user before writing the 128-byte record.
     unsafe {
         if !user_ptr_ok(st_buf, core::mem::size_of::<UserStat>() as u64) {
             return Errno::Inval.as_i64();

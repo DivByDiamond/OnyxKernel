@@ -8,7 +8,14 @@ use crate::srv::timer;
 use onyx_core::errno::{Errno, KResult};
 use onyx_core::formats::{ONYFS_DIRECT_BLKS, ONYFS_NAME_MAX, OnyfsInode};
 
+/// # Safety
+///
+/// Caller must not invoke onyxfs operations concurrently from multiple harts
+/// (shared G_BUF scratch block, journal head, and dirent slots). `dir_ino`
+/// must be a valid directory inode; `name` is length-checked in-line.
 pub unsafe fn create(dir_ino: u32, name: &[u8], mode: u32) -> KResult<u32> {
+    // SAFETY: single-threaded onyxfs exclusion (see # Safety); all on-disk
+    // accesses go through the bounds-checked alloc/add/write helpers.
     unsafe {
         check_v2()?;
         if name.is_empty() || name.len() > ONYFS_NAME_MAX {

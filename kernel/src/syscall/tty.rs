@@ -7,6 +7,9 @@
 /// consumed control bytes, Some(b) otherwise.
 pub(crate) fn filter_input(b: u8) -> Option<u8> {
     if b == 0x03 {
+        // SAFETY: signal_foreground validates the signal number and treats a
+        // stale foreground pid as a no-op; no proc_list_lock is held here and
+        // it takes that lock internally via by_pid.
         unsafe {
             let _ = crate::proc::signal_foreground(crate::proc::SIGINT);
         }

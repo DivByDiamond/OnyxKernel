@@ -14,6 +14,12 @@ pub use shared::{
 
 use onyx_core::errno::{Errno, KResult};
 
+/// # Safety
+///
+/// `data` must remain valid and unmodified for the rest of the kernel's
+/// lifetime: G_FONT stores raw pointers into it. Must run once during boot
+/// (before secondary harts are released) so G_FONT is never written
+/// concurrently; header/offset fields are bounds-checked inside.
 pub unsafe fn init(data: &[u8]) -> KResult<()> {
     unsafe {
         if data.len() < 4 {

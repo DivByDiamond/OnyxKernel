@@ -8,7 +8,14 @@ use super::handler::user_ptr_ok;
 
 /// SYS_snapshot_create(name): create a filesystem snapshot.
 /// `name` is a NUL-terminated user pointer to the snapshot name.
+/// # Safety
+///
+/// Call only from the syscall path with a current process set; `name` is
+/// validated inside before use.
 pub(super) unsafe fn sys_snapshot_create(name: u64) -> i64 {
+    // SAFETY: the 32-byte name range passed user_ptr_ok and per-page
+    // check_user_range (readable user pages) above, so the NUL scan and
+    // slice construction only read mapped user memory.
     unsafe {
         if !user_ptr_ok(name, 1)
             || crate::mm::vmm::check_user_range(crate::proc::current().root_pa, name, 32, false)
@@ -30,7 +37,13 @@ pub(super) unsafe fn sys_snapshot_create(name: u64) -> i64 {
 }
 
 /// SYS_snapshot_rollback(id): restore filesystem state from snapshot `id`.
+/// # Safety
+///
+/// Call only from the syscall path (ACL already restricts this to ring <=
+/// PROC_RING_ROOT); no user memory is touched.
 pub(super) unsafe fn sys_snapshot_rollback(id: u32) -> i64 {
+    // SAFETY: body performs no unsafe operations; the block only wraps the
+    // call to onyxfs::snapshot_rollback for the unsafe-fn dispatch convention.
     unsafe {
         match onyxfs::snapshot_rollback(id) {
             Ok(()) => 0,
@@ -41,7 +54,14 @@ pub(super) unsafe fn sys_snapshot_rollback(id: u32) -> i64 {
 
 /// SYS_snapshot_list(buf, len): list snapshot names into `buf`.
 /// Returns the number of snapshots listed.
+/// # Safety
+///
+/// Call only from the syscall path with a current process set; `buf`/`len`
+/// are validated inside before any write.
 pub(super) unsafe fn sys_snapshot_list(buf: u64, len: u64) -> i64 {
+    // SAFETY: buf/len passed user_ptr_ok and the per-page writable
+    // check_user_range above, so onyxfs::snapshot_list writes only mapped
+    // user pages.
     unsafe {
         if len == 0 {
             return 0;

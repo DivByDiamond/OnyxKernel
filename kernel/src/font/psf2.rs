@@ -16,6 +16,13 @@ fn read_u32(data: &[u8], off: usize) -> KResult<u32> {
         .ok_or(Errno::Io)
 }
 
+/// # Safety
+///
+/// Caller (font::init) must run once, single-threaded, during boot before
+/// secondary harts start; `data` must remain valid for the kernel's
+/// lifetime since G_FONT stores pointers into it. hdr_size/num_glyphs/
+/// charsize are sanity-capped and the glyph area is length- and
+/// overflow-checked before any as_ptr().add().
 pub(super) unsafe fn init_psf2(data: &[u8]) -> KResult<()> {
     unsafe {
         if data.len() < 32 {
@@ -76,6 +83,11 @@ pub(super) unsafe fn init_psf2(data: &[u8]) -> KResult<()> {
     }
 }
 
+/// # Safety
+///
+/// Caller must have validated the glyph area of `data`; the table start is
+/// re-checked here (`table_start >= data.len()` bails out), `table` is a
+/// real subslice, and every access goes through bounds-checked indexing.
 unsafe fn parse_psf2_unicode_table(data: &[u8], hdr_size: usize, num_glyphs: u32, charsize: u32) {
     unsafe {
         let glyph_bytes = (num_glyphs as usize) * (charsize as usize);
@@ -111,6 +123,11 @@ unsafe fn parse_psf2_unicode_table(data: &[u8], hdr_size: usize, num_glyphs: u32
     }
 }
 
+/// # Safety
+///
+/// `*pos` must be a valid cursor into `data` (<= data.len()); the function
+/// re-checks `*pos < data.len()` before every byte read and only advances
+/// `pos` after those checks, so no out-of-bounds access is possible.
 unsafe fn decode_utf8(data: &[u8], pos: &mut usize) -> u32 {
     if *pos >= data.len() {
         return 0;

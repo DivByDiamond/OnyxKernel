@@ -4,7 +4,13 @@ use onyx_core::errno::Errno;
 
 use super::super::handler::{parse_user_path, user_ptr_ok};
 
+/// # Safety
+///
+/// Call only from the syscall path with a current process set; `old_token`
+/// is validated inside vfs::dup and no user memory is touched.
 pub unsafe fn sys_dup(old_token: u64) -> i64 {
+    // SAFETY: body performs no unsafe operations; the block only wraps the
+    // vfs::dup call for the unsafe-fn dispatch convention.
     unsafe {
         match vfs::dup(old_token) {
             Ok(new_token) => new_token as i64,
@@ -13,7 +19,14 @@ pub unsafe fn sys_dup(old_token: u64) -> i64 {
     }
 }
 
+/// # Safety
+///
+/// Call only from the syscall path with a current process set; `pipefd` is
+/// validated inside before any write.
 pub unsafe fn sys_pipe(pipefd: u64) -> i64 {
+    // SAFETY: pipefd passed user_ptr_ok and the per-page writable
+    // check_user_range above; copy_to_user re-validates each page before
+    // writing the two 8-byte tokens from the stack array.
     unsafe {
         if !user_ptr_ok(pipefd, 16)
             || crate::mm::vmm::check_user_range(proc::current().root_pa, pipefd, 16, true).is_err()
@@ -37,7 +50,14 @@ pub unsafe fn sys_pipe(pipefd: u64) -> i64 {
 }
 
 #[inline(never)]
+/// # Safety
+///
+/// Call only from handler::handle's syscall path: current process set, ACL
+/// checked; `path` is validated inside before use.
 pub unsafe fn sys_unlink(path: u64) -> i64 {
+    // SAFETY: parse_user_path validates the user path internally and copies
+    // it into a kernel stack buffer; only that kernel copy is used
+    // afterwards.
     unsafe {
         let mut path_buf = [0u8; 256];
         let path_len = match parse_user_path(path, &mut path_buf) {
@@ -53,7 +73,14 @@ pub unsafe fn sys_unlink(path: u64) -> i64 {
 }
 
 #[inline(never)]
+/// # Safety
+///
+/// Call only from handler::handle's syscall path: current process set, ACL
+/// checked; both path arguments are validated inside before use.
 pub unsafe fn sys_rename(old_path: u64, new_path: u64) -> i64 {
+    // SAFETY: parse_user_path validates both user paths internally and
+    // copies them into kernel stack buffers; only those kernel copies are
+    // used afterwards.
     unsafe {
         let mut old_buf = [0u8; 256];
         let old_len = match parse_user_path(old_path, &mut old_buf) {
@@ -77,7 +104,14 @@ pub unsafe fn sys_rename(old_path: u64, new_path: u64) -> i64 {
 /// truncate(path) — legacy v0.3 ABI. Truncates to length 0. Kept for
 /// backwards compatibility with old binaries. New code should use
 /// `SYS_truncate2` (syscall 71) which takes an explicit length.
+/// # Safety
+///
+/// Call only from handler::handle's syscall path: current process set, ACL
+/// checked; `path` is validated inside before use.
 pub unsafe fn sys_truncate(path: u64) -> i64 {
+    // SAFETY: parse_user_path validates the user path internally and copies
+    // it into a kernel stack buffer; only that kernel copy is used
+    // afterwards.
     unsafe {
         let mut path_buf = [0u8; 256];
         let path_len = match parse_user_path(path, &mut path_buf) {
@@ -101,7 +135,14 @@ pub unsafe fn sys_truncate(path: u64) -> i64 {
 /// truncate2(path, length) — POSIX-style truncate with explicit length.
 /// Now delegates to OnyxFS `truncate_to_length` which supports all three
 /// cases (zero, shrink, extend with zero-fill).
+/// # Safety
+///
+/// Call only from handler::handle's syscall path: current process set, ACL
+/// checked; `path` is validated inside before use.
 pub unsafe fn sys_truncate2(path: u64, length: u64) -> i64 {
+    // SAFETY: parse_user_path validates the user path internally and copies
+    // it into a kernel stack buffer; only that kernel copy is used
+    // afterwards.
     unsafe {
         let mut path_buf = [0u8; 256];
         let path_len = match parse_user_path(path, &mut path_buf) {
@@ -124,7 +165,13 @@ pub unsafe fn sys_truncate2(path: u64, length: u64) -> i64 {
 
 /// ftruncate(fd, length) — same as truncate2 but takes an fd.
 /// Now uses truncate_to_length to support non-zero lengths.
+/// # Safety
+///
+/// Call only from the syscall path with a current process set; `fd` is
+/// validated inside vfs and no user memory is touched.
 pub unsafe fn sys_ftruncate(fd: u64, length: u64) -> i64 {
+    // SAFETY: body performs no unsafe operations; the block only wraps the
+    // vfs::truncate_to_length call for the unsafe-fn dispatch convention.
     unsafe {
         match vfs::truncate_to_length(fd, length) {
             Ok(()) => 0,
@@ -133,7 +180,14 @@ pub unsafe fn sys_ftruncate(fd: u64, length: u64) -> i64 {
     }
 }
 
+/// # Safety
+///
+/// Call only from handler::handle's syscall path: current process set, ACL
+/// checked; `path` is validated inside before use.
 pub unsafe fn sys_access(path: u64, _mode: u64) -> i64 {
+    // SAFETY: parse_user_path validates the user path internally and copies
+    // it into a kernel stack buffer; only that kernel copy is used
+    // afterwards.
     unsafe {
         let mut path_buf = [0u8; 256];
         let path_len = match parse_user_path(path, &mut path_buf) {

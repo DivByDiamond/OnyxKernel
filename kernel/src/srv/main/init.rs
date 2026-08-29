@@ -5,7 +5,14 @@ use crate::mm::heap;
 use crate::proc;
 use onyx_core::fmt::Arg;
 
+/// # Safety
+///
+/// Terminal boot step: loads /bin/init, creates pid 1, enables S-mode
+/// interrupts, releases secondary harts and enters user mode without
+/// returning. Must run once on the boot hart with VFS and traps ready.
 pub(crate) unsafe fn launch() -> ! {
+    // SAFETY: one-shot boot call; proc state is initialized (proc::init) before create_user/enter_user,
+    // and SIE is only enabled after the trap path is armed.
     unsafe {
         let path = b"/bin/init";
         let token = match vfs::open(path, vfs::PERM_READ | vfs::PERM_SEEK) {

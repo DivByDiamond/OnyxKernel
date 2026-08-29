@@ -72,6 +72,8 @@ fn test_checksum_known_ip_header() {
 
 #[test]
 fn test_arp_cache_insert_lookup() {
+    // SAFETY: test-only access to the global ARP cache; IPs are disjoint from other tests
+    // (see note in test_arp_cache_insert_many), though the shared LEN counter is unsynchronized.
     unsafe {
         let ip1 = [10, 8, 8, 1]; // unique range: cache is global across tests
         let mac1 = [0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF];
@@ -96,6 +98,8 @@ fn test_arp_cache_insert_lookup() {
 
 #[test]
 fn test_arp_cache_insert_many() {
+    // SAFETY: test-only access to the global ARP cache; disjoint IPs per the NOTE below,
+    // but ARP_CACHE_LEN is a shared unsynchronized RMW across parallel tests (known race).
     unsafe {
         // NOTE: the ARP cache is a process-global static; use IPs unique to this
         // test so parallel/order-dependent pollution from other tests can't leak.

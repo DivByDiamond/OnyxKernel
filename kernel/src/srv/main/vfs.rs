@@ -4,7 +4,12 @@ use crate::mm::heap;
 use onyx_core::errno::KResult;
 use onyx_core::fmt::Arg;
 
+/// # Safety
+///
+/// Boot-time VFS bring-up: mounts root/procfs/ipcfs/devfs; must run
+/// single-threaded on the boot hart after the block drivers are probed.
 pub(crate) unsafe fn setup(ndevs: usize) {
+    // SAFETY: one-shot boot call; `ndevs` comes from probe_devices and mount candidates are validated by the superblock check.
     unsafe {
         vfs::init();
         if ndevs > 0 {
@@ -46,7 +51,14 @@ pub(crate) unsafe fn setup(ndevs: usize) {
     }
 }
 
+/// # Safety
+///
+/// Reads /font/default.psf into a heap buffer and hands it to font::init.
+/// The buffer is intentionally NOT freed: font::init retains raw pointers
+/// into it (font/psf2.rs stores `glyphs`/`unicode` into G_FONT), so the
+/// blob must outlive the kernel. Leak is bounded by the font file size.
 pub(crate) unsafe fn load_font() {
+    // SAFETY: from_raw_parts covers exactly the kmalloc'd `size` bytes; the buffer is leaked on purpose (font::init retains raw pointers into it) so the slice stays valid for the program's lifetime.
     unsafe {
         (|| -> KResult<()> {
             let token = vfs::open(b"/font/default.psf", vfs::PERM_READ)?;
@@ -57,7 +69,9 @@ pub(crate) unsafe fn load_font() {
                 vfs::read(token, buf, size).ok();
                 vfs::close(token).ok();
                 crate::font::init(core::slice::from_raw_parts(buf, size as usize)).ok();
-                heap::kfree(buf);
+                // Leak `buf` on purpose: font::init kept raw pointers into
+                // the PSF blob (G_FONT.glyphs/unicode). Freeing it would
+                // leave every glyph read dangling (UAF on the console path).
                 crate::kinf!("font", "loaded /font/default.psf");
             } else {
                 vfs::close(token).ok();

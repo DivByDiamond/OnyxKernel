@@ -21,7 +21,16 @@ use onyx_core::formats::{
 ///   3. If no free slot exists in any existing block, allocate a fresh
 ///      direct block in the first empty `blocks[i]` slot, zero it, and
 ///      write the new entry as its first slot.
+///
+/// # Safety
+///
+/// Caller must not invoke onyxfs operations concurrently from multiple harts:
+/// this uses the module-global G_BUF scratch block, reads G_VERSION/G_SB and
+/// calls other unsafe onyxfs helpers. `dir_ino` must be a valid directory
+/// inode; slot offsets are bounds-checked (off + entry_size <= block size).
 pub unsafe fn add_dirent(dir_ino: u32, name: &[u8], target_ino: u32, dtype: u8) -> KResult<()> {
+    // SAFETY: single-threaded onyxfs exclusion (see # Safety); every dirent
+    // slot access is bounds-checked before the raw G_BUF dereferences.
     unsafe {
         let mut dir_inode = OnyfsInode {
             mode: 0,

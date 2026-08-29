@@ -23,11 +23,22 @@ pub(crate) use layout::copy_argv_envp_to_stack;
 /// the syscall layer (`user_ptr_ok`): [USER_BASE, USER_TOP) with overflow
 /// guard, so both the char** array base and each string pointer are validated
 /// before any dereference.
+///
+/// # Safety
+///
+/// Caller contract: purely a range check (no dereference happens here);
+/// `p` may be any value (returns false for out-of-range).
 unsafe fn argv_ptr_ok(p: u64, len: u64) -> bool {
     crate::syscall::handler::user_ptr_ok(p, len)
 }
 
+/// # Safety
+///
+/// Caller contract: `root_pa` is a valid root table; `va` must already be
+/// mapped as a user page (unmapped = silently skipped).
 unsafe fn write_val(root_pa: u64, va: u64, val: u64) {
+    // SAFETY: vmm::translate returns a valid PA (or 0, which is skipped)
+    // for the mapped user pages of the loader-owned root table.
     unsafe {
         let pa = crate::mm::vmm::translate(root_pa, va);
         if pa != 0 {
@@ -36,7 +47,15 @@ unsafe fn write_val(root_pa: u64, va: u64, val: u64) {
     }
 }
 
+/// # Safety
+///
+/// Caller contract: `p` was validated by argv_ptr_ok (in-range user ptr);
+/// `buf` has room per the caller's accounting; reads at most max_len bytes
+/// plus a from_raw_parts copy of the measured slen.
 unsafe fn copy_user_str(p: u64, buf: &mut [u8], off: &mut usize, max_len: usize) -> Option<usize> {
+    // SAFETY: p passed argv_ptr_ok at the call site ([USER_BASE, USER_TOP)
+    // with overflow guard) and the scan stops at max_len or NUL, so the raw
+    // reads stay inside the validated user range.
     unsafe {
         let mut slen = 0usize;
         while slen < max_len && *((p + slen as u64) as *const u8) != 0 {
@@ -53,6 +72,11 @@ unsafe fn copy_user_str(p: u64, buf: &mut [u8], off: &mut usize, max_len: usize)
     }
 }
 
+/// # Safety
+///
+/// Caller contract: `ptrs` (the argv/envp array base) was validated with
+/// argv_ptr_ok by the caller; `buf`/`offsets` are caller-owned and sized;
+/// each string pointer is re-validated before its bytes are copied.
 unsafe fn collect_strings(
     ptrs: *const u64,
     max_count: usize,
@@ -61,6 +85,9 @@ unsafe fn collect_strings(
     offsets: &mut [u64; 64],
     off: &mut usize,
 ) -> usize {
+    // SAFETY: ptrs base was argv_ptr_ok-checked by the caller and reads are
+    // capped at max_count; each element p is re-validated with argv_ptr_ok
+    // before copy_user_str dereferences it.
     unsafe {
         let mut count = 0usize;
         for i in 0..max_count {
@@ -84,10 +111,16 @@ unsafe fn collect_strings(
     }
 }
 
+/// # Safety
+///
+/// Caller contract: `root_pa` is a valid root table with the user stack
+/// already mapped; `argv_user` (if non-zero) must pass argv_ptr_ok.
 pub(crate) unsafe fn copy_argv_to_stack(
     root_pa: u64,
     ustack_top: u64,
     argv_user: u64,
 ) -> (usize, u64) {
+    // SAFETY: forwards to copy_argv_envp_to_stack, whose caller contract
+    // (validated user pointers, mapped stack pages) is satisfied here.
     unsafe { copy_argv_envp_to_stack(root_pa, ustack_top, argv_user, 0, 0, 0) }
 }

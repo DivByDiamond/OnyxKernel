@@ -17,7 +17,15 @@ use super::extend::extend_to_length;
 /// Used by `truncate(ino)` (zero-length) and as a building block for
 /// partial truncation. Does NOT touch the inode itself — caller is
 /// responsible for updating inode.blocks/indirect/size.
+///
+/// # Safety
+///
+/// Caller must not invoke onyxfs operations concurrently from multiple harts
+/// (free_data_block uses the shared G_BUF scratch global). All block numbers
+/// come from a previously read inode and are validated by free_data_block.
 unsafe fn free_all_blocks(inode: &mut OnyfsInode) -> KResult<()> {
+    // SAFETY: only calls free_data_block/free_indirect_block/
+    // free_double_indirect, whose own contracts cover the raw access.
     unsafe {
         for &blk in inode.blocks.iter() {
             if blk != 0 {
@@ -41,7 +49,15 @@ unsafe fn free_all_blocks(inode: &mut OnyfsInode) -> KResult<()> {
 
 /// Free every block referenced by a single-indirect block, then the
 /// indirect block itself.
+///
+/// # Safety
+///
+/// Caller must not invoke onyxfs operations concurrently from multiple harts
+/// (shared G_BUF scratch global). `ind_blk` must be an indirect block number
+/// from a valid inode; entry reads stay inside the 4 KB block buffer.
 unsafe fn free_indirect_block(ind_blk: u32) -> KResult<()> {
+    // SAFETY: single-threaded onyxfs exclusion (see # Safety); `pb` is the
+    // module-global G_BUF, valid for a full block; entry loop is bounded.
     unsafe {
         let pb = &raw mut G_BUF;
         read_block(ind_blk, &mut *pb)?;
@@ -57,7 +73,15 @@ unsafe fn free_indirect_block(ind_blk: u32) -> KResult<()> {
 
 /// Free every block referenced by a double-indirect block, both levels,
 /// then the double-indirect block itself.
+///
+/// # Safety
+///
+/// Caller must not invoke onyxfs operations concurrently from multiple harts
+/// (shared G_BUF scratch global). `dind_blk` must be a double-indirect block
+/// number from a valid inode; entry reads stay inside the block buffer.
 unsafe fn free_double_indirect(dind_blk: u32) -> KResult<()> {
+    // SAFETY: single-threaded onyxfs exclusion (see # Safety); `pb` is the
+    // module-global G_BUF, valid for a full block; entry loop is bounded.
     unsafe {
         let pb = &raw mut G_BUF;
         for i in 0..entries_per_block() {
@@ -72,7 +96,14 @@ unsafe fn free_double_indirect(dind_blk: u32) -> KResult<()> {
 }
 
 /// Truncate the file to exactly 0 bytes — frees all data blocks.
+///
+/// # Safety
+///
+/// Caller must not invoke onyxfs operations concurrently from multiple harts
+/// (shared G_BUF, journal head, inode slots). `ino` must be a valid inode.
 pub unsafe fn truncate(ino: u32) -> KResult<()> {
+    // SAFETY: single-threaded onyxfs exclusion (see # Safety); raw access is
+    // delegated to the bounds-checked read_inode/free_all_blocks helpers.
     unsafe {
         check_v2()?;
         let mut inode = OnyfsInode::default();
@@ -101,7 +132,14 @@ pub unsafe fn truncate(ino: u32) -> KResult<()> {
 ///   block_index = floor(offset / bs)
 ///   blocks 0..10 are direct; blocks 10..(10 + bs/4) are in the single
 ///   indirect block.
+///
+/// # Safety
+///
+/// Caller must not invoke onyxfs operations concurrently from multiple harts
+/// (shared G_BUF, journal head, inode slots). `ino` must be a valid inode.
 pub unsafe fn truncate_to_length(ino: u32, length: u64) -> KResult<()> {
+    // SAFETY: single-threaded onyxfs exclusion (see # Safety); raw access is
+    // delegated to the bounds-checked read_inode/shrink/extend helpers.
     unsafe {
         check_v2()?;
         let mut inode = OnyfsInode::default();
@@ -131,7 +169,15 @@ pub unsafe fn truncate_to_length(ino: u32, length: u64) -> KResult<()> {
 
 /// Shrink: free direct blocks and indirect entries past the last block
 /// needed to hold `length` bytes.
+///
+/// # Safety
+///
+/// Caller must not invoke onyxfs operations concurrently from multiple harts
+/// (shared G_BUF scratch global). `length` must be nonzero and < the inode's
+/// current size; indirect entry reads are bounded by entries_per_block().
 unsafe fn shrink(inode: &mut OnyfsInode, length: u64) -> KResult<()> {
+    // SAFETY: single-threaded onyxfs exclusion (see # Safety); `pb` is the
+    // module-global G_BUF; indirect entry indices are bounded by the loop.
     unsafe {
         let bs = ONYFS_BLOCK_SIZE as u64;
         // Block at index `last_needed` partially contains the byte at

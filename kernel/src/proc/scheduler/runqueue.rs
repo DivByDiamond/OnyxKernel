@@ -12,11 +12,14 @@ pub struct RunQueue {
     pub nr_ready: usize,
 }
 
+// SAFETY: RunQueue is only manipulated while holding its own SpinLock
+// (or from the owning hart before other harts can observe it).
 unsafe impl Sync for RunQueue {}
 
 pub static mut G_RQ: MaybeUninit<[RunQueue; MAX_HARTS]> = MaybeUninit::uninit();
 
 pub fn init() {
+    // SAFETY: boot-time init of G_RQ before any hart schedules.
     unsafe {
         for i in 0..MAX_HARTS {
             (*G_RQ.as_mut_ptr())[i] = RunQueue {
@@ -29,23 +32,39 @@ pub fn init() {
     }
 }
 
+/// # Safety
+///
+/// Caller contract: init() has run; `hart` < MAX_HARTS.
 unsafe fn rq(hart: usize) -> &'static mut RunQueue {
+    // SAFETY: G_RQ was initialized by init() and never re-assigned; valid index per contract.
     unsafe { &mut (*G_RQ.as_mut_ptr())[hart] }
 }
 
+/// # Safety
+///
+/// Caller contract: init() has run; `hart` < MAX_HARTS; SIE clear (crate::sync invariant).
 pub unsafe fn rq_lock(hart: usize) {
+    // SAFETY: rq(hart) valid per caller contract; SpinLock interrupt invariant holds.
     unsafe {
         rq(hart).lock.lock();
     }
 }
 
+/// # Safety
+///
+/// Caller contract: `hart` < MAX_HARTS and rq_lock(hart) is held by this hart.
 pub unsafe fn rq_unlock(hart: usize) {
+    // SAFETY: rq(hart) valid; unlock pairs with the caller's prior rq_lock(hart).
     unsafe {
         rq(hart).lock.unlock();
     }
 }
 
+/// # Safety
+///
+/// Caller contract: rq_lock(hart) held; `p` a live heap Proc not on another runqueue.
 pub unsafe fn enqueue(hart: usize, p: *mut Proc) {
+    // SAFETY: rq(hart) and p dereferenceable; rq_lock(hart) held excludes queue races.
     unsafe {
         if (*p).on_rq {
             return;
@@ -63,7 +82,11 @@ pub unsafe fn enqueue(hart: usize, p: *mut Proc) {
     }
 }
 
+/// # Safety
+///
+/// Caller contract: as enqueue - the target queue's rq_lock must be held; `p` live.
 pub unsafe fn enqueue_affine(hart: usize, p: *mut Proc) {
+    // SAFETY: p dereferenceable per caller contract; enqueue runs under the target's lock.
     unsafe {
         let target = if (*p).affinity >= 0 && (*p).affinity < MAX_HARTS as i32 {
             (*p).affinity as usize
@@ -74,7 +97,11 @@ pub unsafe fn enqueue_affine(hart: usize, p: *mut Proc) {
     }
 }
 
+/// # Safety
+///
+/// Caller contract: rq_lock(hart) held; `hart` < MAX_HARTS; returned Proc owned by caller.
 pub unsafe fn dequeue(hart: usize) -> *mut Proc {
+    // SAFETY: rq(hart) valid; rq_lock(hart) held excludes concurrent queue mutation.
     unsafe {
         let p = rq(hart).head;
         if !p.is_null() {
@@ -90,7 +117,11 @@ pub unsafe fn dequeue(hart: usize) -> *mut Proc {
     }
 }
 
+/// # Safety
+///
+/// Caller contract: rq_lock(hart) held; `p` a valid Proc on this queue.
 pub unsafe fn remove(hart: usize, p: *mut Proc) -> bool {
+    // SAFETY: rq(hart) and p dereferenceable; rq_lock(hart) held excludes queue races.
     unsafe {
         if !(*p).on_rq {
             return false;
@@ -131,7 +162,11 @@ mod tests {
         Box::into_raw(p)
     }
 
+    /// # Safety
+    ///
+    /// Test-only: reads nr_ready; single merged test, no parallel G_RQ access.
     unsafe fn rq_len(hart: usize) -> usize {
+        // SAFETY: G_RQ initialized by init() in this single merged test; no concurrent access.
         unsafe { (*G_RQ.as_mut_ptr())[hart].nr_ready }
     }
 
@@ -140,6 +175,8 @@ mod tests {
     /// assertion lives in one function to stay deterministic.
     #[test]
     fn test_runqueue_fifo_affinity_remove_and_steal() {
+        // SAFETY: host test; G_RQ is initialized here and exercised
+        // single-threaded from this one merged test (no parallel access).
         unsafe {
             init();
 

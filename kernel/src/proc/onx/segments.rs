@@ -4,12 +4,20 @@ use core::ptr;
 use onyx_core::errno::{Errno, KResult};
 use onyx_core::formats::OnxSegment;
 
+/// # Safety
+///
+/// Caller contract: `root_pa` a valid root table owned by this loader;
+/// `s` validated (ranges in [USER_BASE, USER_TOP), filesz <= memsz,
+/// data_end <= image_size) by onx::load; `image` readable for those bytes.
 pub unsafe fn map_segment_data(
     root_pa: u64,
     s: &OnxSegment,
     image: *const u8,
     compressed: bool,
 ) -> KResult<()> {
+    // SAFETY: all page-table access goes through the owning root table
+    // (fresh from onx::load, not shared yet); freshly allocated pages are
+    // freed on every error path and file ranges were validated by the caller.
     unsafe {
         let seg_flags = (s.flags as u64) | PTE_U | PTE_A | PTE_D;
         let mut va = s.vaddr;
@@ -65,7 +73,15 @@ pub unsafe fn map_segment_data(
     }
 }
 
+/// # Safety
+///
+/// Caller contract: `root_pa` owned by this loader and every page of
+/// [s.vaddr, s.vaddr+filesz) already mapped (map_segment_data ran); `image`
+/// readable for the segment's compressed range (validated in onx::load).
 unsafe fn decompress_to_pages(root_pa: u64, s: &OnxSegment, image: *const u8) -> KResult<()> {
+    // SAFETY: src stays within the caller-validated image buffer (bounds
+    // enforced by the in_off/comp_end checks); destination PAs come from
+    // vmm::translate on pages this function mapped above.
     unsafe {
         let src = image.add(s.offset as usize);
         let comp_end = s.compressed_size as usize;
@@ -114,7 +130,15 @@ unsafe fn decompress_to_pages(root_pa: u64, s: &OnxSegment, image: *const u8) ->
     }
 }
 
+/// # Safety
+///
+/// Caller contract: same as decompress_to_pages; `root_pa` owned by this
+/// loader with all segment pages already mapped; `image` readable for the
+/// raw file range.
 unsafe fn copy_raw_to_pages(root_pa: u64, s: &OnxSegment, image: *const u8) -> KResult<()> {
+    // SAFETY: per-page translation of the just-mapped user pages yields
+    // valid PA destinations; src stays within the caller-validated image
+    // (copy_len bounded by page remainder and remaining filesz).
     unsafe {
         let mut va = s.vaddr;
         let end = s.vaddr + s.memsz;

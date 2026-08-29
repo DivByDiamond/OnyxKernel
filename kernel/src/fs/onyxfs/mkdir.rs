@@ -13,7 +13,16 @@ use onyx_core::formats::{
 /// Create a new directory. Returns the new inode number. Like `create()` but
 /// with `mode = ONYFS_DT_DIR`, and the new directory is given its own data
 /// block pre-populated with the conventional "." and ".." entries.
+///
+/// # Safety
+///
+/// Caller must not invoke onyxfs operations concurrently from multiple harts
+/// (shared G_BUF scratch global, journal head, dirent slots). `dir_ino` must
+/// be a valid directory inode; `name` is length-checked in-line.
 pub unsafe fn mkdir(dir_ino: u32, name: &[u8]) -> KResult<u32> {
+    // SAFETY: single-threaded onyxfs exclusion (see # Safety); `pb` is the
+    // module-global G_BUF and the two dirent writes stay within
+    // 2 * OnyfsDirent::SIZE < ONYFS_BLOCK_SIZE.
     unsafe {
         if G_VERSION == ONYFS_V1 {
             return Err(Errno::NoSys);

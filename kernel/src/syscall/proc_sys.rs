@@ -6,7 +6,13 @@ use onyx_core::errno::Errno;
 
 use super::handler::user_ptr_ok;
 
+/// # Safety
+///
+/// Call only from the syscall path with this hart's current-process slot
+/// (G_HART_CURRENT) initialized; no user memory is touched.
 pub(super) unsafe fn sys_exit(code: u64) -> i64 {
+    // SAFETY: body performs no unsafe operations; the block only wraps the
+    // safe proc::current_pid/exit calls for the unsafe-fn dispatch convention.
     unsafe {
         let pid = proc::current_pid();
         proc::exit(pid, code as i32);
@@ -14,18 +20,36 @@ pub(super) unsafe fn sys_exit(code: u64) -> i64 {
     }
 }
 
+/// # Safety
+///
+/// Call only from the syscall path with this hart's current-process slot
+/// (G_HART_CURRENT) initialized; no user memory is touched.
 pub(super) unsafe fn sys_yield() -> i64 {
+    // SAFETY: body performs no unsafe operations; the block only wraps the
+    // safe set_need_resched/hart_id calls for the unsafe-fn dispatch
+    // convention.
     unsafe {
         proc::set_need_resched(proc::hart_id(), true);
         0
     }
 }
+/// # Safety
+///
+/// Call only from the syscall path with this hart's current-process slot
+/// (G_HART_CURRENT) initialized; no user memory is touched.
 pub(super) unsafe fn sys_getpid() -> i64 {
     proc::current_pid() as i64
 }
 
 /// SYS_spawn: create new process from .onx file.
+/// # Safety
+///
+/// Call only from the syscall path with a current process set and a live
+/// trap frame; `path`/`argv` are validated inside before use.
 pub(super) unsafe fn sys_spawn(_tf: &mut TrapFrame, path: u64, argv: u64, ring_hint: u8) -> i64 {
+    // SAFETY: the 256-byte path range passed user_ptr_ok and per-page
+    // check_user_range (readable user pages) above, so the NUL scan and
+    // slice only read mapped user memory.
     unsafe {
         if !user_ptr_ok(path, 1)
             || crate::mm::vmm::check_user_range(proc::current().root_pa, path, 256, false).is_err()
@@ -47,7 +71,15 @@ pub(super) unsafe fn sys_spawn(_tf: &mut TrapFrame, path: u64, argv: u64, ring_h
 }
 
 /// SYS_wait: wait for child exit. Blocks (yields) until a child exits.
+/// # Safety
+///
+/// Call only from the syscall path with a current process set and a live
+/// trap frame; `status_out` is validated inside before any store.
 pub(super) unsafe fn sys_wait(tf: &mut TrapFrame, status_out: u64) -> i64 {
+    // SAFETY: the 4-byte status_out range passed user_ptr_ok and per-page
+    // check_user_range (writable user pages) above, so proc::wait stores
+    // only through mapped user memory (or a null pointer when status_out
+    // is 0).
     unsafe {
         // Validate the full user range (mapping + PTE_U) up front so proc::wait
         // never stores through a bad pointer; a broken buffer returns EFAULT.
@@ -73,7 +105,14 @@ pub(super) unsafe fn sys_wait(tf: &mut TrapFrame, status_out: u64) -> i64 {
 
 /// SYS_kill(pid, signal): deliver `signal` to process `pid`.
 /// Root-only (ACL enforced in `syscall_allowed`).
+/// # Safety
+///
+/// Call only from the syscall path in kernel context; must not already hold
+/// proc_list_lock (signal_send takes it internally via by_pid).
 pub(super) unsafe fn sys_kill(pid: u32, signal: u32) -> i64 {
+    // SAFETY: signal_send's own contract (syscall/trap context, no
+    // proc_list_lock held) is satisfied here; it validates pid/signal
+    // internally and locks the process list for the lookup.
     unsafe {
         match proc::signal_send(pid, signal) {
             Ok(()) => 0,
@@ -85,7 +124,14 @@ pub(super) unsafe fn sys_kill(pid: u32, signal: u32) -> i64 {
 /// SYS_sigmask(how, sig): block / unblock / set the signal mask for one
 /// signal. `how`: 0 = block, 1 = unblock, 2 = set mask to just `sig`.
 /// Signal 9 (KILL) cannot be blocked — `how == 0` on signal 9 is a no-op.
+/// # Safety
+///
+/// Call only from the syscall path with this hart's current process set;
+/// the mask field is mutated only by the owning process's own context.
 pub(super) unsafe fn sys_sigmask(how: u32, sig: u32) -> i64 {
+    // SAFETY: proc::current() reads this hart's G_HART_CURRENT slot, which
+    // the trap path set to the running process; only that process's
+    // signal_mask is written.
     unsafe {
         if sig >= 32 {
             return Errno::Inval.as_i64();
@@ -119,7 +165,14 @@ pub(super) unsafe fn sys_sigmask(how: u32, sig: u32) -> i64 {
     }
 }
 
+/// # Safety
+///
+/// Call only from the syscall path with this hart's current process set;
+/// the affinity field of the target is written after the ring/perm check.
 pub(super) unsafe fn sys_sched_setaffinity(pid: u64, cpu: i64) -> i64 {
+    // SAFETY: by_pid() takes proc_list_lock internally for the lookup; the
+    // affinity store follows by_pid's documented per-caller field-mutation
+    // discipline.
     unsafe {
         // Bug (syscall MINOR #12): validate pid range. The previous code did
         // `by_pid(pid as u32)` which silently truncated a u64 pid > u32::MAX
@@ -144,7 +197,14 @@ pub(super) unsafe fn sys_sched_setaffinity(pid: u64, cpu: i64) -> i64 {
     }
 }
 
+/// # Safety
+///
+/// Call only from the syscall path with this hart's current process set;
+/// the target's affinity field is only read.
 pub(super) unsafe fn sys_sched_getaffinity(pid: u64) -> i64 {
+    // SAFETY: by_pid() takes proc_list_lock internally for the lookup; the
+    // affinity read follows by_pid's documented per-caller field-access
+    // discipline.
     unsafe {
         if let Some(p) = crate::proc::by_pid(pid as u32) {
             p.affinity as i64

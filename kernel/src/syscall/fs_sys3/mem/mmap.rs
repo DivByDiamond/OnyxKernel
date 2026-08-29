@@ -12,6 +12,11 @@ const MMAP_BASE: u64 = 0x2000_0000;
 /// hint is advanced ONLY after validation succeeds and the caller's map
 /// operation returned Ok — otherwise a failed mmap would permanently burn
 /// hint space (rollback bug).
+/// # Safety
+///
+/// `p.root_pa` must satisfy the vmm translate contract (page-aligned PA of
+/// a live, direct-mapped root table); `do_map` must map only into that same
+/// table at the chosen `vaddr`.
 unsafe fn resolve_vaddr(
     p: &mut crate::proc::process::Proc,
     addr: u64,
@@ -19,6 +24,9 @@ unsafe fn resolve_vaddr(
     map_fixed: bool,
     do_map: impl FnOnce(u64) -> Result<(), Errno>,
 ) -> i64 {
+    // SAFETY: p.root_pa satisfies the vmm translate contract per the
+    // caller; unmap and translate_user operate only on that table, and the
+    // chosen vaddr is checked to stay below USER_TOP before do_map runs.
     unsafe {
         let mut vaddr = addr;
         let advance_hint;
@@ -63,6 +71,10 @@ unsafe fn resolve_vaddr(
 }
 
 /// Anonymous or devfs-backed mmap.
+/// # Safety
+///
+/// Call only from handler::handle's syscall path: current process set, ACL
+/// checked; the fd path validates the token via vfs::fd_check before use.
 pub unsafe fn sys_mmap(
     addr: u64,
     length: u64,
@@ -71,6 +83,9 @@ pub unsafe fn sys_mmap(
     fd: u64,
     _offset: u64,
 ) -> i64 {
+    // SAFETY: p is this hart's current process and root_pa satisfies the
+    // vmm translate contract; resolve_vaddr validates the vaddr and its
+    // do_map callbacks map only into that same root table.
     unsafe {
         if length == 0 {
             return Errno::Inval.as_i64();

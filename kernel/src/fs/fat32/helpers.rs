@@ -5,15 +5,30 @@ use super::{
 };
 use onyx_core::errno::{Errno, KResult};
 
+/// True if `cluster` is a valid data-cluster number (2..EOC).
+///
+/// # Safety
+///
+/// Pure predicate; unsafe only to match module convention. No raw access.
 pub(crate) unsafe fn is_valid_cluster(cluster: u32) -> bool {
     (2..FAT32_EOC).contains(&cluster)
 }
 
+/// Read one 512-byte sector from within `cluster`'s data area.
+///
+/// # Safety
+///
+/// Caller must not invoke FAT32 I/O concurrently from multiple harts; mount()
+/// must have initialized the globals, and `cluster` must be a valid data
+/// cluster (callers check is_valid_cluster) so cluster_to_lba cannot
+/// underflow. `buf` is a caller-owned 512-byte buffer.
 pub(crate) unsafe fn read_cluster_sector(
     cluster: u32,
     sector_in_cluster: u32,
     buf: &mut [u8; 512],
 ) -> KResult<()> {
+    // SAFETY: see # Safety; buf is a valid 512-byte buffer, the LBA
+    // arithmetic cannot underflow for a validated cluster.
     unsafe {
         let lba = cluster_to_lba(cluster) + sector_in_cluster as u64;
         read_sec(lba, buf)
@@ -41,6 +56,16 @@ pub(crate) fn fat32_name_8_3(name: &[u8]) -> [u8; 11] {
     out
 }
 
+/// Walk a directory cluster chain looking for the 8.3 name `needle`.
+/// Chain traversal is hop-capped (MAX_HOPS) and every cluster is validated
+/// against the FAT before following it.
+///
+/// # Safety
+///
+/// Caller must not invoke FAT32 I/O concurrently from multiple harts (the
+/// module globals are unsynchronized); `dir_cluster` must be a valid data
+/// cluster; `buf` is a caller-owned 512-byte scratch buffer reused across
+/// sector reads.
 pub(crate) unsafe fn scan_dir_entries(
     dir_cluster: u32,
     needle: &[u8; 11],
@@ -49,6 +74,8 @@ pub(crate) unsafe fn scan_dir_entries(
     is_dir: &mut bool,
     buf: &mut [u8; 512],
 ) -> KResult<()> {
+    // SAFETY: see # Safety; entry offsets are ei*32 with ei < 16, so all
+    // buffer reads stay within the 512-byte sector.
     unsafe {
         let mut cluster = dir_cluster;
         if !is_valid_cluster(cluster) {
@@ -117,7 +144,15 @@ pub(crate) fn fat_type_for_clusters(count_of_clusters: u64) -> &'static str {
     }
 }
 
+/// # Safety
+///
+/// Must be called once at boot before secondary harts are released (see
+/// `release_secondary_harts()` in srv/main/init.rs): it writes the module
+/// globals without a lock. All BPB fields are validated in-line and the
+/// volume is required to be FAT32 (not FAT12/16).
 pub unsafe fn mount(dev: usize) -> KResult<()> {
+    // SAFETY: single-threaded boot init is the exclusion guarantee for the
+    // module globals written here.
     unsafe {
         G_DEV = dev;
         let mut bpb = [0u8; 512];

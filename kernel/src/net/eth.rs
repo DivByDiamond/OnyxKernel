@@ -16,7 +16,13 @@ static mut ARP_CACHE_IP: [[u8; 4]; ARP_CACHE_MAX] = [[0; 4]; ARP_CACHE_MAX];
 static mut ARP_CACHE_MAC: [[u8; 6]; ARP_CACHE_MAX] = [[0; 6]; ARP_CACHE_MAX];
 static mut ARP_CACHE_LEN: usize = 0;
 
+/// # Safety
+///
+/// Reads the lock-free ARP cache statics; caller must not race a
+/// concurrent `arp_insert` from another hart (SIE=0 only bars same-hart
+/// preemption, the kernel is SMP).
 pub unsafe fn arp_lookup(ip: [u8; 4]) -> Option<[u8; 6]> {
+    // SAFETY: read-only scan; indices derive from ARP_CACHE_LEN, which arp_insert keeps <= ARP_CACHE_MAX.
     unsafe {
         for i in 0..ARP_CACHE_LEN {
             if ARP_CACHE_IP[i] == ip {
@@ -27,7 +33,12 @@ pub unsafe fn arp_lookup(ip: [u8; 4]) -> Option<[u8; 6]> {
     }
 }
 
+/// # Safety
+///
+/// Mutates the lock-free ARP cache; caller must serialize cache access
+/// across harts (no lock guards ARP_CACHE_LEN or the entries).
 pub unsafe fn arp_insert(ip: [u8; 4], mac: [u8; 6]) {
+    // SAFETY: capacity checked against ARP_CACHE_MAX before every write; single-writer contract above.
     unsafe {
         for i in 0..ARP_CACHE_LEN {
             if ARP_CACHE_IP[i] == ip {
@@ -43,7 +54,12 @@ pub unsafe fn arp_insert(ip: [u8; 4], mac: [u8; 6]) {
     }
 }
 
+/// # Safety
+///
+/// TX path: reads the boot-written G_IP and drives the transmit ring;
+/// must not run concurrently with another sender/poller on another hart.
 pub unsafe fn arp_request(target_ip: [u8; 4]) {
+    // SAFETY: fixed 42-byte stack buffer with in-range slice offsets; TX ring contract per virtio_net::send.
     unsafe {
         let mac = virtio_net::mac();
         let broadcast = [0xFF; 6];
@@ -64,7 +80,12 @@ pub unsafe fn arp_request(target_ip: [u8; 4]) {
     }
 }
 
+/// # Safety
+///
+/// RX-path handler: frame length is checked (>= 42) before any indexed
+/// read; ARP-cache and G_IP access rely on the net single-poller contract.
 pub unsafe fn handle_arp(frame: &[u8]) {
+    // SAFETY: all frame indexing bounds-checked against the length check above; statics per net contract.
     unsafe {
         if frame.len() < 42 {
             return;
@@ -96,6 +117,11 @@ pub unsafe fn handle_arp(frame: &[u8]) {
     }
 }
 
+/// # Safety
+///
+/// TX path: builds the frame from validated arguments and hands it to the
+/// transmit ring; must not run concurrently with another sender per the
+/// net single-poller contract (no lock serializes the TX ring).
 pub unsafe fn send_frame(dst_mac: [u8; 6], ethertype: u16, payload: &[u8]) {
     let mac = virtio_net::mac();
     let total = ETH_HLEN + payload.len();
@@ -107,7 +133,13 @@ pub unsafe fn send_frame(dst_mac: [u8; 6], ethertype: u16, payload: &[u8]) {
     let _ = virtio_net::send(&frame);
 }
 
+/// # Safety
+///
+/// RX dispatcher: requires the net single-poller contract; frame length
+/// is re-checked inside before the ethertype read, and sub-handlers
+/// re-validate their own offsets.
 pub unsafe fn dispatch(frame: &[u8]) {
+    // SAFETY: ethertype read bounds-checked (frame.len() >= ETH_HLEN); callees re-check lengths.
     unsafe {
         if frame.len() < ETH_HLEN {
             return;

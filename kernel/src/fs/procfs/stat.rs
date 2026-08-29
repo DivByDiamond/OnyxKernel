@@ -9,6 +9,10 @@ pub struct ProcfsStat {
     pub mode: u32,
 }
 
+/// # Safety
+///
+/// No unsafe operations inside; pure ino-to-stat match. Kept unsafe for
+/// signature symmetry with the other procfs entry points.
 pub unsafe fn stat(ino: u32) -> KResult<ProcfsStat> {
     match ino {
         PROCFS_ROOT_INO => Ok(ProcfsStat {

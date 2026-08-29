@@ -9,7 +9,14 @@ use onyx_core::errno::{Errno, KResult};
 use onyx_core::fmt::Arg;
 use onyx_core::formats::{ONYFS_BLOCK_SIZE, OnyfsSuper, onyxfs_growth_limit, onyxfs_growth_target};
 
+/// # Safety
+///
+/// Caller must invoke this once at boot, before secondary harts are released
+/// (`release_secondary_harts()`), and before any onyxfs I/O: it writes the
+/// module-wide G_DEV/G_LBA_BASE/G_SB/G_BUF globals without any lock.
 pub unsafe fn mount(dev: usize, lba_offset: u32) -> KResult<()> {
+    // SAFETY: single-threaded boot init (before release_secondary_harts) is the
+    // exclusion guarantee for the module globals written here.
     unsafe {
         crate::kinf!(
             "onyxfs",
@@ -50,6 +57,9 @@ pub unsafe fn mount(dev: usize, lba_offset: u32) -> KResult<()> {
 /// config space (read-only u64 at offset 0x100). Returns 0 for an invalid
 /// device index, which disables grow-on-mount.
 unsafe fn blk_capacity_sectors(dev_idx: usize) -> u64 {
+    // SAFETY: dev_idx validated below via the null check; the one unsafe block
+    // dereferences `pd` only after `virtio::dev` returned a non-null pointer and
+    // is already covered by the inner SAFETY comment.
     unsafe {
         let pd = virtio::dev(dev_idx);
         if pd.is_null() {
@@ -83,6 +93,8 @@ unsafe fn blk_capacity_sectors(dev_idx: usize) -> u64 {
 /// The new size is persisted to the superblock immediately; if it ever needs
 /// shrinking again, rebuild the image with mkimage.
 unsafe fn grow_to_device() -> KResult<()> {
+    // SAFETY: only called from mount(), which holds the single-threaded boot
+    // exclusion for the G_SB global it reads and writes.
     unsafe {
         let sectors = blk_capacity_sectors(G_DEV);
         if sectors == 0 {
@@ -123,6 +135,9 @@ unsafe fn grow_to_device() -> KResult<()> {
 
 /// Persist the in-memory superblock back to disk block 0.
 pub(super) unsafe fn persist_superblock() -> KResult<()> {
+    // SAFETY: `pb` points at the module-global G_BUF, valid for ONYFS_BLOCK_SIZE
+    // bytes; only this function's scope writes through it. Caller must not run
+    // other onyxfs I/O concurrently (G_BUF is unsynchronized).
     unsafe {
         let bytes = (G_SB).to_bytes();
         let pb = &raw mut G_BUF;
@@ -138,6 +153,8 @@ pub(super) unsafe fn persist_superblock() -> KResult<()> {
 /// Number of inode-table blocks occupied by the current filesystem.
 #[inline]
 pub(super) unsafe fn inode_table_block_count() -> u32 {
+    // SAFETY: reads only G_SB (set by mount) and calls inodes_per_block(); no
+    // pointer arithmetic beyond the validated superblock fields.
     unsafe {
         let ipb = inodes_per_block() as u32;
         let cnt = (G_SB).inode_count;

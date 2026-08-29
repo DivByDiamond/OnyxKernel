@@ -1,10 +1,17 @@
 use super::super::inode;
 use super::super::journal::journal_log;
-use super::super::{read_block, write_block, G_BUF, G_SB};
+use super::super::{G_BUF, G_SB, read_block, write_block};
 use super::bitmap::free_data_block;
 use onyx_core::errno::{Errno, KResult};
-use onyx_core::formats::{OnyfsInode, ONYFS_BLOCK_SIZE, ONYFS_DIRECT_BLKS};
+use onyx_core::formats::{ONYFS_BLOCK_SIZE, ONYFS_DIRECT_BLKS, OnyfsInode};
 
+/// # Safety
+///
+/// Caller must not invoke onyxfs operations concurrently from multiple harts:
+/// this uses the module-global G_BUF scratch block and reads G_SB. `ino` must
+/// be a valid allocated inode number; ino == 0 would clear bitmap byte 0-
+/// NOTE: unlike bitmap::free_inode this path does not reject ino == 0 before
+/// clearing the bitmap bit (bit_index saturates to 0).
 pub unsafe fn free_inode(ino: u32) -> KResult<()> {
     let mut inode = OnyfsInode {
         mode: 0,

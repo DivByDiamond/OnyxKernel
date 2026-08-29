@@ -20,7 +20,9 @@ static BAD_CKSUM: AtomicU32 = AtomicU32::new(0);
 pub(super) const SEG_ACK: u8 = 1;
 pub(super) const SEG_FIN_ACK: u8 = 2;
 
+/// # Safety: allocates into the lock-free CONNS table; caller must serialize TCP calls across harts (no lock; SIE=0 only bars same-hart preemption).
 pub unsafe fn tcp_connect(dst_ip: [u8; 4], port: u16) -> KResult<usize> {
+    // SAFETY: slot from alloc_conn, fully initialized before the SYN is sent; table contract above.
     unsafe {
         let cid = alloc_conn().ok_or(Errno::Busy)?;
         let sport = alloc_local_port();
@@ -56,14 +58,15 @@ pub unsafe fn tcp_connect(dst_ip: [u8; 4], port: u16) -> KResult<usize> {
     }
 }
 
+/// # Safety: indexes CONNS[cid]; caller must own that slot (no concurrent recv/send/close on this cid from another hart).
 pub unsafe fn tcp_send(cid: usize, data: &[u8]) -> KResult<usize> {
+    // SAFETY: conn checked non-empty; copy bounds-checked against BUF_SIZE - send_len; send per send_tcp_seg contract.
     unsafe {
         let conn = CONNS[cid].as_mut().ok_or(Errno::Inval)?;
         if conn.state != 2 {
             return Err(Errno::Io);
         }
-        // Space freed as ACKs advance snd_una (drain_acked), so send_len here
-        // reflects only bytes the peer has not yet acknowledged.
+        // Send space is freed as ACKs advance snd_una (drain_acked); send_len counts unacked bytes.
         let n = data.len().min(BUF_SIZE - conn.send_len);
         conn.send_buf[conn.send_len..conn.send_len + n].copy_from_slice(&data[..n]);
         conn.send_len += n;
@@ -73,7 +76,9 @@ pub unsafe fn tcp_send(cid: usize, data: &[u8]) -> KResult<usize> {
     }
 }
 
+/// # Safety: indexes CONNS[cid]; caller must own that slot exclusively (a concurrent recv would corrupt the ring indices).
 pub unsafe fn tcp_recv(cid: usize, buf: &mut [u8]) -> KResult<usize> {
+    // SAFETY: conn checked non-empty; ring reads masked % BUF_SIZE; head/len advanced under exclusive ownership.
     unsafe {
         let conn = CONNS[cid].as_mut().ok_or(Errno::Inval)?;
         if conn.recv_len == 0 {
@@ -89,7 +94,9 @@ pub unsafe fn tcp_recv(cid: usize, buf: &mut [u8]) -> KResult<usize> {
     }
 }
 
+/// # Safety: indexes CONNS[cid]; caller must guarantee no other hart touches this slot during close.
 pub unsafe fn tcp_close(cid: usize) {
+    // SAFETY: FIN send reads a copy of the conn; slot cleared exactly once; valid-index contract on cid.
     unsafe {
         if let Some(conn) = CONNS[cid].as_ref()
             && conn.state == 2
@@ -101,9 +108,7 @@ pub unsafe fn tcp_close(cid: usize) {
     }
 }
 
-/// Free acked bytes from the send window: advance snd_una and drop the
-/// leading `acked` bytes of send_buf. A bogus ACK (outside
-/// [snd_una, snd_nxt]) is ignored.
+/// Free acked bytes: advance snd_una and drop the leading send_buf bytes; bogus ACKs are ignored.
 pub(super) fn drain_acked(c: &mut super::conn::TcpConn, ack: u32) {
     let outstanding = c.snd_nxt.wrapping_sub(c.snd_una);
     let acked = ack.wrapping_sub(c.snd_una);
@@ -116,10 +121,7 @@ pub(super) fn drain_acked(c: &mut super::conn::TcpConn, ack: u32) {
     c.snd_una = ack;
 }
 
-/// Pure TCP state-machine transition core (no I/O, host-testable). Mutates
-/// the connection (state, seq vars, recv buffer) and returns up to two
-/// segment commands (SEG_ACK / SEG_FIN_ACK) the caller must emit in order.
-/// `now` is the uptime in microseconds, used for the TIMEWAIT deadline.
+/// Pure TCP state-machine core (no I/O, host-testable): mutates the conn, returns SEG_* commands to emit in order; `now` is uptime us.
 pub(super) fn tcp_transition(
     c: &mut super::conn::TcpConn,
     seq: u32,
@@ -139,7 +141,6 @@ pub(super) fn tcp_transition(
         2 | 4 => {
             drain_acked(c, ack);
             let mut out = [0u8; 2];
-            // In-sequence data only.
             if seq == c.rcv_nxt && !payload.is_empty() {
                 let n = payload.len().min(BUF_SIZE - c.recv_len);
                 let start = (c.recv_head + c.recv_len) % BUF_SIZE;
@@ -185,7 +186,9 @@ fn process_segment(c: &mut super::conn::TcpConn, seq: u32, ack: u32, flags: u8, 
     }
 }
 
+/// # Safety: RX path -- mutates CONNS and sends; must run under the net single-poller contract (no concurrent poll or socket syscalls).
 pub unsafe fn handle_tcp(frame: &[u8], ip_start: usize, ihl: usize, total_len: usize) {
+    // SAFETY: offsets validated against frame.len() before indexing; table mutation per the contract above.
     unsafe {
         sweep_timewait(now_us());
         let tcp_off = ip_start + ihl;
@@ -200,8 +203,7 @@ pub unsafe fn handle_tcp(frame: &[u8], ip_start: usize, ihl: usize, total_len: u
         sip.copy_from_slice(&frame[ip_start + 12..ip_start + 16]);
         let mut dip = [0u8; 4];
         dip.copy_from_slice(&frame[ip_start + 16..ip_start + 20]);
-        // Not addressed to us (IP layer does not filter) — drop before any
-        // connection matching or checksum work.
+        // Not addressed to us (IP layer does not filter): drop before matching/checksum work.
         if dip != G_IP {
             return;
         }
@@ -226,8 +228,7 @@ pub unsafe fn handle_tcp(frame: &[u8], ip_start: usize, ihl: usize, total_len: u
         }
         let payload_start = tcp_off + data_off;
         let payload_len = seg_end.saturating_sub(payload_start);
-        // Inbound checksum verification: pseudo-header + header + payload,
-        // checksum field included. Bad packets are dropped and counted.
+        // Verify inbound checksum (checksum field included); drop and count bad segments.
         let seg = &frame[tcp_off..seg_end];
         if !tcp_checksum_ok(&sip, &G_IP, seg) {
             let n = BAD_CKSUM.fetch_add(1, Ordering::Relaxed) + 1;
@@ -238,8 +239,7 @@ pub unsafe fn handle_tcp(frame: &[u8], ip_start: usize, ihl: usize, total_len: u
         }
         let payload = &frame[payload_start..payload_start + payload_len];
         for c in CONNS.iter_mut().flatten() {
-            // Full 4-tuple match: local port AND remote IP:port. Prevents
-            // off-path injection and lets duplicate local ports coexist.
+            // Full 4-tuple match (local port AND remote IP:port) blocks off-path injection.
             if c.src_port != dport || c.dst_port != sport || c.dst_ip != sip {
                 continue;
             }

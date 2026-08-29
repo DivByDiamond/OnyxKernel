@@ -8,6 +8,9 @@
 //!
 //! `snapshot_list` writes each snapshot name (NUL-terminated, newline-
 //! separated) into `names_out` and returns the number listed.
+//!
+//! See the # Safety sections on the two functions below for the caller
+//! contracts (user-buffer validity is established by the syscall layer).
 use super::compress::rle_decompress;
 use super::journal::{journal_commit, journal_log};
 use super::{
@@ -26,7 +29,16 @@ use onyx_core::formats::{ONYFS_BLOCK_SIZE, SnapshotMeta};
 /// transaction via `journal_commit` at the end. If a crash occurs mid-
 /// rollback, the next mount's `journal_recover` will replay the remaining
 /// writes and bring the filesystem to a consistent snapshot-restored state.
+///
+/// # Safety
+///
+/// Caller must not invoke onyxfs operations concurrently from multiple harts
+/// (shared G_BUF scratch global, journal head, and the non-atomic restore of
+/// live blocks). `snapshot_id` is validated against snapshot_count below.
 pub unsafe fn snapshot_rollback(snapshot_id: u32) -> KResult<()> {
+    // SAFETY: single-threaded onyxfs exclusion (see # Safety); n_blocks is
+    // capped at SNAPSHOT_SLOTS so header offsets stay inside the header
+    // block, and comp_size is checked before every slice.
     unsafe {
         let sb_ptr = &raw const G_SB;
         if (*sb_ptr).snapshot_area_start == 0 {
@@ -97,7 +109,18 @@ pub unsafe fn snapshot_rollback(snapshot_id: u32) -> KResult<()> {
 
 /// List all snapshots: write each snapshot name (NUL-terminated, newline-
 /// separated) into `names_out`. Returns the number of snapshots listed.
+///
+/// # Safety
+///
+/// `names_out` must be writable for `max_len` bytes and stay valid for the
+/// call (the syscall layer translates user buffers before reaching fs/);
+/// every write below is guarded by a `written + 1 < max_len` check. Caller
+/// must not invoke onyxfs operations concurrently from multiple harts (the
+/// G_BUF scratch global is unsynchronized).
 pub unsafe fn snapshot_list(names_out: *mut u8, max_len: usize) -> KResult<u32> {
+    // SAFETY: see # Safety for names_out validity; all writes are bounded by
+    // the max_len checks, and G_BUF slices are bounds-checked against the
+    // block size and SnapshotMeta::SIZE.
     unsafe {
         let sb_ptr = &raw const G_SB;
         if (*sb_ptr).snapshot_area_start == 0 {

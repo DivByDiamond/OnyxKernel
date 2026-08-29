@@ -6,7 +6,15 @@ use super::super::process::{
 };
 use crate::{arch::trap_frame::TrapFrame, mm::heap};
 
+/// # Safety
+///
+/// Caller contract: process context of the waiting parent on this hart;
+/// `status_out` (if non-null) must be a writable i32; must NOT already hold
+/// proc_list_lock; may return while parked via sched_yield.
 pub unsafe fn wait(tf: &mut TrapFrame, status_out: *mut i32) -> KResult<u32> {
+    // SAFETY: the child scan/unlink runs under proc_list_lock (taken here);
+    // the reaped node is kfree'd only after unlinking, and the Waiting
+    // publish uses the same lock per the B4 lost-wakeup protocol below.
     unsafe {
         let my_pid = current_pid();
         proc_list_lock();

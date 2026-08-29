@@ -119,6 +119,7 @@ impl onyx_core::fmt::Write for PanicWriter {
 
 fn delay_loops(n: u64) {
     for _ in 0..n {
+        // SAFETY: bare `nop` asm -- no memory access and no registers declared as clobbered.
         unsafe { core::arch::asm!("nop") }
     }
 }
@@ -144,6 +145,7 @@ pub fn panic_handler(info: &PanicInfo) -> ! {
         w.write_str(msg);
         w.write_char(b'\n');
     }
+    // SAFETY: panic path -- kdump only reads CSRs and process state (volatile reads) and prints; no allocation.
     unsafe {
         crate::srv::kdump::kdump();
     }
@@ -151,6 +153,8 @@ pub fn panic_handler(info: &PanicInfo) -> ! {
     crate::proc::dump_all(&mut w);
     w.write_str("\n  Rebooting in 3 seconds...\n");
     delay_loops(300_000_000);
+    // SAFETY: 0x100000 is the fixed QEMU-virt sifive_test finisher MMIO register; the volatile
+    // word write of 0x5555 requests shutdown and bypasses compiler reordering.
     unsafe {
         let finisher = 0x100000usize as *mut u32;
         core::ptr::write_volatile(finisher, 0x5555);
@@ -159,6 +163,7 @@ pub fn panic_handler(info: &PanicInfo) -> ! {
 }
 
 pub fn halt() -> ! {
+    // SAFETY: S-mode CSR write clears SIE (stops same-hart timer preemption) then parks in a wfi loop; no memory access.
     unsafe {
         crate::arch::csr::clear_sstatus(crate::arch::regs::SSTATUS_SIE);
         loop {

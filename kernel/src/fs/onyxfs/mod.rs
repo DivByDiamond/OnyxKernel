@@ -101,6 +101,9 @@ pub(super) static mut G_BUF: [u8; ONYFS_BLOCK_SIZE] = [0; ONYFS_BLOCK_SIZE];
 pub(super) static mut G_JOURNAL_HEAD: u32 = 0;
 
 pub(super) unsafe fn read_block(blk: u32, buf: &mut [u8; ONYFS_BLOCK_SIZE]) -> KResult<()> {
+    // SAFETY: buf points to a caller-owned ONYFS_BLOCK_SIZE buffer; G_DEV/G_LBA_BASE
+    // are set by mount() before any I/O. Caller must not run onyxfs I/O concurrently
+    // from multiple harts (globals are unsynchronized).
     unsafe {
         let lba = (G_LBA_BASE as u64) + (blk as u64) * 8;
         // A single OnyxFS block is 4096 bytes = 8 × 512-byte sectors. We issue
@@ -115,6 +118,8 @@ pub(super) unsafe fn read_block(blk: u32, buf: &mut [u8; ONYFS_BLOCK_SIZE]) -> K
 /// Write a 4096-byte block back to disk. Used by `update_mtime`,
 /// `write_inode`, and the snapshot management stubs.
 pub(super) unsafe fn write_block(blk: u32, buf: &[u8; ONYFS_BLOCK_SIZE]) -> KResult<()> {
+    // SAFETY: buf points to a fully initialized ONYFS_BLOCK_SIZE buffer owned by the
+    // caller; G_DEV/G_LBA_BASE were set by mount(). Same exclusion contract as read_block.
     unsafe {
         let lba = (G_LBA_BASE as u64) + (blk as u64) * 8;
         // Same batching as `read_block` — a single `write_multi` call for the
@@ -125,6 +130,7 @@ pub(super) unsafe fn write_block(blk: u32, buf: &[u8; ONYFS_BLOCK_SIZE]) -> KRes
 
 #[inline]
 pub(super) unsafe fn inodes_per_block() -> usize {
+    // SAFETY: reads only G_VERSION, set by mount() before first use; no pointers dereferenced.
     unsafe {
         match G_VERSION {
             ONYFS_V1 => ONYFS_BLOCK_SIZE / ONYFS_V1_INODE_SIZE, // 64
@@ -135,6 +141,7 @@ pub(super) unsafe fn inodes_per_block() -> usize {
 
 #[inline]
 pub(super) unsafe fn dirents_per_block() -> usize {
+    // SAFETY: reads only G_VERSION, set by mount() before first use; no pointers dereferenced.
     unsafe {
         match G_VERSION {
             ONYFS_V1 => ONYFS_BLOCK_SIZE / ONYFS_V1_DIRENT_SIZE, // 113
@@ -160,6 +167,9 @@ mod tests {
 
     #[test]
     fn test_inode_dirent_per_block_v1() {
+        // SAFETY: test-only; saves and restores G_VERSION around reads of it.
+        // NOTE: cargo test may run tests in parallel; these two tests mutate the
+        // same global, which is a benign-for-assertions race in practice.
         unsafe {
             let old = G_VERSION;
             G_VERSION = ONYFS_V1;
@@ -173,6 +183,8 @@ mod tests {
 
     #[test]
     fn test_inode_dirent_per_block_v2() {
+        // SAFETY: test-only; saves and restores G_VERSION around reads of it.
+        // NOTE: races with test_inode_dirent_per_block_v1 if run in parallel.
         unsafe {
             let old = G_VERSION;
             G_VERSION = ONYFS_V2;

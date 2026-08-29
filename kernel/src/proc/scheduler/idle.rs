@@ -9,7 +9,12 @@ use crate::{
     srv::timer,
 };
 
+/// # Safety
+///
+/// Caller contract: init() has run; reads only this hart's current slot.
 pub unsafe fn is_idle() -> bool {
+    // SAFETY: own-hart G_HART_CURRENT slot read (written only by the
+    // owning hart's scheduler); null or a live heap-allocated Proc.
     unsafe { current_for_hart(hart_id()).is_null() }
 }
 
@@ -40,7 +45,15 @@ pub unsafe fn is_idle() -> bool {
 /// Returning to USER mode never relies on this loop: user trap frames
 /// carry sstatus.SPIE = 1, so `sret` re-enables interrupts by hardware
 /// (SPIE → SIE) exactly when entering user space.
+///
+/// # Safety
+///
+/// Caller contract: run once per hart after scheduler/smp init, from that
+/// hart's boot context; never returns.
 pub unsafe fn sched_enter_idle() -> ! {
+    // SAFETY: per-hart idle setup: CSR writes configure this hart's trap
+    // vector/scratch and interrupt sources; no locks are held in this body
+    // and SIE is set only around wfi (audited invariant above).
     unsafe {
         let hartid = hart_id();
         csr::write_stvec(crate::arch::asm::trap_entry as *const () as usize as u64);

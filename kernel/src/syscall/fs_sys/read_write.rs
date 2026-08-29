@@ -11,14 +11,29 @@ use super::super::handler::user_ptr_ok;
 /// Validate a user buffer for syscall access: range-check plus per-page
 /// mapping/PTE_U verification so a bad pointer yields EFAULT instead of an
 /// S-mode page fault (which halts the machine).
+/// # Safety
+///
+/// Caller must be on the syscall path with a live current-process root_pa;
+/// `buf`/`len` are untrusted values validated here, not pre-verified.
 unsafe fn user_buf_ok(buf: u64, len: u64, write: bool) -> bool {
+    // SAFETY: only the two validators run here; user_ptr_ok is pure
+    // arithmetic and check_user_range performs read-only PTE translation on
+    // the current process's own root table (vmm translate contract).
     unsafe {
         user_ptr_ok(buf, len)
             && vmm::check_user_range(proc::current().root_pa, buf, len, write).is_ok()
     }
 }
 
+/// # Safety
+///
+/// Call only from handler::handle's syscall path: current process set, ACL
+/// checked; `buf`/`len` are validated inside before any access.
 pub(in super::super) unsafe fn sys_write(tf: &mut TrapFrame, fd: u64, buf: u64, len: u64) -> i64 {
+    // SAFETY: user_buf_ok verified every page of [buf, buf+len) is a mapped
+    // readable user page, so the byte reads on the uart path and the
+    // vfs::write below only touch mapped user memory; `tf` is this hart's
+    // live trap frame.
     unsafe {
         if !user_buf_ok(buf, len, false) {
             return Errno::Fault.as_i64();
@@ -55,7 +70,15 @@ pub(in super::super) unsafe fn sys_write(tf: &mut TrapFrame, fd: u64, buf: u64, 
     }
 }
 
+/// # Safety
+///
+/// Call only from handler::handle's syscall path: current process set, ACL
+/// checked; `buf`/`len` are validated inside before any access.
 pub(in super::super) unsafe fn sys_read(tf: &mut TrapFrame, _fd: u64, buf: u64, len: u64) -> i64 {
+    // SAFETY: user_buf_ok verified every page of [buf, buf+len) is a mapped
+    // writable user page; all writes below stay within len bytes of `dst`
+    // (cooked mode writes at most len-1 chars plus a NUL), and `tf` is this
+    // hart's live trap frame.
     unsafe {
         if !user_buf_ok(buf, len, true) {
             return Errno::Fault.as_i64();

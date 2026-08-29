@@ -5,7 +5,16 @@ use super::free_data_block;
 use onyx_core::errno::{Errno, KResult};
 use onyx_core::formats::{ONYFS_BLOCK_SIZE, ONYFS_DIRECT_BLKS, OnyfsInode};
 
+/// # Safety
+///
+/// Caller must not invoke onyxfs allocation from multiple harts concurrently:
+/// this scans and mutates the module-global G_BUF scratch block and depends on
+/// G_SB/G_VERSION being initialized by mount(). `ino` indices are validated
+/// in-line by the callee bitmap code.
 pub unsafe fn alloc_inode() -> KResult<u32> {
+    // SAFETY: single-threaded exclusion for the G_BUF scratch global is the
+    // caller's contract (see # Safety); all bit indices are bounds-checked
+    // against ONYFS_BLOCK_SIZE by construction of the loops.
     unsafe {
         const INODE_BITMAP_BLK: u32 = 1;
         let pb = &raw mut G_BUF;
@@ -28,8 +37,16 @@ pub unsafe fn alloc_inode() -> KResult<u32> {
     }
 }
 
+/// # Safety
+///
+/// Same contract as `alloc_inode`: no concurrent onyxfs callers from multiple
+/// harts (G_BUF scratch global, G_SB must be initialized). `ino` must be a
+/// valid inode number; ino == 0 is rejected and the bitmap byte index is
+/// bounds-checked against ONYFS_BLOCK_SIZE below.
 #[inline(never)]
 pub unsafe fn free_inode(ino: u32) -> KResult<()> {
+    // SAFETY: see # Safety - single-threaded onyxfs access; byte_idx is
+    // bounds-checked against ONYFS_BLOCK_SIZE before use.
     unsafe {
         if ino == 0 {
             return Err(Errno::Inval);

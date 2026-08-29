@@ -16,7 +16,16 @@ use super::fat::{alloc_cluster, free_chain, write_cluster_sector};
 
 /// Create a new file in `dir_cluster` with the given 8.3 name.
 /// Returns the new file's first cluster (or 0 for an empty file).
+///
+/// # Safety
+///
+/// Caller must not invoke FAT32 I/O concurrently from multiple harts
+/// (module globals and FAT/dirent state are unsynchronized). `dir_cluster`
+/// must be a valid data cluster; `name` is length-checked in-line and
+/// converted to an 8.3 short name (no LFN support).
 pub unsafe fn create(dir_cluster: u32, name: &[u8], is_dir: bool) -> KResult<u32> {
+    // SAFETY: single-threaded FAT32 exclusion (see # Safety); all raw access
+    // is delegated to the bounds-checked scan/alloc/dirent helpers.
     unsafe {
         if name.is_empty() || name.len() > 12 {
             return Err(Errno::Inval);
@@ -75,7 +84,15 @@ pub unsafe fn create(dir_cluster: u32, name: &[u8], is_dir: bool) -> KResult<u32
 }
 
 /// Populate "." and ".." in a freshly allocated directory cluster.
+///
+/// # Safety
+///
+/// Caller must not invoke FAT32 I/O concurrently from multiple harts;
+/// `first_cluster` must be a freshly allocated valid data cluster and
+/// `dir_cluster` a valid directory cluster (from create()'s alloc path).
 unsafe fn write_dot_entries(dir_cluster: u32, first_cluster: u32) -> KResult<()> {
+    // SAFETY: single-threaded FAT32 exclusion (see # Safety); the 64-byte
+    // dot-entry patch stays within the 512-byte sector buffer.
     unsafe {
         let mut dot = [0u8; 32];
         dot[..11].copy_from_slice(b".          ");
@@ -104,7 +121,17 @@ unsafe fn write_dot_entries(dir_cluster: u32, first_cluster: u32) -> KResult<()>
 
 /// Mark a directory entry as deleted (0xE5) and free its clusters.
 /// Returns Ok(()) if found and deleted, Err(NoEnt) if not found.
+///
+/// # Safety
+///
+/// Caller must not invoke FAT32 I/O concurrently from multiple harts
+/// (two racing unlinks on the same entry could free the chain twice);
+/// `dir_cluster` must be a valid data cluster and is re-validated on every
+/// chain hop below. NOTE: no FS-level lock exists; the VFS layer does not
+/// serialize callers.
 pub unsafe fn unlink(dir_cluster: u32, name: &[u8]) -> KResult<()> {
+    // SAFETY: single-threaded FAT32 exclusion (see # Safety); entry offsets
+    // are ei*32 with ei < 16, staying within the 512-byte sector buffer.
     unsafe {
         if name.is_empty() {
             return Err(Errno::Inval);
@@ -164,7 +191,15 @@ pub unsafe fn unlink(dir_cluster: u32, name: &[u8]) -> KResult<()> {
 /// Update the size field in a directory entry. Looks up `name` in
 /// `dir_cluster` and writes the new size (4 bytes, little-endian) into
 /// the dirent at offset 28.
+///
+/// # Safety
+///
+/// Caller must not invoke FAT32 I/O concurrently from multiple harts;
+/// `dir_cluster` must be a valid data cluster and is re-validated on every
+/// chain hop below.
 pub unsafe fn update_size(dir_cluster: u32, name: &[u8], new_size: u32) -> KResult<()> {
+    // SAFETY: single-threaded FAT32 exclusion (see # Safety); entry offsets
+    // are ei*32 with ei < 16, staying within the 512-byte sector buffer.
     unsafe {
         if name.is_empty() {
             return Err(Errno::Inval);

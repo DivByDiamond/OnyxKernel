@@ -53,6 +53,8 @@ pub fn hart_id() -> usize {
     #[cfg(not(test))]
     {
         let id: usize;
+        // SAFETY: inline asm only reads the tp register (per-hart thread
+        // pointer set by boot); no side effects, single `out` operand.
         unsafe { core::arch::asm!("mv {0}, tp", out(reg) id) }
         id
     }
@@ -62,7 +64,13 @@ pub fn hart_id() -> usize {
     }
 }
 
+/// # Safety
+///
+/// Caller contract: must run once during early kernel init (single-hart boot
+/// path) before any hart touches these globals; no concurrent access.
 pub unsafe fn init() {
+    // SAFETY: one-time boot-time reset of the process globals; by the caller
+    // contract no other hart reads or writes them yet.
     unsafe {
         G_ALL_PROCS = ptr::null_mut();
         G_CURRENT = ptr::null_mut();
@@ -82,9 +90,17 @@ pub fn alloc_pid() -> u32 {
     G_NEXT_PID.fetch_add(1, Ordering::SeqCst)
 }
 
+/// # Safety
+///
+/// Caller contract: out-of-range `hartid` yields null; the slot for `hartid`
+/// is written only by the scheduler running on that hart, so a caller reading
+/// another hart's slot must tolerate it changing concurrently.
 pub unsafe fn current_for_hart(hartid: usize) -> *mut Proc {
+    // SAFETY: bounds-checked read of the per-hart slot per the doc contract.
     unsafe {
         if hartid < MAX_HARTS {
+            // SAFETY: slot is either null or points to a live heap-allocated
+            // Proc (never freed while current).
             G_HART_CURRENT[hartid]
         } else {
             ptr::null_mut()
@@ -92,9 +108,17 @@ pub unsafe fn current_for_hart(hartid: usize) -> *mut Proc {
     }
 }
 
+/// # Safety
+///
+/// Caller contract: `p` must be a valid Proc pointer (or null); the slot for
+/// `hartid` is written only by the scheduler running on that hart, and slot 0
+/// additionally mirrors into `G_CURRENT` for legacy single-hart paths.
 pub unsafe fn set_current_for_hart(hartid: usize, p: *mut Proc) {
+    // SAFETY: bounds-checked write by the owning hart's scheduler/boot init.
     unsafe {
         if hartid < MAX_HARTS {
+            // SAFETY: slot write per the caller contract; no other hart
+            // writes this slot.
             G_HART_CURRENT[hartid] = p;
             if hartid == 0 {
                 G_CURRENT = p;
@@ -103,7 +127,13 @@ pub unsafe fn set_current_for_hart(hartid: usize, p: *mut Proc) {
     }
 }
 
+/// # Safety
+///
+/// Caller contract: `hart` must be a valid hart index accepted by
+/// `smp::set_cpu_online` (see that module for its bounds contract).
 pub unsafe fn set_cpu_online(hart: usize, v: bool) {
+    // SAFETY: forward to the smp module; validity of `hart` is the caller
+    // contract documented above.
     unsafe {
         smp::set_cpu_online(hart, v);
     }

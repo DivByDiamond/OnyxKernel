@@ -4,7 +4,14 @@ use crate::fs::vfs;
 use crate::proc;
 use crate::syscall::handler::{parse_user_path, user_ptr_ok};
 
+/// # Safety
+///
+/// Call only from handler::handle's syscall path: current process set, ACL
+/// checked; `path` and `buf` are validated inside before use.
 pub unsafe fn sys_readlink(path: u64, buf: u64, bufsiz: u64) -> i64 {
+    // SAFETY: parse_user_path validates the user path internally; buf/bufsiz
+    // passed user_ptr_ok and the per-page writable check_user_range above,
+    // so vfs::readlink writes only mapped, writable user pages.
     unsafe {
         let mut path_buf = [0u8; 256];
         let path_len = match parse_user_path(path, &mut path_buf) {
@@ -27,7 +34,14 @@ pub unsafe fn sys_readlink(path: u64, buf: u64, bufsiz: u64) -> i64 {
     }
 }
 
+/// # Safety
+///
+/// Call only from handler::handle's syscall path: current process set, ACL
+/// checked; both path arguments are validated inside before use.
 pub unsafe fn sys_symlink(target: u64, linkpath: u64) -> i64 {
+    // SAFETY: parse_user_path validates both user paths internally and
+    // copies them into kernel stack buffers; only those kernel copies are
+    // used afterwards.
     unsafe {
         let mut target_buf = [0u8; 256];
         let target_len = match parse_user_path(target, &mut target_buf) {

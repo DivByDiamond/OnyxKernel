@@ -5,7 +5,16 @@ use super::lookup::{lookup, lookup_nofollow};
 use onyx_core::errno::{Errno, KResult};
 use onyx_core::formats::ONYFS_ROOT_INO;
 
+/// # Safety
+///
+/// Caller must not invoke onyxfs operations concurrently from multiple harts
+/// (shared G_BUF scratch global, journal head, dirent/inode slots). `path`
+/// must be a kernel-owned, absolute (leading '/') byte string - the syscall
+/// layer parses user paths before reaching fs/.
 pub unsafe fn unlink(path: &[u8]) -> KResult<()> {
+    // SAFETY: single-threaded onyxfs exclusion (see # Safety); all raw access
+    // is delegated to the bounds-checked lookup/remove_dirent/free_inode
+    // helpers, and path slicing stays within path.len().
     unsafe {
         if path.is_empty() || path[0] != b'/' {
             return Err(Errno::Inval);
@@ -29,14 +38,14 @@ pub unsafe fn unlink(path: &[u8]) -> KResult<()> {
             lookup(parent_path, &mut st)?;
             st.ino
         };
-        // Resolve the target inode BEFORE removing the dirent — we need its
+        // Resolve the target inode BEFORE removing the dirent - we need its
         // inode number to free it. The previous code skipped this entirely,
         // so unlink only zeroed the dirent's inode field and leaked the
         // inode + every data block it referenced (Bug #20).
         let mut target_st = OnyfsStat::default();
         let target_ino = match lookup_nofollow(path, &mut target_st) {
             Ok(ino) => ino,
-            // Already gone — nothing to do.
+            // Already gone - nothing to do.
             Err(_) => return Err(Errno::NoEnt),
         };
         // Refuse to unlink the root or a directory via this path. Directory

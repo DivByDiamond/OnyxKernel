@@ -2,8 +2,14 @@ use super::FdtMmio;
 use super::reader::{cstr_at, rd32, reg_base};
 use super::walk::walk;
 
+/// # Safety
+///
+/// `fdt::init()` must have succeeded; called once during single-threaded
+/// boot (before secondary harts start).
 pub unsafe fn find_uart() -> Option<FdtMmio> {
     unsafe {
+        // SAFETY: caller contract: init() validated the DTB; walk only reads
+        // the magic-checked struct block single-threaded.
         let mut result: Option<FdtMmio> = None;
         walk(&mut |_name, props: &[(u32, &[u8])]| {
             let mut base = 0u64;

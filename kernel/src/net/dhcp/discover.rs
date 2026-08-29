@@ -5,7 +5,13 @@ use onyx_core::errno::{Errno, KResult};
 
 use super::protocol::{self, DHCP_CLIENT_PORT, DHCP_SERVER_PORT, MSG_ACK, MSG_OFFER, MSG_REQUEST};
 
+/// # Safety
+///
+/// Blocking DHCP exchange over the temp-socket API; boot-time only
+/// (boot hart, before user processes exist) because it polls for a long
+/// time and uses the unguarded net tables.
 pub unsafe fn dhcp_discover() -> KResult<([u8; 4], [u8; 4], [u8; 4], [u8; 4])> {
+    // SAFETY: only udp_*/poll wrappers and fixed 2048-byte stack buffers; parse_dhcp_reply validates xid and chaddr.
     unsafe {
         let mac = virtio_net::mac();
         // Random transaction id (hardware entropy): a predictable xid lets

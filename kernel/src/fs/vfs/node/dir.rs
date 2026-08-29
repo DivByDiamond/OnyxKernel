@@ -5,7 +5,18 @@ use onyx_core::errno::{Errno, KResult};
 use crate::fs::vfs::Fs;
 use crate::fs::vfs::resolve_mount;
 
+/// # Safety
+///
+/// Caller contract: dir_path comes from the syscall layer's parse_user_path
+/// (kernel-side slice); for user callers name_out is a validated user range
+/// of name_len bytes (user_ptr_ok/check_user_range upstream, translated);
+/// kernel callers pass a valid kernel buffer. Mutates the readdir cursor of
+/// the process current on this hart.
 pub unsafe fn readdir(dir_path: &[u8], name_out: *mut u8, name_len: usize) -> KResult<bool> {
+    // SAFETY: proc::current() returns the Proc current on this hart; only
+    // this process's own syscall context touches its cursor fields. name_out
+    // is forwarded unchanged to per-fs readdir_entry, which bound their
+    // writes to name_len (see procfs/dir.rs and ipcfs::copy_name).
     unsafe {
         if dir_path.is_empty() || dir_path[0] != b'/' {
             return Err(Errno::Inval);
@@ -130,6 +141,12 @@ pub unsafe fn readdir(dir_path: &[u8], name_out: *mut u8, name_len: usize) -> KR
 
 /// Read a single directory entry by inode and cursor index.
 /// Used by getdents64 for fd-based directory iteration.
+///
+/// # Safety
+///
+/// Caller contract: same buffer contract as readdir (validated/translated
+/// name_out of name_len bytes for user callers); fs/ino/idx must come from a
+/// live fd or a validated stat call.
 pub unsafe fn readdir_entry_by_ino(
     fs: Fs,
     ino: u32,
@@ -137,6 +154,9 @@ pub unsafe fn readdir_entry_by_ino(
     name_out: *mut u8,
     name_len: usize,
 ) -> KResult<Option<u32>> {
+    // SAFETY: only forwards name_out to per-fs readdir_entry helpers that
+    // bound their writes to name_len; ino/idx validity is checked by each
+    // backend (bounds-checked table walks).
     unsafe {
         match fs {
             Fs::Onyx => onyxfs::readdir_entry(ino, idx, name_out, name_len),

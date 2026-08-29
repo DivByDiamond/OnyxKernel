@@ -60,7 +60,13 @@ pub fn jiffies() -> u64 {
     }
 }
 
+/// # Safety
+///
+/// Boot-time: must run once on the boot hart before secondary harts arm
+/// their own comparators (init_hart); sets the CLINT statics and arms
+/// hart 0's comparator.
 pub unsafe fn init() {
+    // SAFETY: single boot-hart call; G_MTIME/G_MTIMECMP are written here before any read_mtime/write_mtimecmp use them.
     unsafe {
         let clint = CLINT_BASE;
         #[cfg(not(feature = "smode"))]
@@ -83,7 +89,12 @@ pub unsafe fn init() {
 }
 
 #[cfg(feature = "smode")]
+/// # Safety
+///
+/// S-mode only: reads the `time` CSR, valid whenever S-mode timer access
+/// is permitted (mcounteren/firmware).
 unsafe fn read_mtime() -> u64 {
+    // SAFETY: pure read of the read-only `time` CSR; no memory access or side effects.
     unsafe {
         // sedna uses an ACLINT timer (mtime at 0x02004FF8, not the legacy CLINT
         // 0x0200BFF8), so the MMIO offset is wrong there. The `time` CSR (0xC01)
@@ -93,7 +104,13 @@ unsafe fn read_mtime() -> u64 {
 }
 
 #[cfg(not(feature = "smode"))]
+/// # Safety
+///
+/// M-mode-boot kernels only: `G_MTIME` must have been set by init() to
+/// the CLINT mtime address; the hi/lo re-read loop tolerates a torn
+/// 64-bit read across the two 32-bit MMIO halves.
 unsafe fn read_mtime() -> u64 {
+    // SAFETY: MMIO reads at the init-established CLINT mtime base; the hi==hi2 retry restores read consistency.
     unsafe {
         loop {
             let hi = Mmio::<u32>::at(G_MTIME + 4).read();
@@ -107,21 +124,37 @@ unsafe fn read_mtime() -> u64 {
 }
 
 #[cfg(feature = "smode")]
+/// # Safety
+///
+/// S-mode only: issues the SBI SetTimer ecall, which arms THIS hart's
+/// timer delegate; `next` is an absolute mtime value.
 unsafe fn arm_timer(next: u64) {
+    // SAFETY: SBI ecall issued from S-mode; the SBI arms the calling hart's timer by spec.
     unsafe {
         crate::arch::sbi::set_timer(next);
     }
 }
 
 #[cfg(not(feature = "smode"))]
+/// # Safety
+///
+/// M-mode-boot kernels only: writes hart 0's mtimecmp via
+/// write_mtimecmp; called from init() before secondary harts exist.
 unsafe fn arm_timer(next: u64) {
+    // SAFETY: MMIO write to hart 0's comparator, boot-time-only per the contract above.
     unsafe {
         write_mtimecmp(next);
     }
 }
 
 #[cfg(not(feature = "smode"))]
+/// # Safety
+///
+/// Targets G_MTIMECMP (hart 0's slot, set by init()); the 0xFFFFFFFF
+/// guard-write prevents a spurious interrupt between the two half-writes
+/// of the 64-bit comparator.
 unsafe fn write_mtimecmp(v: u64) {
+    // SAFETY: ordered volatile MMIO writes at the init-established address; the guard value avoids spurious ticks mid-update.
     unsafe {
         Mmio::<u32>::at(G_MTIMECMP + 4).write(0xFFFF_FFFF);
         Mmio::<u32>::at(G_MTIMECMP).write(v as u32);
@@ -129,7 +162,13 @@ unsafe fn write_mtimecmp(v: u64) {
     }
 }
 
+/// # Safety
+///
+/// Per-hart: must run once per hart at startup with its own `hartid`;
+/// writes that hart's mtimecmp slot and enables the S-mode timer
+/// interrupt locally. No shared state is mutated.
 pub unsafe fn init_hart(hartid: usize) {
+    // SAFETY: per-hart comparator address derived from the passed hartid; one call per hart at startup.
     unsafe {
         let now = read_mtime();
         let next = now + G_TICK_INTERVAL;
@@ -149,7 +188,14 @@ pub unsafe fn init_hart(hartid: usize) {
     }
 }
 
+/// # Safety
+///
+/// Timer-interrupt context: runs on the trapped hart with SIE cleared
+/// (same-hart preemption impossible; other harts may tick concurrently).
+/// Tick counters are atomic fetch_add, and the comparator write targets
+/// this hart only.
 pub unsafe fn handle() {
+    // SAFETY: G_UPTICKS/G_JIFFIES are atomic fetch_add so cross-hart ticks are never lost; the comparator write targets this hart only.
     unsafe {
         // Atomic RMW so ticks from different harts are never lost.
         G_UPTICKS.fetch_add(1, Ordering::Relaxed);

@@ -5,6 +5,11 @@ use super::{
 const AUXV_COUNT: usize = 9;
 const AT_RANDOM_BYTES: usize = 16;
 
+/// # Safety
+///
+/// Caller contract: `root_pa` is a valid root table with the user stack
+/// pages already mapped; argv_user/envp_user (when non-zero) were validated
+/// with argv_ptr_ok by the caller; ustack_top is the mapped stack top.
 pub(crate) unsafe fn copy_argv_envp_to_stack(
     root_pa: u64,
     ustack_top: u64,
@@ -13,6 +18,10 @@ pub(crate) unsafe fn copy_argv_envp_to_stack(
     entry_vaddr: u64,
     uid: u64,
 ) -> (usize, u64) {
+    // SAFETY: all user pointers were argv_ptr_ok-validated (per the caller
+    // contract) before collect_strings dereferenced them; writes to the
+    // new stack area go through vmm::translate on the loader-owned root
+    // table whose stack pages were mapped by onx::load.
     unsafe {
         use crate::mm::vmm;
 

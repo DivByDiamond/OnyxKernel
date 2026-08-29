@@ -7,7 +7,16 @@ use onyx_core::errno::{Errno, KResult};
 use super::consts::*;
 use super::fmt;
 
+/// # Safety
+///
+/// Caller contract: `buf` must be writable for `len` bytes (validated and
+/// translated by the syscall layer for user callers); offset/len are plain
+/// u32s clamped inside.
 pub unsafe fn read(ino: u32, buf: *mut u8, offset: u32, len: u32) -> KResult<u32> {
+    // SAFETY: to_copy = min(len, content.len() - offset) after the
+    // saturating avail computation, so both the source offset and the copy
+    // length stay in bounds of the generated content; buf covers `len`
+    // bytes per the caller contract.
     unsafe {
         let content = generate_content(ino)?;
         let avail = (content.len() as u32).saturating_sub(offset);
@@ -19,7 +28,18 @@ pub unsafe fn read(ino: u32, buf: *mut u8, offset: u32, len: u32) -> KResult<u32
     }
 }
 
+/// # Safety
+///
+/// Caller contract: ino must be a valid procfs content inode (validated by
+/// the match below, NoEnt otherwise). NOTE (real race): G_PROCBUF is a
+/// shared `static mut` scratch buffer with NO lock - two harts generating
+/// content concurrently (e.g. two processes reading /proc/cpuinfo) race on
+/// it; safe only while procfs reads stay serialized in practice.
 unsafe fn generate_content(ino: u32) -> KResult<&'static [u8]> {
+    // SAFETY: all writes go through the procfs::fmt helpers, which
+    // bounds-check every write against the fixed-size G_PROCBUF; the
+    // resulting byte range holds only ASCII literals/digits, so
+    // from_utf8_unchecked is sound (valid UTF-8 by construction).
     unsafe {
         static mut G_PROCBUF: [u8; PROCFS_MAX_SIZE as usize] = [0; PROCFS_MAX_SIZE as usize];
         let pb = &raw mut G_PROCBUF;
