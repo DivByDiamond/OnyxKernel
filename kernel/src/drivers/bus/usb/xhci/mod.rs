@@ -58,14 +58,26 @@ pub(crate) static mut G_XHCI: XhciCtx = XhciCtx {
 
 pub use init::init;
 
+/// # Safety
+///
+/// `base` must be the MMIO base of an xHCI capability register file that was
+/// probed/validated at driver init and identity-mapped at boot.
 pub unsafe fn probe(base: usize) -> bool {
+    // SAFETY: caller guarantees `base` lies inside the controller's MMIO
+    // window; HCIVERSION offset 0x02 is within the capability registers.
     unsafe {
         let hci_ver = regs::read_hciversion(base);
         hci_ver >= 0x100
     }
 }
 
+/// # Safety
+///
+/// The driver must have been initialized via `init`; G_XHCI.obase must be a
+/// valid operational register base. `port` must be < max_ports.
 pub unsafe fn port_connect(port: u8) -> bool {
+    // SAFETY: G_XHCI.obase was set by init from the validated controller
+    // base; OP_PORTSC + port*0x10 is within the operational register file.
     unsafe {
         let reg = regs::OP_PORTSC + (port as u32) * 0x10;
         let v = regs::op_r32(G_XHCI.obase, reg);
@@ -73,7 +85,14 @@ pub unsafe fn port_connect(port: u8) -> bool {
     }
 }
 
+/// # Safety
+///
+/// The controller must be initialized and operational (cmd/event rings
+/// allocated by init); must run before secondary harts start or serialized
+/// by the driver's lock.
 pub unsafe fn enable_slot() -> KResult<u8> {
+    // SAFETY: init allocated cmd/event rings with valid base pointers and
+    // ring-size entries; submit_command keeps enqueue within the ring.
     unsafe {
         let mut trb = ring::Trb::zero();
         trb.set_type(ring::TRB_ENABLE_SLOT);
@@ -88,7 +107,15 @@ pub unsafe fn enable_slot() -> KResult<u8> {
     }
 }
 
+/// # Safety
+///
+/// Controller initialized and operational; `input_ctx_pa` must point at a
+/// physically contiguous page-aligned input context buffer allocated by the
+/// caller via the PMM; `slot_id` must be a slot granted by `enable_slot`.
 pub unsafe fn address_device(slot_id: u8, input_ctx_pa: u64) -> KResult<()> {
+    // SAFETY: init allocated the DCBAA as a page with max_slots+1 u64
+    // entries; slot_id is a controller-granted slot id within that range,
+    // so dcbaap.add(slot_id) stays inside the allocation.
     unsafe {
         let mut trb = ring::Trb::zero();
         trb.params[0] = input_ctx_pa as u32;
@@ -106,14 +133,24 @@ pub unsafe fn address_device(slot_id: u8, input_ctx_pa: u64) -> KResult<()> {
     }
 }
 
+/// # Safety
+///
+/// Must only be invoked from the xHCI IRQ context on the hart that owns the
+/// controller; G_XHCI must have been initialized.
 pub unsafe fn irq_handler() {
+    // SAFETY: read-only access to G_XHCI from IRQ context; single hart
+    // services this controller's IRQ, so no concurrent mutation occurs.
     unsafe {
         let ctx = &raw const G_XHCI;
         if !(*ctx).operational {
             return;
         }
+        // SAFETY: rtsoff comes from init (validated RTSOFF register value
+        // within the MMIO window); RTS_IMAN is a valid runtime-register offset.
         let iman = regs::rt_r32((*ctx).rtsoff, 0, regs::RTS_IMAN);
         if (iman & regs::IMAN_IP) != 0 {
+            // SAFETY: same validated rtsoff; writing IMAN_IP clears the
+            // pending bit per the xHCI spec.
             regs::rt_w32((*ctx).rtsoff, 0, regs::RTS_IMAN, regs::IMAN_IP);
         }
     }

@@ -5,8 +5,14 @@ use core::arch::asm;
 
 macro_rules! csr_read_u64 {
     ($name:ident, $csr:literal) => {
+        /// # Safety
+        ///
+        /// The hart must execute at a privilege level where the target CSR
+        /// is accessible (otherwise the read raises an illegal-instruction
+        /// exception); the access is hart-local and touches no memory.
         #[inline]
         pub unsafe fn $name() -> u64 { unsafe {
+            // SAFETY: hart-local privileged CSR read per the RISC-V privileged spec (see fn contract).
             #[cfg(all(not(test), target_pointer_width = "64"))]
             { let v: u64; asm!(concat!("csrr {0}, ", $csr), out(reg) v, options(nomem, nostack)); v }
             #[cfg(all(not(test), target_pointer_width = "32"))]
@@ -18,8 +24,15 @@ macro_rules! csr_read_u64 {
 }
 macro_rules! csr_write_u64 {
     ($name:ident, $csr:literal) => {
+        /// # Safety
+        ///
+        /// The hart must execute at a privilege level where the target CSR
+        /// is writable (otherwise the write raises an illegal-instruction
+        /// exception), and the written value must be a legal encoding for
+        /// that CSR; the access is hart-local and touches no memory.
         #[inline]
         pub unsafe fn $name(v: u64) { unsafe {
+            // SAFETY: hart-local privileged CSR write per the RISC-V privileged spec (see fn contract).
             #[cfg(all(not(test), target_pointer_width = "64"))]
             asm!(concat!("csrw ", $csr, ", {0}"), in(reg) v, options(nomem, nostack));
             #[cfg(all(not(test), target_pointer_width = "32"))]
@@ -31,8 +44,15 @@ macro_rules! csr_write_u64 {
 }
 macro_rules! csr_set_u64 {
     ($name:ident, $csr:literal) => {
+        /// # Safety
+        ///
+        /// The hart must execute at a privilege level where the target CSR
+        /// is accessible (otherwise the set raises an illegal-instruction
+        /// exception) and the settable bits must be legal for that CSR;
+        /// the access is hart-local and touches no memory.
         #[inline]
         pub unsafe fn $name(m: u64) { unsafe {
+            // SAFETY: hart-local privileged CSR set per the RISC-V privileged spec (see fn contract).
             #[cfg(all(not(test), target_pointer_width = "64"))]
             asm!(concat!("csrs ", $csr, ", {0}"), in(reg) m, options(nomem, nostack));
             #[cfg(all(not(test), target_pointer_width = "32"))]
@@ -44,8 +64,15 @@ macro_rules! csr_set_u64 {
 }
 macro_rules! csr_clear_u64 {
     ($name:ident, $csr:literal) => {
+        /// # Safety
+        ///
+        /// The hart must execute at a privilege level where the target CSR
+        /// is accessible (otherwise the clear raises an illegal-instruction
+        /// exception) and the clearable bits must be legal for that CSR;
+        /// the access is hart-local and touches no memory.
         #[inline]
         pub unsafe fn $name(m: u64) { unsafe {
+            // SAFETY: hart-local privileged CSR clear per the RISC-V privileged spec (see fn contract).
             #[cfg(all(not(test), target_pointer_width = "64"))]
             asm!(concat!("csrc ", $csr, ", {0}"), in(reg) m, options(nomem, nostack));
             #[cfg(all(not(test), target_pointer_width = "32"))]
@@ -74,15 +101,27 @@ csr_write_u64!(write_sscratch, "sscratch");
 csr_write_u64!(write_scounteren, "scounteren");
 csr_read_u64!(read_mhartid, "mhartid");
 
+/// # Safety
+///
+/// Must execute at a privilege level where `sfence.vma` is permitted
+/// (S- or M-mode); invalidates all address-translation entries for the
+/// current hart only.
 #[inline]
 pub unsafe fn sfence_vma_all() {
+    // SAFETY: hart-local TLB invalidation, legal in S-/M-mode per the fn contract.
     unsafe {
         #[cfg(not(test))]
         asm!("sfence.vma zero, zero", options(nostack));
     }
 }
+/// # Safety
+///
+/// Must execute at a privilege level where `sfence.vma` is permitted
+/// (S- or M-mode); `va`/`asid` must identify the translations the caller
+/// wants invalidated; affects the current hart only.
 #[inline]
 pub unsafe fn sfence_vma(va: u64, asid: u64) {
+    // SAFETY: hart-local TLB invalidation for va/asid, legal per the fn contract.
     unsafe {
         #[cfg(all(not(test), target_pointer_width = "64"))]
         asm!("sfence.vma {0}, {1}", in(reg) va, in(reg) asid, options(nostack));
@@ -94,8 +133,13 @@ pub unsafe fn sfence_vma(va: u64, asid: u64) {
         }
     }
 }
+/// # Safety
+///
+/// Must execute at a privilege level where `wfi` does not trap
+/// (S- or M-mode, i.e. TW=0); hart-local wait for interrupt, no memory access.
 #[inline]
 pub unsafe fn wfi() {
+    // SAFETY: wfi is a hart-local wait-for-interrupt with no memory effects.
     unsafe {
         #[cfg(not(test))]
         asm!("wfi", options(nostack));

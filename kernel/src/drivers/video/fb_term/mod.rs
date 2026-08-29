@@ -7,6 +7,7 @@ pub use writer::FbWriter;
 static mut G_WRITER: FbWriter = FbWriter::new();
 
 pub fn writer() -> Option<&'static mut FbWriter> {
+    // SAFETY: G_WRITER is a kernel-lifetime static; SIE=0 prevents same-hart preemption (see crate::sync). Cross-hart concurrent writer() callers would alias the returned &'static mut — tolerated by console convention (no reallocation, output may interleave); the reference must not outlive the caller's statement.
     unsafe {
         if fb::enabled() {
             Some(&mut G_WRITER)

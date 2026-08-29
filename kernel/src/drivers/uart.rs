@@ -43,6 +43,7 @@ impl Uart {
     }
     pub fn init(self, base: usize, shift: u32) {
         let uart = Self::with_config(base, shift);
+        // SAFETY: base/shift describe the UART MMIO window from the FDT node or QEMU virt default; writes target NS16550A register offsets (R_*).
         unsafe {
             let r = uart.regs();
             r.reg_u8(R_IER).write(0x00);
@@ -54,11 +55,13 @@ impl Uart {
                 .write(FCR_FIFO_ENA | FCR_RX_FIFO_RESET | FCR_TX_FIFO_RESET | FCR_TRIGGER_14);
             r.reg_u8(R_MCR).write(0x0B);
         }
+        // SAFETY: publishing the configured UART during single-threaded boot console init; kernel code never runs with SIE set (see crate::sync).
         unsafe {
             G_UART = uart;
         }
     }
     pub fn putc(self, c: u8) {
+        // SAFETY: self.base is the configured UART MMIO base; LSR poll and DATA write use NS16550A register offsets via MmioBlock.
         unsafe {
             let r = self.regs();
             // Bounded wait for THRE, then write regardless. sedna's UART
@@ -85,6 +88,7 @@ impl Uart {
         }
     }
     pub fn getc(self) -> Option<u8> {
+        // SAFETY: self.base is the configured UART MMIO base; LSR poll and DATA read use NS16550A register offsets via MmioBlock.
         unsafe {
             let r = self.regs();
             if r.reg_u8(R_LSR).read() & LSR_DR != 0 {
@@ -152,6 +156,7 @@ mod tests {
 
 pub fn init(base: usize, shift: u32) {
     crate::srv::klog::debug_mark(b'u');
+    // SAFETY: boot-time single-threaded console bring-up; G_UART is accessed only from kernel context, which never runs with SIE set (see crate::sync).
     unsafe {
         G_UART.init(base, shift);
     }
@@ -160,18 +165,21 @@ pub fn init_default() {
     init(0x1000_0000, 0);
 }
 pub fn putc(c: u8) {
+    // SAFETY: G_UART defaults to the QEMU virt base (0x1000_0000) and is reconfigured by uart::init during single-threaded boot; NS16550A register accesses from kernel context, which never runs with SIE set (see crate::sync).
     unsafe {
         let p = &raw const G_UART;
         (*p).putc(c);
     }
 }
 pub fn puts(s: &str) {
+    // SAFETY: G_UART defaults to the QEMU virt base (0x1000_0000) and is reconfigured by uart::init during single-threaded boot; NS16550A register accesses from kernel context, which never runs with SIE set (see crate::sync).
     unsafe {
         let p = &raw const G_UART;
         (*p).puts(s);
     }
 }
 pub fn getc() -> Option<u8> {
+    // SAFETY: G_UART defaults to the QEMU virt base (0x1000_0000) and is reconfigured by uart::init during single-threaded boot; NS16550A register accesses from kernel context, which never runs with SIE set (see crate::sync).
     unsafe {
         let p = &raw const G_UART;
         (*p).getc()

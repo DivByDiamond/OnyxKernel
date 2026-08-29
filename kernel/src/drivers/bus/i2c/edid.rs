@@ -1,7 +1,12 @@
 use super::*;
 use onyx_core::errno::{Errno, KResult};
 
+/// # Safety
+/// Caller contract: `i2c_base` must be a valid SiFive I2C MMIO base, identity-mapped; no concurrent I2C use while this runs (it temporarily rebinds G_BASE).
 pub unsafe fn read_edid(i2c_base: usize) -> KResult<[u8; 128]> {
+    // SAFETY: G_BASE is temporarily set to the caller-provided I2C MMIO
+    // base; all rd/wr helpers then access offsets within the controller
+    // register file per mod.rs constants. No concurrent I2C calls allowed.
     unsafe {
         let old_base = G_BASE;
         G_BASE = i2c_base;

@@ -30,13 +30,21 @@ pub(crate) const R_OUT_XOR: u32 = 0x40;
 pub(crate) static mut G_PINS: [PinSlot; N_PINS] = [PinSlot { handler: None }; N_PINS];
 pub(crate) static mut G_BASE: usize = GPIO_BASE;
 
+/// # Safety
+/// G_BASE must hold a valid SiFive GPIO MMIO base; `off` must be within the controller register file.
 #[inline]
 pub(crate) unsafe fn rd(off: u32) -> u32 {
+    // SAFETY: G_BASE was set by init() from a probed/validated GPIO base
+    // (QEMU virt fixed 0x1006_0000 or FDT-derived), identity-mapped at boot;
+    // off is a datasheet register offset defined in this file.
     unsafe { Mmio::<u32>::at(G_BASE + off as usize).read() }
 }
 
+/// # Safety
+/// G_BASE must hold a valid GPIO MMIO base; `off` must be within the register file.
 #[inline]
 pub(crate) unsafe fn wr(off: u32, v: u32) {
+    // SAFETY: same contract as `rd`; off is a controller register offset defined in this file.
     unsafe {
         Mmio::<u32>::at(G_BASE + off as usize).write(v);
     }
@@ -44,7 +52,11 @@ pub(crate) unsafe fn wr(off: u32, v: u32) {
 
 /// Initialise the controller at the given base address. Disables and
 /// clears all edge interrupts so drivers can register cleanly.
+/// # Safety
+/// `base` must be a valid SiFive GPIO MMIO base, identity-mapped; no concurrent GPIO use while rebinding G_BASE.
 pub unsafe fn init(base: usize) {
+    // SAFETY: G_BASE is rebound to the caller-provided probed base on the
+    // single-threaded init path; register offsets are per spec §3.1.
     unsafe {
         G_BASE = base;
         wr(R_RISE_IE, 0);

@@ -14,7 +14,11 @@ const PCI_VENDOR_ID: u32 = 0x00;
 const PCI_CLASS_REV: u32 = 0x08;
 const PCI_BAR0: u32 = 0x10;
 
+/// # Safety
+/// Caller contract: (bus, dev, fun) within ECAM bounds (bus<16, dev<32, fun<8); `off` 4-byte-aligned.
 unsafe fn cfg_rd(bus: u8, dev: u8, fun: u8, off: u32) -> u32 {
+    // SAFETY: addr is an ECAM address computed from a valid bus:dev:fn
+    // within the ECAM window at ECAM_BASE, identity-mapped at boot.
     unsafe {
         let addr = ECAM_BASE
             + ((bus as usize) << 20)
@@ -25,7 +29,12 @@ unsafe fn cfg_rd(bus: u8, dev: u8, fun: u8, off: u32) -> u32 {
     }
 }
 
+/// # Safety
+/// Caller contract: single-threaded boot-time probe; must run before concurrent frame-buffer users.
 pub unsafe fn find_vga_fb() -> KResult<usize> {
+    // SAFETY: all cfg_rd calls use bus<16, dev<32, fun 0 within the ECAM
+    // window, identity-mapped at boot; BAR offsets 0x10..0x28 are standard
+    // config-space registers.
     unsafe {
         for bus in 0u8..16 {
             // Probe dev 0, func 0 for any device on this bus

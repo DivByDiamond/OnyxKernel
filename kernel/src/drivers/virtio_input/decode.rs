@@ -29,6 +29,7 @@ pub enum EventType {
 /// Poll the virtio-input device for the next event. Returns `None` when
 /// no event is available. Each call may recycle the consumed descriptor.
 pub fn poll() -> Option<EventType> {
+    // SAFETY: valid only after init completed: used/ev_buf point at PMM rings/buffer; slot and buf_idx masked % N_EVENTS keep accesses in bounds; reads are volatile of device-written memory.
     unsafe {
         let used_idx = ptr::read_volatile(ptr::addr_of!((*G_IN.used).idx));
         if used_idx == G_IN.last_used {

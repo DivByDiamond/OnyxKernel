@@ -42,14 +42,25 @@ pub(crate) static mut G_GMAC: GmacDev = GmacDev {
     rx_cur: 0,
 };
 
+/// # Safety
+///
+/// `base` must be a mapped GMAC MMIO base inside the device's
+/// identity-mapped window; the VERSION read validates the device is present.
 pub unsafe fn probe(base: usize) -> bool {
+    // SAFETY: volatile read at base + VERSION (datasheet offset) in the caller-provided GMAC MMIO window.
     unsafe {
         let ver = Mmio::<u32>::at(base + regs::VERSION as usize).read();
         ver != 0 && ver != 0xFFFFFFFF
     }
 }
 
+/// # Safety
+///
+/// `base`/`mdio_base` must be mapped GMAC MMIO bases in the identity-mapped
+/// device window; must run once, single-threaded (SIE=0), before any other
+/// gmac call because it mutates `G_GMAC`.
 pub unsafe fn init(base: usize, mdio_base: usize, mac: [u8; 6]) -> KResult<()> {
+    // SAFETY: single-threaded driver init (SIE=0, see crate::sync); G_GMAC is only written here, MMIO writes target base + datasheet register offsets.
     unsafe {
         if G_GMAC.base != 0 {
             return Err(Errno::Busy);
@@ -137,7 +148,12 @@ pub unsafe fn init(base: usize, mdio_base: usize, mac: [u8; 6]) -> KResult<()> {
     }
 }
 
+/// # Safety
+///
+/// `base` must be a mapped GMAC MMIO base; `phy`/`reg` are masked to 5 bits
+/// internally.
 unsafe fn mdio_read_raw(base: usize, phy: u8, reg: u8) -> KResult<u16> {
+    // SAFETY: MMIO accesses at base + MII datasheet offsets inside the caller-provided GMAC window.
     unsafe {
         let v = ((phy as u32 & 0x1F) << 11) | ((reg as u32 & 0x1F) << 6) | regs::MII_CR_42;
         Mmio::<u32>::at(base + regs::MII_ADDR as usize).write(v);
@@ -153,11 +169,21 @@ unsafe fn mdio_read_raw(base: usize, phy: u8, reg: u8) -> KResult<u16> {
     }
 }
 
+/// # Safety
+///
+/// `gmac::init` must have completed so `G_GMAC.base` holds a valid mapped
+/// GMAC base.
 pub unsafe fn mdio_read(phy: u8, reg: u8) -> KResult<u16> {
+    // SAFETY: G_GMAC.base was set by init(); mdio_read_raw only touches GMAC MMIO registers.
     unsafe { mdio_read_raw(G_GMAC.base, phy, reg) }
 }
 
+/// # Safety
+///
+/// `gmac::init` must have completed so `G_GMAC.base` holds a valid mapped
+/// GMAC base; `phy`/`reg` are masked to 5 bits internally.
 pub unsafe fn mdio_write(phy: u8, reg: u8, data: u16) -> KResult<()> {
+    // SAFETY: G_GMAC.base was set by init(); MMIO writes target GMAC MII datasheet offsets.
     unsafe {
         let base = G_GMAC.base;
         let v = ((phy as u32 & 0x1F) << 11) | ((reg as u32 & 0x1F) << 6) | regs::MII_CR_42;
@@ -175,7 +201,12 @@ pub unsafe fn mdio_write(phy: u8, reg: u8, data: u16) -> KResult<()> {
     }
 }
 
+/// # Safety
+///
+/// `gmac::init` must have completed; mutates `G_GMAC.link_up`, so callers
+/// must not invoke link management concurrently from multiple harts.
 pub unsafe fn poll_link() -> bool {
+    // SAFETY: G_GMAC access is not preempted on the calling hart (SIE=0, see crate::sync); concurrent-hart callers must serialize per the caller contract; mdio_read touches only GMAC MMIO.
     unsafe {
         let bmsr = mdio_read(G_GMAC.phy_addr, phy::BMSR).unwrap_or(0);
         G_GMAC.link_up = bmsr & phy::BMSR_LINK_STATUS != 0;
@@ -183,7 +214,12 @@ pub unsafe fn poll_link() -> bool {
     }
 }
 
+/// # Safety
+///
+/// `gmac::init` must have completed so MDIO access via `G_GMAC.base` is
+/// valid; must not run concurrently from multiple harts (caller contract).
 pub unsafe fn reset_phy(phy_addr: u8) -> KResult<()> {
+    // SAFETY: MDIO access via mdio_read/mdio_write on the init-validated G_GMAC.base; no shared state mutated.
     unsafe {
         mdio_write(phy_addr, phy::BMCR, phy::BMCR_RESET)?;
         let mut t = 100_000u32;
@@ -199,10 +235,12 @@ pub unsafe fn reset_phy(phy_addr: u8) -> KResult<()> {
 }
 
 pub fn mac() -> [u8; 6] {
+    // SAFETY: plain 6-byte copy of the G_GMAC.mac field, written once during init (before harts are released) and never mutated afterwards.
     unsafe { G_GMAC.mac }
 }
 
 pub fn link_up() -> bool {
+    // SAFETY: single-byte aligned flag read (no tearing); a concurrent poll_link update on another hart can only yield a stale informational value, which is tolerated.
     unsafe { G_GMAC.link_up }
 }
 

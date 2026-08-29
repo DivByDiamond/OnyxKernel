@@ -5,7 +5,16 @@ use core::sync::atomic::{Ordering, fence};
 use onyx_core::errno::{Errno, KResult};
 use onyx_core::fmt::Arg;
 
+/// # Safety
+///
+/// `dev_idx` must be an initialized virtio-blk device index (device present
+/// in G_DEVS with queues set up); caller must be in polled kernel context
+/// and must serialize submissions to the device's queue (one in-flight
+/// request per queue; concurrent-hart callers must lock externally).
+/// NOTE: the current caller chain (fs/vfs/fd/rw.rs -> fs/devfs/blk.rs) does
+/// not serialize cross-hart I/O — pre-existing, tracked in todo.md.
 unsafe fn submit_and_wait(dev_idx: usize, req_type: u32, sector: u64) -> KResult<()> {
+    // SAFETY: dev_idx valid per contract; desc/avail/used/req_buf established by setup_queue from contiguous PMM pages; desc slots 0..=2 < VIRTQ_SIZE; avail slot masked % VIRTQ_SIZE per spec; volatiles + SeqCst fence order ring entry before idx bump/notify.
     unsafe {
         let pd = &raw mut G_DEVS;
         let dev = &mut (*pd)[dev_idx];
@@ -83,7 +92,12 @@ unsafe fn submit_and_wait(dev_idx: usize, req_type: u32, sector: u64) -> KResult
     }
 }
 
+/// # Safety
+///
+/// `buf` must point to at least `VIRTIO_BLK_SECTOR` (512) bytes of writable
+/// memory; `dev_idx` must satisfy the `submit_and_wait` contract.
 pub unsafe fn read(dev_idx: usize, lba: u64, buf: *mut u8) -> KResult<()> {
+    // SAFETY: dev_idx valid per contract; copy_nonoverlapping moves exactly VIRTIO_BLK_SECTOR bytes into buf, which the caller guarantees is 512 bytes writable.
     unsafe {
         let pd = &raw const G_DEVS;
         let dev = &(*pd)[dev_idx];
@@ -96,7 +110,12 @@ pub unsafe fn read(dev_idx: usize, lba: u64, buf: *mut u8) -> KResult<()> {
     }
 }
 
+/// # Safety
+///
+/// `buf` must point to at least `VIRTIO_BLK_SECTOR` (512) bytes of readable
+/// memory; `dev_idx` must satisfy the `submit_and_wait` contract.
 pub unsafe fn write(dev_idx: usize, lba: u64, buf: *const u8) -> KResult<()> {
+    // SAFETY: dev_idx valid per contract; copy_nonoverlapping moves exactly VIRTIO_BLK_SECTOR bytes from buf (512 readable per caller contract) into the device req buffer.
     unsafe {
         let pd = &raw const G_DEVS;
         let dev = &(*pd)[dev_idx];
@@ -114,7 +133,13 @@ pub unsafe fn write(dev_idx: usize, lba: u64, buf: *const u8) -> KResult<()> {
 /// MVP implementation: loops over `read()` for each sector. The
 /// infrastructure is here so a future scatter-gather optimization can replace
 /// the loop with a single batched virtio-blk request.
+///
+/// # Safety
+///
+/// `dev_idx` must satisfy the `read` contract; `buf` must have room for
+/// `n_sectors * 512` writable bytes (stated above).
 pub unsafe fn read_multi(dev_idx: usize, lba: u64, n_sectors: u32, buf: *mut u8) -> KResult<()> {
+    // SAFETY: per-iteration read() contract upheld: buf has room for n_sectors * 512 bytes per the doc contract, so each buf.add(i * 512) slice is in bounds.
     unsafe {
         for i in 0u32..n_sectors {
             read(
@@ -133,7 +158,13 @@ pub unsafe fn read_multi(dev_idx: usize, lba: u64, n_sectors: u32, buf: *mut u8)
 /// MVP implementation: loops over `write()` for each sector. Like
 /// `read_multi`, this is the seam where a future scatter-gather optimization
 /// would issue a single batched virtio-blk request.
+///
+/// # Safety
+///
+/// `dev_idx` must satisfy the `write` contract; `buf` must provide
+/// `n_sectors * 512` readable bytes (stated above).
 pub unsafe fn write_multi(dev_idx: usize, lba: u64, n_sectors: u32, buf: *const u8) -> KResult<()> {
+    // SAFETY: per-iteration write() contract upheld: buf provides n_sectors * 512 readable bytes per the doc contract, so each buf.add(i * 512) slice is in bounds.
     unsafe {
         for i in 0u32..n_sectors {
             write(

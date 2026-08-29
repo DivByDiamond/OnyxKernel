@@ -22,6 +22,7 @@ pub fn draw_unicode_char(x: usize, y: usize, cp: u32, fg: u32, bg: u32) {
             let byte_idx = col / 8;
             let bit_idx = 7 - (col % 8);
             let bits = unsafe {
+                // SAFETY: gd.data points at a glyph inside the loaded font bitmap (font::glyph_bitmap_unicode) and off is bounds-checked against gd.charsize before the read.
                 let off = row_off + byte_idx;
                 if off < gd.charsize as usize {
                     *gd.data.add(off)

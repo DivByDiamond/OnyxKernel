@@ -88,25 +88,40 @@ pub(super) const SDHCI_TIMEOUT: u32 = 1_000_000;
 
 pub const PLIC_PRIO_SDHCI: u32 = 0x07;
 
+/// # Safety
+/// `base` must be a valid SDHCI MMIO base and `off` a u32 register offset within its register file.
 #[inline]
 pub(super) unsafe fn reg_r(base: usize, off: u32) -> u32 {
+    // SAFETY: base comes from a controller base probed/validated at driver
+    // init (FDT node), identity-mapped at boot; off is a datasheet register
+    // offset defined in this file, so base+off is inside the MMIO window.
     unsafe { Mmio::<u32>::at(base + off as usize).read() }
 }
 
+/// # Safety
+/// `base` must be a valid SDHCI MMIO base and `off` a u32 register offset within its register file.
 #[inline]
 pub(super) unsafe fn reg_w(base: usize, off: u32, v: u32) {
+    // SAFETY: base comes from a controller base probed/validated at driver
+    // init, identity-mapped at boot; off is a datasheet offset defined here.
     unsafe {
         Mmio::<u32>::at(base + off as usize).write(v);
     }
 }
 
+/// # Safety
+/// `base` must be a valid SDHCI MMIO base and `off` a u16 register offset within its register file.
 #[inline]
 pub(super) unsafe fn reg_r16(base: usize, off: u32) -> u16 {
+    // SAFETY: same contract as `reg_r`; off names a 16-bit SDHCI register.
     unsafe { Mmio::<u16>::at(base + off as usize).read() }
 }
 
+/// # Safety
+/// `base` must be a valid SDHCI MMIO base and `off` a u16 register offset within its register file.
 #[inline]
 pub(super) unsafe fn reg_w16(base: usize, off: u32, v: u16) {
+    // SAFETY: same contract as `reg_r`; off names a 16-bit SDHCI register.
     unsafe {
         Mmio::<u16>::at(base + off as usize).write(v);
     }

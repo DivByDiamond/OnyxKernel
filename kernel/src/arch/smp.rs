@@ -3,6 +3,7 @@ use core::sync::atomic::{AtomicU32, Ordering};
 // Boot-protocol word width: the OnyxBoot SMP mailbox and the G_RELEASE
 // spin flag hold one machine word. rv32imac lacks 64-bit atomics (no
 // A-extension 64-bit AMOs), so the protocol degrades to AtomicU32 there.
+mod secondary;
 #[cfg(target_pointer_width = "64")]
 type MailboxAtomic = core::sync::atomic::AtomicU64;
 #[cfg(target_pointer_width = "32")]
@@ -20,7 +21,7 @@ pub static mut G_SEC_STACKS: [u8; MAX_HARTS * SEC_STACK_SIZE] = [0; MAX_HARTS * 
 
 // Bug (syscall SERIOUS #10): make G_ONLINE_HARTS atomic so concurrent
 // secondary hart bring-up doesn't race on the increment.
-static G_ONLINE_HARTS: AtomicU32 = AtomicU32::new(1);
+pub(super) static G_ONLINE_HARTS: AtomicU32 = AtomicU32::new(1);
 
 #[cfg(target_pointer_width = "64")]
 #[unsafe(no_mangle)]
@@ -36,6 +37,7 @@ pub fn current_hart() -> usize {
     #[cfg(not(test))]
     {
         let hartid: usize;
+        // SAFETY: reads tp, which the boot asm sets to this hart's hartid on every hart.
         unsafe {
             core::arch::asm!("mv {}, tp", out(reg) hartid);
         }
@@ -51,10 +53,18 @@ static mut G_CPU_ONLINE: [bool; MAX_HARTS] =
     [true, false, false, false, false, false, false, false];
 
 pub fn cpu_online(hart: usize) -> bool {
+    // SAFETY: caller guarantees hart < MAX_HARTS, so the G_CPU_ONLINE index is in bounds.
     unsafe { (G_CPU_ONLINE)[hart] }
 }
 
+/// Mark a hart online in the `G_CPU_ONLINE` table.
+///
+/// # Safety
+///
+/// Caller guarantees `hart < MAX_HARTS`; must not race with concurrent
+/// writers of the same slot (bring-up is serialized by the boot protocol).
 pub unsafe fn set_cpu_online(hart: usize, v: bool) {
+    // SAFETY: caller guarantees hart < MAX_HARTS, so the G_CPU_ONLINE index is in bounds; writers are serialized by the boot protocol.
     unsafe {
         G_CPU_ONLINE[hart] = v;
     }
@@ -78,6 +88,13 @@ fn mailbox() -> &'static MailboxAtomic {
     unsafe { MailboxAtomic::from_ptr(SMP_MAILBOX_PA as *mut MailboxVal) }
 }
 
+/// Release every parked secondary hart (bootloader mailbox + G_RELEASE).
+///
+/// # Safety
+///
+/// Must be called exactly once, from hart 0, after kernel initialization
+/// the secondaries rely on (root page table, heap, scheduler) is complete;
+/// never while holding a spinlock (secondaries immediately run kernel code).
 pub unsafe fn release_secondary_harts() {
     // Two release channels for two boot topologies:
     //   1. Bootloader mailbox (OnyxBoot): parked harts poll SMP_MAILBOX_PA
@@ -87,7 +104,7 @@ pub unsafe fn release_secondary_harts() {
     //   2. G_RELEASE flag: firmwares that hand EVERY hart to the kernel
     //      entry (-bios none / OpenSBI-style) leave them spinning inside
     //      `secondary_entry`; setting the flag releases those.
-    let entry = secondary_continue as *const () as usize as MailboxVal;
+    let entry = secondary::secondary_continue as *const () as usize as MailboxVal;
     mailbox().store(entry, Ordering::SeqCst);
     // SAFETY: G_RELEASE is a naturally-aligned machine-word static that
     // outlives the program; see the matching pattern in `mailbox()` above.
@@ -98,7 +115,13 @@ pub unsafe fn release_secondary_harts() {
 
 #[cfg(not(test))]
 #[unsafe(no_mangle)]
+/// # Safety
+///
+/// Firmware-side secondary entry: every hart lands here in M-mode with
+/// `tp` = hartid < MAX_HARTS (boot protocol); spins on `G_RELEASE`, then
+/// jumps to `secondary::secondary_continue` and never returns.
 pub unsafe extern "Rust" fn secondary_entry() -> ! {
+    // SAFETY: G_RELEASE is an aligned machine-word static that outlives the program (same contract as the store in release_secondary_harts); the asm is a bare wfi that only sleeps.
     unsafe {
         loop {
             // Firmware paths that hand EVERY hart to the kernel entry
@@ -115,131 +138,8 @@ pub unsafe extern "Rust" fn secondary_entry() -> ! {
             }
             core::arch::asm!("wfi");
         }
-        secondary_continue()
+        secondary::secondary_continue()
     }
-}
-
-/// Common continuation once a secondary hart is allowed to run: switch to
-/// its private stack, load the kernel root page table and drop to S-mode in
-/// `secondary_kmain`. Reached either from `secondary_entry` (firmware hands
-/// every hart to the kernel) or directly via the bootloader SMP mailbox.
-#[cfg(not(test))]
-pub unsafe extern "Rust" fn secondary_continue() -> ! {
-    unsafe {
-        let hartid: usize;
-        core::arch::asm!("mv {0}, tp", out(reg) hartid);
-        let sp = &raw const G_SEC_STACKS as *const u8 as usize + (hartid + 1) * SEC_STACK_SIZE;
-        let entry = secondary_kmain as *const () as usize;
-        let root_pa = core::ptr::read_volatile(&raw const G_KERNEL_ROOT_PA);
-        // Register-width typed so `in(reg)` operands match the target's
-        // integer register class (u64 on rv64, u32 on rv32).
-        #[cfg(target_pointer_width = "64")]
-        let satp: usize = if root_pa != 0 {
-            (8usize << 60) | ((root_pa >> 12) as usize)
-        } else {
-            0
-        };
-        #[cfg(target_pointer_width = "32")]
-        let satp: usize = if root_pa != 0 {
-            (crate::arch::bits::SATP_MODE_SV32 as usize) | (((root_pa >> 12) & 0x3FF_FFFF) as usize)
-        } else {
-            0
-        };
-        #[cfg(not(feature = "smode"))]
-        core::arch::asm!(
-            // This hart entered through the bootloader SMP mailbox (or the
-            // `park` spin in boot.rs), so it NEVER ran the kernel's `_start`
-            // bootstrap — and therefore lacks the per-hart machine CSRs that
-            // `_start` programs on hart 0. We are still in M-mode here, so
-            // mirror that bootstrap now, before dropping to S-mode:
-            //
-            //   * PMP entry 0 (TOR, R|W|X over the first 1 GiB): with no
-            //     matching PMP entry, S/U-mode access to ALL memory faults,
-            //     so the first S-mode instruction fetch after `mret` below
-            //     would die with an instruction access fault (observed on
-            //     QEMU virt as pc=0, mcause=1, because mtvec is still 0).
-            //   * medeleg/mideleg: route page faults, misaligned/access
-            //     faults and S-mode ecalls/interrupts to the kernel trap
-            //     handler instead of an unhandled M-mode trap.
-            //   * mcounteren: allow lower modes to read cycle/time/instret
-            //     (`rdtime` in the timer code raises illegal-instruction
-            //     otherwise).
-            "li t0, 0x3FFFFFFF",
-            "csrw pmpaddr0, t0",
-            "li t0, 0x9F",
-            "csrw pmpcfg0, t0",
-            "li t0, (1<<0)|(1<<1)|(1<<2)|(1<<3)|(1<<5)|(1<<7)|(1<<8)|(1<<9)|(1<<11)|(1<<12)|(1<<13)|(1<<15)",
-            "csrw medeleg, t0",
-            "li t0, (1<<1)|(1<<5)|(1<<9)",
-            "csrw mideleg, t0",
-            "li t0, (1<<0)|(1<<1)|(1<<2)",
-            "csrw mcounteren, t0",
-            "mv sp, {0}",
-            "csrw mepc, {1}",
-            "li t0, 1 << 11",
-            "csrs mstatus, t0",
-            "li t0, 1 << 12",
-            "csrc mstatus, t0",
-            "li t0, 1 << 7",
-            "csrc mstatus, t0",
-            "csrw satp, {2}",
-            "sfence.vma zero, zero",
-            "mret",
-            in(reg) sp,
-            in(reg) entry,
-            in(reg) satp,
-            options(noreturn),
-        );
-        #[cfg(feature = "smode")]
-        core::arch::asm!(
-            "mv sp, {0}",
-            "csrw sepc, {1}",
-            "li t0, 1 << 8",     // sstatus.SPP = 1
-            "csrs sstatus, t0",
-            "li t0, 1 << 5",     // sstatus.SPIE = 1
-            "csrs sstatus, t0",
-            "csrw satp, {2}",
-            "sfence.vma zero, zero",
-            "sret",
-            in(reg) sp,
-            in(reg) entry,
-            in(reg) satp,
-            options(noreturn),
-        );
-    }
-}
-
-#[cfg(test)]
-#[unsafe(no_mangle)]
-pub unsafe extern "Rust" fn secondary_entry() -> ! {
-    loop {}
-}
-
-// Test twin of the real `secondary_continue`: `release_secondary_harts`
-// publishes its address into the bootloader mailbox unconditionally, so the
-// symbol must exist when the crate is built for `cargo test` (where the
-// real M-mode/S-mode trampoline is compiled out).
-#[cfg(test)]
-pub unsafe extern "Rust" fn secondary_continue() -> ! {
-    loop {}
-}
-
-#[cfg(not(test))]
-#[unsafe(no_mangle)]
-pub unsafe extern "Rust" fn secondary_kmain() -> ! {
-    unsafe {
-        let hartid: usize;
-        core::arch::asm!("mv {0}, tp", out(reg) hartid);
-        crate::proc::process::set_cpu_online(hartid, true);
-        G_ONLINE_HARTS.fetch_add(1, Ordering::SeqCst);
-        crate::proc::scheduler::sched_enter_idle()
-    }
-}
-
-#[cfg(test)]
-#[unsafe(no_mangle)]
-pub unsafe extern "Rust" fn secondary_kmain() -> ! {
-    loop {}
 }
 
 pub fn online_harts() -> u32 {

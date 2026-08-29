@@ -25,6 +25,8 @@
 #[cfg(feature = "smode")]
 pub fn hart_in_m_mode() -> bool {
     let out: usize;
+    // SAFETY: the asm touches only declared-output registers and CSRs
+    // (stvec is saved and restored; no memory is read or written).
     unsafe {
         core::arch::asm!(
             ".option push",
@@ -61,7 +63,13 @@ pub fn hart_in_m_mode() -> bool {
 
 /// Arm the S-mode timer. Legacy SBI_SET_TIMER: ecall with a7=0, a0=absolute stime value.
 /// OpenSBI services the underlying MTIP and delivers us an STIP.
+/// # Safety
+///
+/// Must be called in S-mode under an SBI firmware that implements the
+/// legacy v0.1 SBI_SET_TIMER extension; an `ecall` with no SBI beneath
+/// (e.g. from M-mode booted via OnyxBoot) traps to an unset mtvec.
 pub unsafe fn set_timer(stime: u64) {
+    // SAFETY: ecall with a7=0 / a0=stime is the legacy SBI_SET_TIMER contract.
     unsafe {
         core::arch::asm!(
             "ecall",

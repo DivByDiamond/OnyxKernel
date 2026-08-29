@@ -41,13 +41,21 @@ pub(crate) const FMT_LEN_8: u32 = 8 << 16;
 
 pub(crate) static mut G_BASE: usize = SPI_BASE;
 
+/// # Safety
+/// G_BASE must hold a valid SiFive SPI MMIO base; `off` must be within the controller register file.
 #[inline]
 pub(crate) unsafe fn rd(off: u32) -> u32 {
+    // SAFETY: G_BASE was set by init() from a probed/validated SPI base
+    // (QEMU virt fixed 0x1004_0000 or FDT-derived), identity-mapped at boot;
+    // off is a datasheet register offset defined in this file.
     unsafe { Mmio::<u32>::at(G_BASE + off as usize).read() }
 }
 
+/// # Safety
+/// G_BASE must hold a valid SPI MMIO base; `off` must be within the register file.
 #[inline]
 pub(crate) unsafe fn wr(off: u32, v: u32) {
+    // SAFETY: same contract as `rd`; off is a controller register offset defined in this file.
     unsafe {
         Mmio::<u32>::at(G_BASE + off as usize).write(v);
     }
@@ -55,7 +63,12 @@ pub(crate) unsafe fn wr(off: u32, v: u32) {
 
 /// Initialise the controller. `sckdiv` = (clk / (2 * spi_hz)) - 1.
 /// `cs` is the default chip-select line (0..MAX_CS).
+/// # Safety
+/// `base` must be a valid SiFive SPI MMIO base, identity-mapped; no concurrent SPI use while rebinding G_BASE.
 pub unsafe fn init(base: usize, sckdiv: u32, cs: u8) {
+    // SAFETY: G_BASE is rebound to the caller-provided probed base on the
+    // single-threaded init path; register offsets are per the constants in
+    // this file.
     unsafe {
         G_BASE = base;
         wr(R_SCKDIV, sckdiv);

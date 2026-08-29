@@ -38,10 +38,16 @@ static mut G_DEVS_RNG: [RngDev; MAX_RNG_DEVS] = [RngDev {
 static mut G_N: usize = 0;
 
 pub fn is_present() -> bool {
+    // SAFETY: plain usize read of boot-probe state; kernel code never runs with SIE set (see crate::sync).
     unsafe { G_N > 0 }
 }
 
+/// # Safety
+///
+/// `base` must be a candidate virtio-mmio base from the FDT probe or the
+/// QEMU virt fallback constants (identity-mapped at boot).
 pub unsafe fn probe(base: usize) -> bool {
+    // SAFETY: base is a candidate virtio-mmio base from the boot-time probe; reg_r reads only spec offsets (magic, device ID).
     unsafe {
         let magic = reg_r(base, R_MAGIC_VALUE);
         if magic != 0x7472_6976 {
@@ -51,7 +57,12 @@ pub unsafe fn probe(base: usize) -> bool {
     }
 }
 
+/// # Safety
+///
+/// `base` must be a probed virtio-rng MMIO base; must be called during the
+/// single-threaded boot-time device probe, once per base.
 pub unsafe fn init(base: usize) -> KResult<()> {
+    // SAFETY: boot-time single-threaded probe on a probed base; G_DEVS_RNG/G_N touched only here (SIE=0, see crate::sync), slot bounded by MAX_RNG_DEVS.
     unsafe {
         let pn = &raw const G_N;
         if *pn >= MAX_RNG_DEVS {
@@ -94,7 +105,12 @@ pub unsafe fn init(base: usize) -> KResult<()> {
     }
 }
 
+/// # Safety
+///
+/// `idx` must be the slot just stored by `init` (so `idx < MAX_RNG_DEVS`)
+/// and the call must happen during single-threaded boot-time probe.
 unsafe fn setup_queue(idx: usize) -> KResult<()> {
+    // SAFETY: idx < MAX_RNG_DEVS guaranteed by init; rings are fresh contiguous PMM pages stored into the device before it is told the addresses.
     unsafe {
         let p = &raw mut G_DEVS_RNG;
         let dev = &mut (*p)[idx];
@@ -137,6 +153,7 @@ pub fn read(buf: &mut [u8]) -> KResult<()> {
     if buf.is_empty() || buf.len() > 4096 {
         return Err(Errno::Inval);
     }
+    // SAFETY: dev 0 is populated only by single-threaded boot init (SIE=0, see crate::sync); base != 0 implies init() completed and desc/avail/used are PMM-allocated rings; desc slot 0 < VIRTQ_SIZE and avail slot masked % VIRTQ_SIZE per spec; buf is a live &mut [u8] of at most one page handed to the device; volatiles + SeqCst fence order ring entry before idx bump/notify.
     unsafe {
         let p = &raw mut G_DEVS_RNG;
         let dev = &mut (*p)[0];

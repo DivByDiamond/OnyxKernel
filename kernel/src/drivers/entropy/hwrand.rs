@@ -25,6 +25,13 @@ static mut G_FALLBACK_SEED: u64 = 0x9E37_79B9_7F4A_7C15;
 /// default under QEMU). A speculative `csrr seed, 0x005` here would hard-
 /// kill the kernel on any hart without Zkr+seed enabled, so we stay with
 /// virtio-rng / LCG until a firmware-provided capability flag exists.
+///
+/// # Safety
+///
+/// The body currently performs no unsafe operations (hard-coded `None`), so
+/// the caller contract is vacuously satisfied. If a real `csrr seed` is ever
+/// added, callers must first guarantee the hart implements Zkr with
+/// `mseccfg.sseed` enabled — see above.
 unsafe fn try_seed_csr() -> Option<u32> {
     None
 }
@@ -44,6 +51,7 @@ fn try_virtio() -> Option<u32> {
 /// Last-resort PRNG: a 64-bit LCG seeded by the RTC counter and the
 /// cycle counter (`rdcycle`). Suitable for non-cryptographic use only.
 fn fallback() -> u32 {
+    // SAFETY: G_FALLBACK_SEED is a static mut touched only from kernel context, which never runs with SIE set (see crate::sync), so the LCG update is not preempted mid-sequence.
     unsafe {
         let mix = rtc::now_nanos() ^ csr::read_cycle();
         G_FALLBACK_SEED = G_FALLBACK_SEED
@@ -56,6 +64,7 @@ fn fallback() -> u32 {
 
 /// Read a single 32-bit entropy word. Tries every source in order.
 pub fn next_u32() -> u32 {
+    // SAFETY: try_seed_csr is a hard-coded None stub today, so its (Zkr-availability) caller contract is vacuously satisfied.
     unsafe {
         if let Some(v) = try_seed_csr() {
             return v;
@@ -84,6 +93,7 @@ pub fn fill(buf: &mut [u8]) {
 
 /// Return the name of the active entropy source, for diagnostics.
 pub fn source_name() -> &'static str {
+    // SAFETY: try_seed_csr is a hard-coded None stub today, so its (Zkr-availability) caller contract is vacuously satisfied.
     unsafe {
         if try_seed_csr().is_some() {
             return "riscv-seed";
@@ -104,5 +114,6 @@ pub fn source_name() -> &'static str {
 /// degraded. Kernel consumers: `drivers::entropy`; userspace learns about
 /// degradation only via an explicit query surface, not from getentropy.
 pub fn strong_source_available() -> bool {
+    // SAFETY: try_seed_csr is a hard-coded None stub today, so its (Zkr-availability) caller contract is vacuously satisfied.
     (unsafe { try_seed_csr().is_some() }) || virtio_rng::is_present()
 }

@@ -8,6 +8,12 @@ use super::{
     qh_ptr, qtd_phys, qtd_ptr,
 };
 
+/// # Safety
+///
+/// Requires `init_ehci` to have run (controller out of reset) and the caller
+/// to serialize USB access (single-threaded path, SIE=0 per `crate::sync`).
+/// `setup_pkt` and `data` must remain valid and DMA-addressable for the
+/// duration of the transfer.
 pub unsafe fn ehci_control_transfer(
     dev_addr: u8,
     setup_pkt: &[u8; 8],
@@ -15,6 +21,7 @@ pub unsafe fn ehci_control_transfer(
     data_in: bool,
     max_pkt: u32,
 ) -> KResult<u32> {
+    // SAFETY: controller initialized by init_ehci (async list lazily brought up below); QH/QTD indices from alloc_qh/alloc_qtd so every raw-pointer write lands inside the G_DMA pool; MMIO via op_rd on in-file offsets; setup/data buffers are caller-provided and valid for the transfer.
     unsafe {
         if !G_ASYNCLIST_ENABLED {
             super::queue::init_async_list()?;

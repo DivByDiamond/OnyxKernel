@@ -48,6 +48,7 @@ pub fn bind(led: Led, pin: usize, active_low: bool) -> KResult<()> {
         return Err(Errno::Range);
     }
     gpio::set_output(pin)?;
+    // SAFETY: i bounds-checked against MAX_LEDS; G_SLOTS is kernel-owned and bind() is only called during single-threaded init (SIE=0).
     unsafe {
         G_SLOTS[i] = Slot {
             pin,
@@ -64,6 +65,7 @@ pub fn bind(led: Led, pin: usize, active_low: bool) -> KResult<()> {
 /// Drive the LED on (true) or off (false).
 pub fn set(led: Led, on: bool) -> KResult<()> {
     let i = idx(led);
+    // SAFETY: Led enum values are 0..MAX_LEDS-1 by definition, so G_SLOTS[i] is in-bounds; read is race-free (kernel never runs with SIE set).
     let slot = unsafe { G_SLOTS[i] };
     if !slot.bound {
         return Err(Errno::NoEnt);
@@ -76,6 +78,7 @@ pub fn set(led: Led, on: bool) -> KResult<()> {
 /// Toggle the LED state.
 pub fn toggle(led: Led) -> KResult<()> {
     let i = idx(led);
+    // SAFETY: Led enum values are 0..MAX_LEDS-1 by definition, so G_SLOTS[i] is in-bounds; read is race-free (kernel never runs with SIE set).
     let slot = unsafe { G_SLOTS[i] };
     if !slot.bound {
         return Err(Errno::NoEnt);
@@ -86,6 +89,7 @@ pub fn toggle(led: Led) -> KResult<()> {
 /// Read back the current LED drive state (not the LED itself).
 pub fn get(led: Led) -> KResult<bool> {
     let i = idx(led);
+    // SAFETY: Led enum values are 0..MAX_LEDS-1 by definition, so G_SLOTS[i] is in-bounds; read is race-free (kernel never runs with SIE set).
     let slot = unsafe { G_SLOTS[i] };
     if !slot.bound {
         return Err(Errno::NoEnt);
@@ -116,6 +120,7 @@ pub fn pulse_activity() {
 
 fn delay(loops: u32) {
     for _ in 0..loops {
+        // SAFETY: bare `nop` assembly is side-effect-free and trivially valid per the RISC-V ISA spec.
         unsafe { core::arch::asm!("nop") }
     }
 }

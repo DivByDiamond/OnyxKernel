@@ -103,6 +103,7 @@ mod tests {
 
     #[test]
     fn test_dev_out_of_range() {
+        // SAFETY: dev() bounds-checks idx against G_NDEVS and returns null out-of-range without touching G_DEVS; usize::MAX only exercises that check.
         unsafe {
             let d = dev(usize::MAX);
             assert!(d.is_null());

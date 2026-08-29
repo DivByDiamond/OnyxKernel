@@ -10,12 +10,16 @@ use onyx_core::errno::{Errno, KResult};
 const R_OK: u32 = 0x1100;
 const C_ATTACH: u32 = 0x106;
 
+/// # Safety
+///
+/// `d`/`a`/`u` must be valid writable locations for the queue pointers; `b` a probed, ack'd virtio-mmio base.
 pub unsafe fn setup_queue(
     d: *mut *mut VqDesc,
     a: *mut *mut VqAvail,
     u: *mut *mut VqUsed,
     b: usize,
 ) -> KResult<()> {
+    // SAFETY: d/a/u valid per contract; rings are fresh contiguous PMM pages stored through them and registered with the device before use; offsets are spec constants.
     unsafe {
         reg_w(b, R_QUEUE_SEL, 0);
         reg_w(b, R_QUEUE_NUM, VIRTQ_SIZE as u32);
@@ -36,6 +40,9 @@ pub unsafe fn setup_queue(
     }
 }
 
+/// # Safety
+///
+/// `d`/`a`/`u` must point at a queue initialized by `setup_queue`, `lu` at the last-used tracker; `rp` a PMM page for the 24-byte response.
 unsafe fn kick(
     d: *mut VqDesc,
     a: *mut VqAvail,
@@ -44,6 +51,7 @@ unsafe fn kick(
     b: usize,
     rp: usize,
 ) -> KResult<()> {
+    // SAFETY: queue pointers per contract; desc/avail slots masked % VIRTQ_SIZE; rp is a PMM page so the 24-byte repr(C) response read is in bounds; SeqCst fences order avail updates and completion reads.
     unsafe {
         let i = (*a).idx as usize % VIRTQ_SIZE;
         *d.add((i + 1) % VIRTQ_SIZE) = VqDesc {
@@ -73,6 +81,9 @@ unsafe fn kick(
     }
 }
 
+/// # Safety
+///
+/// `cmd` must point to `len` bytes of device-accessible (physical/PMM) memory valid for the synchronous kick; queue pointers per `kick`.
 pub unsafe fn send_cmd(
     d: *mut VqDesc,
     a: *mut VqAvail,
@@ -82,6 +93,7 @@ pub unsafe fn send_cmd(
     cmd: *mut u8,
     len: u32,
 ) -> KResult<()> {
+    // SAFETY: queue pointers per kick contract; slots masked % VIRTQ_SIZE; cmd is device-accessible for len bytes per the caller contract.
     unsafe {
         let rp = pmm::alloc_zero()? as usize;
         let i = (*a).idx as usize % VIRTQ_SIZE;
@@ -95,6 +107,9 @@ pub unsafe fn send_cmd(
     }
 }
 
+/// # Safety
+///
+/// Queue pointers per `kick`; the command struct must outlive the synchronous kick (true for the stack local).
 pub unsafe fn cmd_create2d(
     d: *mut VqDesc,
     a: *mut VqAvail,
@@ -105,6 +120,7 @@ pub unsafe fn cmd_create2d(
     w: u32,
     h: u32,
 ) -> KResult<()> {
+    // SAFETY: &c stays live for the whole synchronous kick; repr(C) layout matches the virtio-gpu spec; queue pointers satisfy the kick contract.
     unsafe {
         let c = Create2D {
             hdr: GpuCtrlHdr {
@@ -131,6 +147,9 @@ pub unsafe fn cmd_create2d(
     }
 }
 
+/// # Safety
+///
+/// `rid`/`pa`/`len` must describe a device resource backed by `len` bytes at physical `pa`; queue pointers per `kick`.
 pub unsafe fn cmd_attach(
     d: *mut VqDesc,
     a: *mut VqAvail,
@@ -141,6 +160,7 @@ pub unsafe fn cmd_attach(
     pa: u32,
     len: u32,
 ) -> KResult<()> {
+    // SAFETY: bp is a fresh PMM page so the header copy and writes at offsets 24..44 are in bounds; pa/len describe the PMM framebuffer per contract; desc slots masked % VIRTQ_SIZE.
     unsafe {
         let buf = pmm::alloc_zero()? as usize;
         let bp = buf as *mut u8;
@@ -174,6 +194,9 @@ pub unsafe fn cmd_attach(
     }
 }
 
+/// # Safety
+///
+/// Queue pointers per `kick`; the command struct must outlive the synchronous kick (true for the stack local).
 pub unsafe fn cmd_scanout(
     d: *mut VqDesc,
     a: *mut VqAvail,
@@ -184,6 +207,7 @@ pub unsafe fn cmd_scanout(
     w: u32,
     h: u32,
 ) -> KResult<()> {
+    // SAFETY: &c stays live for the whole synchronous kick; repr(C) layout matches the virtio-gpu spec; queue pointers satisfy the kick contract.
     unsafe {
         let c = SetScanout {
             hdr: GpuCtrlHdr {

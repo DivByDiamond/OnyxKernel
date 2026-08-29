@@ -157,6 +157,9 @@ drop_to_user:
 "#,
 );
 
+// SAFETY: the symbols are defined by the global_asm! above (trap.S, 32-bit);
+// the declared signatures match the asm ABI (a0 = new_sp for sched_switch;
+// a0-a2 = entry/ustack/user_root_pa for drop_to_user).
 unsafe extern "Rust" {
     pub fn trap_entry();
     pub fn trap_return();

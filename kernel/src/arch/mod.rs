@@ -12,6 +12,9 @@ pub mod trap_frame;
 
 pub use regs::*;
 
+// SAFETY: the kernel linker script defines these symbols as kernel image
+// boundary markers; they exist in every final link and only their addresses
+// are ever taken (never dereferenced as `u8`).
 unsafe extern "Rust" {
     pub static __bss_start: u8;
     pub static __bss_end: u8;

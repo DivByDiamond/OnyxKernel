@@ -42,6 +42,7 @@ pub(crate) static mut G_ANSI: AnsiTerm = AnsiTerm::new();
 
 /// Write a byte through the ANSI interpreter.
 pub fn console_putc(c: u8) {
+    // SAFETY: G_ANSI is a kernel-lifetime static; SIE=0 prevents same-hart preemption (see crate::sync). Cross-hart concurrent console_putc IS possible (klog from trap contexts) and tolerated by convention: output may interleave, the static never reallocates, and no reference escapes this block.
     unsafe {
         let t = &raw mut G_ANSI;
         (*t).putc(c);
@@ -50,6 +51,7 @@ pub fn console_putc(c: u8) {
 
 /// Refresh the cursor after a console operation.
 pub fn console_cursor() {
+    // SAFETY: G_ANSI is a kernel-lifetime static; SIE=0 prevents same-hart preemption (see crate::sync); cross-hart interleaving is tolerated by convention (see console_putc); draw_cursor only repaints the console grid.
     unsafe {
         let t = &raw mut G_ANSI;
         (*t).draw_cursor();

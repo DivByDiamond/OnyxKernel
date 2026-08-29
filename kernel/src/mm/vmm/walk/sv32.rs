@@ -24,7 +24,13 @@ pub unsafe fn walk(root_pa: u64, vaddr: u64, leaf_level: u32, create: bool) -> K
 }
 
 /// See [`walk`] for the safety contract.
+/// # Safety
+///
+/// Same contract as [`walk`]: `root_pa` is a live, page-aligned Sv32 root
+/// table reachable through the kernel's direct physical mapping; with
+/// `create` true the caller must hold the VMM lock.
 unsafe fn walk_impl(root_pa: u64, vaddr: u64, leaf_level: u32, create: bool) -> KResult<*mut u64> {
+    // SAFETY: slot addresses come from the valid root, validated non-leaf PTEs or freshly zero-allocated `pmm::alloc_zero` tables; mutations require the VMM lock per the fn contract.
     unsafe {
         if leaf_level > 1 {
             return Err(Errno::Inval);

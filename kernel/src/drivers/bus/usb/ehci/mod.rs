@@ -81,23 +81,30 @@ pub(super) static mut G_QH_COUNT: usize = 0;
 pub(super) static mut G_QTD_OFFSETS: [usize; MAX_QTD] = [0; MAX_QTD];
 pub(super) static mut G_QTD_COUNT: usize = 0;
 
+/// # Safety: `G_OP_BASE` must have been set by `init_ehci` and `reg` must be a register offset from this file's constants.
 #[inline]
 pub(super) unsafe fn op_rd(reg: u32) -> u32 {
+    // SAFETY: G_OP_BASE was set by init_ehci from the probed controller base; reg is an in-file register offset, so the MMIO read stays in the device window.
     unsafe { Mmio::<u32>::at(G_OP_BASE + reg as usize).read() }
 }
+/// # Safety: same contract as `op_rd`; the write targets an in-file register offset within the controller's MMIO window.
 #[inline]
 pub(super) unsafe fn op_wr(reg: u32, v: u32) {
+    // SAFETY: G_OP_BASE was set by init_ehci from the probed controller base; reg is an in-file register offset, so the MMIO write stays in the device window.
     unsafe {
         Mmio::<u32>::at(G_OP_BASE + reg as usize).write(v);
     }
 }
 
+/// # Safety: `off` must be an offset previously returned by `alloc_dma` (bounded by `DMA_POOL_SIZE`) so pool_va + off stays inside the pool.
 pub(super) unsafe fn pool_offset_to_phys(off: usize) -> u32 {
     let pool_va = &raw const G_DMA as usize;
     (pool_va + off) as u32
 }
 
+/// # Safety: call from the driver's single-threaded USB path with SIE=0 (see `crate::sync`); the aligned request must fit `DMA_POOL_SIZE` (checked below).
 pub(super) unsafe fn alloc_dma(size: usize) -> KResult<usize> {
+    // SAFETY: G_DMA_USED is only mutated here under the single-threaded (SIE=0) contract; bounds checked against DMA_POOL_SIZE and write_bytes stays inside the aligned pool.
     unsafe {
         let aligned = (size + 31) & !31;
         let off = G_DMA_USED;
@@ -110,7 +117,9 @@ pub(super) unsafe fn alloc_dma(size: usize) -> KResult<usize> {
     }
 }
 
+/// # Safety: call from the driver's single-threaded USB path with SIE=0 (see `crate::sync`); QH table state is only mutated through this helper.
 pub(super) unsafe fn alloc_qh() -> KResult<usize> {
+    // SAFETY: G_QH_COUNT is bounded by the MAX_QH check and mutated only here (SIE=0 per crate::sync); alloc_dma's offset is bounds-checked.
     unsafe {
         if G_QH_COUNT >= MAX_QH {
             return Err(Errno::NoMem);
@@ -123,7 +132,9 @@ pub(super) unsafe fn alloc_qh() -> KResult<usize> {
     }
 }
 
+/// # Safety: call from the driver's single-threaded USB path with SIE=0 (see `crate::sync`); QTD table state is only mutated through this helper.
 pub(super) unsafe fn alloc_qtd() -> KResult<usize> {
+    // SAFETY: G_QTD_COUNT is bounded by the MAX_QTD check and mutated only here (SIE=0 per crate::sync); alloc_dma's offset is bounds-checked.
     unsafe {
         if G_QTD_COUNT >= MAX_QTD {
             return Err(Errno::NoMem);
@@ -136,23 +147,33 @@ pub(super) unsafe fn alloc_qtd() -> KResult<usize> {
     }
 }
 
+/// # Safety: `idx` must be a QH index previously returned by `alloc_qh` (its pool offset recorded in `G_QH_OFFSETS`).
 pub(super) unsafe fn qh_ptr(idx: usize) -> *mut QH {
+    // SAFETY: idx from alloc_qh means G_QH_OFFSETS[idx] is a checked in-pool offset; the cast stays inside the 4096-byte aligned G_DMA pool.
     unsafe { G_DMA.data.as_mut_ptr().add(G_QH_OFFSETS[idx]) as *mut QH }
 }
 
+/// # Safety: `idx` must be a QTD index previously returned by `alloc_qtd` (its pool offset recorded in `G_QTD_OFFSETS`).
 pub(super) unsafe fn qtd_ptr(idx: usize) -> *mut Qtd {
+    // SAFETY: idx from alloc_qtd means G_QTD_OFFSETS[idx] is a checked in-pool offset; the cast stays inside the 4096-byte aligned G_DMA pool.
     unsafe { G_DMA.data.as_mut_ptr().add(G_QTD_OFFSETS[idx]) as *mut Qtd }
 }
 
+/// # Safety: `idx` must be a QH index previously returned by `alloc_qh`.
 pub(super) unsafe fn qh_phys(idx: usize) -> u32 {
+    // SAFETY: idx from alloc_qh means the offset is a checked in-pool offset; the pool base is the static G_DMA address.
     unsafe { pool_offset_to_phys(G_QH_OFFSETS[idx]) }
 }
 
+/// # Safety: `idx` must be a QTD index previously returned by `alloc_qtd`.
 pub(super) unsafe fn qtd_phys(idx: usize) -> u32 {
+    // SAFETY: idx from alloc_qtd means the offset is a checked in-pool offset; the pool base is the static G_DMA address.
     unsafe { pool_offset_to_phys(G_QTD_OFFSETS[idx]) }
 }
 
+/// # Safety: `base` must be the MMIO base of an EHCI controller identity-mapped at boot (init_usb passes the hardcoded SG2000 `EHCI_BASE`).
 pub(super) unsafe fn probe_ehci(base: usize) -> bool {
+    // SAFETY: base is the platform-constant EHCI_BASE, identity-mapped on SG2000 (probing is skipped elsewhere); reads hit the capability register file at offsets 0x00/0x04.
     unsafe {
         if base == 0 {
             return false;
@@ -164,10 +185,13 @@ pub(super) unsafe fn probe_ehci(base: usize) -> bool {
 }
 
 pub(super) fn ehci_n_ports() -> u8 {
+    // SAFETY: plain read of G_N_PORTS, written once by init_ehci during single-threaded boot init.
     unsafe { G_N_PORTS }
 }
 
+/// # Safety: requires a prior `init_ehci` (G_OP_BASE/G_N_PORTS set); `idx` is bounds-checked below against G_N_PORTS.
 pub(super) unsafe fn ehci_port_status(idx: u8) -> KResult<u32> {
+    // SAFETY: init_ehci set G_OP_BASE and G_N_PORTS; idx is bounds-checked above, so the PORTSC offset stays within the register file.
     unsafe {
         if idx >= G_N_PORTS {
             return Err(Errno::Range);
@@ -177,7 +201,9 @@ pub(super) unsafe fn ehci_port_status(idx: u8) -> KResult<u32> {
     }
 }
 
+/// # Safety: requires a prior `init_ehci` (G_OP_BASE/G_N_PORTS set); `idx` is bounds-checked below against G_N_PORTS.
 pub(super) unsafe fn ehci_port_reset(idx: u8) -> KResult<()> {
+    // SAFETY: init_ehci set G_OP_BASE and G_N_PORTS; idx is bounds-checked above, so the PORTSC offset stays within the register file.
     unsafe {
         if idx >= G_N_PORTS {
             return Err(Errno::Range);
@@ -195,7 +221,9 @@ pub(super) unsafe fn ehci_port_reset(idx: u8) -> KResult<()> {
     }
 }
 
+/// # Safety: requires a prior `init_ehci` (G_OP_BASE/G_N_PORTS set); `idx` is bounds-checked below against G_N_PORTS.
 pub(super) unsafe fn ehci_port_enable(idx: u8) -> KResult<()> {
+    // SAFETY: init_ehci set G_OP_BASE and G_N_PORTS; idx is bounds-checked above, so the PORTSC offset stays within the register file.
     unsafe {
         if idx >= G_N_PORTS {
             return Err(Errno::Range);

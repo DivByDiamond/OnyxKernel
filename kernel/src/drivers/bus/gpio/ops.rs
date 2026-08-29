@@ -22,6 +22,7 @@ fn mask(pin: usize) -> KResult<u32> {
 
 pub fn set_output(pin: usize) -> KResult<()> {
     let m = mask(pin)?;
+    // SAFETY: wr()/rd() access GPIO MMIO registers within the controller window derived from the probed G_BASE; pin is bounds-checked by mask().
     unsafe {
         wr(R_OUTPUT_EN, rd(R_OUTPUT_EN) | m);
         wr(R_INPUT_EN, rd(R_INPUT_EN) & !m);
@@ -31,6 +32,7 @@ pub fn set_output(pin: usize) -> KResult<()> {
 
 pub fn set_input(pin: usize) -> KResult<()> {
     let m = mask(pin)?;
+    // SAFETY: wr()/rd() access GPIO MMIO registers within the controller window derived from the probed G_BASE; pin is bounds-checked by mask().
     unsafe {
         wr(R_INPUT_EN, rd(R_INPUT_EN) | m);
         wr(R_OUTPUT_EN, rd(R_OUTPUT_EN) & !m);
@@ -40,6 +42,7 @@ pub fn set_input(pin: usize) -> KResult<()> {
 
 pub fn write(pin: usize, value: u8) -> KResult<()> {
     let m = mask(pin)?;
+    // SAFETY: wr()/rd() access R_OUTPUT_VAL inside the controller MMIO window derived from the probed G_BASE; pin is bounds-checked by mask().
     unsafe {
         let cur = rd(R_OUTPUT_VAL);
         wr(R_OUTPUT_VAL, if value != 0 { cur | m } else { cur & !m });
@@ -49,11 +52,13 @@ pub fn write(pin: usize, value: u8) -> KResult<()> {
 
 pub fn read(pin: usize) -> KResult<u8> {
     let m = mask(pin)?;
+    // SAFETY: rd() reads R_INPUT_VAL inside the controller MMIO window derived from the probed G_BASE; pin is bounds-checked by mask().
     Ok(unsafe { if rd(R_INPUT_VAL) & m != 0 { 1 } else { 0 } })
 }
 
 pub fn toggle(pin: usize) -> KResult<()> {
     let m = mask(pin)?;
+    // SAFETY: wr()/rd() access R_OUTPUT_VAL inside the controller MMIO window derived from the probed G_BASE; pin is bounds-checked by mask().
     unsafe {
         wr(R_OUTPUT_VAL, rd(R_OUTPUT_VAL) ^ m);
     }
@@ -62,6 +67,7 @@ pub fn toggle(pin: usize) -> KResult<()> {
 
 pub fn set_invert(pin: usize, on: bool) -> KResult<()> {
     let m = mask(pin)?;
+    // SAFETY: wr()/rd() access R_OUT_XOR inside the controller MMIO window derived from the probed G_BASE; pin is bounds-checked by mask().
     unsafe {
         let cur = rd(R_OUT_XOR);
         wr(R_OUT_XOR, if on { cur | m } else { cur & !m });
@@ -71,6 +77,10 @@ pub fn set_invert(pin: usize, on: bool) -> KResult<()> {
 
 pub fn on_edge(pin: usize, rising: bool, h: PinHandler) -> KResult<()> {
     let m = mask(pin)?;
+    // SAFETY: G_PINS is written here under the single-threaded registration
+    // path (no concurrent registration/dispatch during init); pin is
+    // bounds-checked by mask() so the slot index is in range; register
+    // writes are GPIO MMIO within the probed controller window.
     unsafe {
         let p = &raw mut G_PINS;
         (*p)[pin].handler = Some(h);
@@ -84,7 +94,13 @@ pub fn on_edge(pin: usize, rising: bool, h: PinHandler) -> KResult<()> {
 }
 
 /// Dispatch pending GPIO interrupts. Called from the PLIC handler.
+/// # Safety
+/// Caller contract: IRQ context; handlers must be IRQ-safe; must not race `on_edge` registration (registration is done before IRQs are enabled).
 pub unsafe fn dispatch(rising: bool) {
+    // SAFETY: reads/clears GPIO MMIO pending-interrupt registers within the
+    // probed controller window; G_PINS is read-only here and handlers are
+    // registered on the single-threaded init path before IRQs are enabled;
+    // pin loop is bounded by N_PINS so slot indices are in range.
     unsafe {
         let pending = if rising { rd(R_RISE_IP) } else { rd(R_FALL_IP) };
         if pending == 0 {

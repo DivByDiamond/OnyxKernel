@@ -62,6 +62,7 @@ static mut G_HANDLER: Option<Handler> = None;
 
 /// Register a single global input handler. Replaces any previous handler.
 pub fn on_event(h: Handler) {
+    // SAFETY: G_HANDLER is a plain kernel-owned slot; registration happens single-threaded at init (SIE=0).
     unsafe {
         G_HANDLER = Some(h);
     }
@@ -69,6 +70,7 @@ pub fn on_event(h: Handler) {
 
 /// Dispatch one event to the registered handler (if any).
 pub fn dispatch(ev: Event) {
+    // SAFETY: G_HANDLER is read and the fn(Event) pointer is invoked only if registered; registration raced nothing (kernel never runs with SIE set).
     unsafe {
         if let Some(h) = G_HANDLER {
             h(ev);
@@ -88,5 +90,6 @@ pub fn poll_all() {
 
 /// Was a handler registered?
 pub fn has_handler() -> bool {
+    // SAFETY: G_HANDLER is a plain kernel-owned slot; read without concurrency (kernel never runs with SIE set).
     unsafe { G_HANDLER.is_some() }
 }

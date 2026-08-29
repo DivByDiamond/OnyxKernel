@@ -34,23 +34,44 @@ static mut G_BASE: usize = DMA_BASE;
 static mut G_CHANNELS: [Channel; N_CHANNELS] = [Channel { in_use: false }; N_CHANNELS];
 
 #[inline]
+/// # Safety
+///
+/// Caller contract: `chan` must be < N_CHANNELS and `off` a DMA register
+/// offset; G_BASE must be initialised (DMA_BASE default or from `init`).
 unsafe fn reg(chan: usize, off: u32) -> usize {
+    // SAFETY: G_BASE is the fixed SoC/FDT DMA base; chan*0x20 + off are datasheet channel/stride constants, keeping the address in the DMA MMIO window.
     unsafe { G_BASE + chan * 0x20 + off as usize }
 }
 
 #[inline]
+/// # Safety
+///
+/// Caller contract: same as `reg` — `chan` < N_CHANNELS, `off` a valid
+/// DMA register offset, G_BASE initialised.
 unsafe fn rd(chan: usize, off: u32) -> u32 {
+    // SAFETY: reg() computes an address inside the DMA MMIO window from the validated G_BASE; Mmio::read is the designated MMIO accessor.
     unsafe { Mmio::<u32>::at(reg(chan, off)).read() }
 }
 
 #[inline]
+/// # Safety
+///
+/// Caller contract: same as `reg` — `chan` < N_CHANNELS, `off` a valid
+/// DMA register offset, G_BASE initialised.
 unsafe fn wr(chan: usize, off: u32, v: u32) {
+    // SAFETY: reg() computes an address inside the DMA MMIO window from the validated G_BASE; Mmio::write is the designated MMIO accessor.
     unsafe {
         Mmio::<u32>::at(reg(chan, off)).write(v);
     }
 }
 
+/// # Safety
+///
+/// Caller contract: `base` must be the validated DMA MMIO base (FDT node
+/// or DMA_BASE constant) and `init` must run once, on a single hart,
+/// before any channel use.
 pub unsafe fn init(base: usize) {
+    // SAFETY: single-threaded init before harts allocate channels; G_BASE/G_CHANNELS only written here.
     unsafe {
         G_BASE = base;
         G_CHANNELS = [Channel { in_use: false }; N_CHANNELS];
@@ -59,6 +80,7 @@ pub unsafe fn init(base: usize) {
 
 /// Allocate a free DMA channel. Returns the channel index.
 pub fn alloc() -> KResult<usize> {
+    // SAFETY: exclusive mutable access to G_CHANNELS is handed out only here, returning before further accesses; no reentrancy (SIE=0).
     unsafe {
         for (c, ch) in G_CHANNELS.iter_mut().enumerate() {
             if !ch.in_use {
@@ -75,6 +97,7 @@ pub fn free(chan: usize) -> KResult<()> {
     if chan >= N_CHANNELS {
         return Err(Errno::Inval);
     }
+    // SAFETY: chan bounds-checked against N_CHANNELS; G_CHANNELS access and wr() MMIO run with no concurrent channel use (SIE=0).
     unsafe {
         if !G_CHANNELS[chan].in_use {
             return Err(Errno::Inval);
@@ -92,6 +115,7 @@ pub fn copy(dst: usize, src: usize, len: usize) -> KResult<()> {
         return Err(Errno::Inval);
     }
     let chan = alloc()?;
+    // SAFETY: chan comes from alloc() (< N_CHANNELS); wr/rd hit DMA registers via the validated G_BASE; src/dst/len were validated by the caller (multiple of 4, physical addresses).
     unsafe {
         wr(chan, R_NEXT_SRC, src as u32);
         wr(chan, R_NEXT_DEST, dst as u32);
@@ -117,6 +141,7 @@ pub fn submit(chan: usize, src: usize, dst: usize, len: usize) -> KResult<()> {
     if chan >= N_CHANNELS || len == 0 || !len.is_multiple_of(4) {
         return Err(Errno::Inval);
     }
+    // SAFETY: chan bounds-checked against N_CHANNELS; MMIO writes go through the validated G_BASE; src/dst/len validated above.
     unsafe {
         if !G_CHANNELS[chan].in_use {
             return Err(Errno::Inval);
@@ -135,5 +160,6 @@ pub fn is_done(chan: usize) -> bool {
     if chan >= N_CHANNELS {
         return true;
     }
+    // SAFETY: chan bounds-checked against N_CHANNELS; rd() reads a DMA register via the validated G_BASE.
     unsafe { rd(chan, R_NEXT_CONFIG) & CFG_RUN == 0 }
 }

@@ -8,6 +8,9 @@ pub fn write(tx: &[u8]) -> KResult<()> {
     if tx.is_empty() {
         return Err(Errno::Inval);
     }
+    // SAFETY: rd()/wr() access the SPI FIFO registers inside the controller
+    // MMIO window derived from the probed G_BASE set by spi::init; no
+    // concurrent SPI bus users during this transfer.
     unsafe {
         for &b in tx {
             let mut t = TIMEOUT;
