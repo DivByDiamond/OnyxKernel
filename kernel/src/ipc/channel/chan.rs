@@ -7,6 +7,11 @@ use super::types::{CHAN_MAX, CHAN_MAX_CLIENTS, CHAN_NAME_MAX, Channel, G_CHANNEL
 // named_by_index) stay lock-free as before — they only read u8/bool fields
 // and tolerate momentary staleness.
 
+/// # Safety
+///
+/// Caller must not already hold any per-channel spinlock (a slot's lock is
+/// taken in turn here); all slot mutation happens while that slot's lock is
+/// held, so concurrent creators serialize on the per-slot locks.
 pub unsafe fn create(owner_pid: u32) -> KResult<u32> {
     unsafe {
         for (i, slot) in G_CHANNELS.iter_mut().enumerate() {
@@ -25,6 +30,12 @@ pub unsafe fn create(owner_pid: u32) -> KResult<u32> {
     }
 }
 
+/// # Safety
+///
+/// Caller must not hold any per-channel spinlock; `name` is only read for
+/// the duration of the call. The id returned by `create` is always < CHAN_MAX
+/// (it comes from indexing G_CHANNELS), so the re-index below is in range,
+/// and the name write happens under the slot's SpinLock.
 pub unsafe fn create_named(name: &[u8], owner_pid: u32) -> KResult<u32> {
     unsafe {
         if name.is_empty() || name.len() > CHAN_NAME_MAX - 1 {
@@ -44,6 +55,11 @@ pub unsafe fn create_named(name: &[u8], owner_pid: u32) -> KResult<u32> {
     }
 }
 
+/// # Safety
+///
+/// Lock-free read-only scan of G_CHANNELS: only reads u8/bool/name fields
+/// of slots and tolerates momentary staleness from concurrent creators
+/// (per the B5 note above); returns an id that is always < CHAN_MAX.
 pub unsafe fn find_by_name(name: &[u8]) -> Option<u32> {
     unsafe {
         for (i, ch) in G_CHANNELS.iter().enumerate() {
@@ -58,6 +74,11 @@ pub unsafe fn find_by_name(name: &[u8]) -> Option<u32> {
     }
 }
 
+/// # Safety
+///
+/// Caller must not hold any per-channel spinlock. The id from `find_by_name`
+/// is < CHAN_MAX; the clients array is only written under the slot's
+/// SpinLock and num_clients is capped at CHAN_MAX_CLIENTS before the write.
 pub unsafe fn open_by_name(name: &[u8], client_pid: u32) -> KResult<u32> {
     unsafe {
         let id = find_by_name(name).ok_or(Errno::NoEnt)?;
@@ -80,6 +101,11 @@ pub unsafe fn open_by_name(name: &[u8], client_pid: u32) -> KResult<u32> {
     }
 }
 
+/// # Safety
+///
+/// Caller must not hold any per-channel spinlock. chan_id is bounds-checked
+/// against CHAN_MAX before G_CHANNELS is indexed; the client list is
+/// mutated only while the slot's SpinLock is held.
 pub unsafe fn disconnect(chan_id: u32, pid: u32) {
     unsafe {
         if chan_id as usize >= CHAN_MAX {
@@ -102,6 +128,12 @@ pub unsafe fn disconnect(chan_id: u32, pid: u32) {
     }
 }
 
+/// # Safety
+///
+/// Caller must not hold any per-channel spinlock. chan_id is bounds-checked
+/// against CHAN_MAX before G_CHANNELS is indexed; the write to
+/// clients[num_clients] happens under the slot's SpinLock with
+/// num_clients < CHAN_MAX_CLIENTS already verified.
 pub unsafe fn connect(chan_id: u32, client_pid: u32) -> KResult<()> {
     unsafe {
         if chan_id as usize >= CHAN_MAX {
@@ -124,6 +156,11 @@ pub unsafe fn connect(chan_id: u32, client_pid: u32) -> KResult<()> {
     }
 }
 
+/// # Safety
+///
+/// Caller must not hold any per-channel spinlock. chan_id is bounds-checked
+/// against CHAN_MAX before G_CHANNELS is indexed; used/closed are flipped
+/// only while the slot's SpinLock is held.
 pub unsafe fn close(chan_id: u32) -> KResult<()> {
     unsafe {
         if chan_id as usize >= CHAN_MAX {
@@ -142,6 +179,10 @@ pub unsafe fn close(chan_id: u32) -> KResult<()> {
     }
 }
 
+/// # Safety
+///
+/// Lock-free read-only scan of G_CHANNELS: reads only u8/bool fields and
+/// tolerates momentary staleness from concurrent creators (B5 note above).
 pub unsafe fn named_count() -> u32 {
     unsafe {
         G_CHANNELS
@@ -151,6 +192,11 @@ pub unsafe fn named_count() -> u32 {
     }
 }
 
+/// # Safety
+///
+/// Lock-free read-only scan of G_CHANNELS: reads only u8/bool/name fields,
+/// tolerates momentary staleness, and the returned name slice indexes only
+/// the fixed CHAN_NAME_MAX array (len taken from the u8 name_len field).
 pub unsafe fn named_by_index(idx: u32) -> Option<(&'static [u8], u32)> {
     unsafe {
         let mut n = 0;

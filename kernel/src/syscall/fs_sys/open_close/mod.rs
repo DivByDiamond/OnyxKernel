@@ -15,7 +15,13 @@ use crate::fs::vfs;
 use crate::syscall::abi::{F_DUPFD, F_GETFD, F_GETFL, F_SETFD, F_SETFL, FD_CLOEXEC, O_RDONLY};
 use onyx_core::errno::Errno;
 
+/// # Safety
+///
+/// Call only from the syscall path with a current process set; `token` is
+/// validated inside vfs::close and no user memory is touched.
 pub(in super::super) unsafe fn sys_close(token: u64) -> i64 {
+    // SAFETY: body performs no unsafe operations; the block only wraps the
+    // vfs::close call for the unsafe-fn dispatch convention.
     unsafe {
         match vfs::close(token) {
             Ok(()) => 0,
@@ -24,7 +30,13 @@ pub(in super::super) unsafe fn sys_close(token: u64) -> i64 {
     }
 }
 
+/// # Safety
+///
+/// Call only from the syscall path with a current process set; `token` is
+/// validated inside vfs::lseek and no user memory is touched.
 pub(in super::super) unsafe fn sys_lseek(token: u64, off: i64, whence: u32) -> i64 {
+    // SAFETY: body performs no unsafe operations; the block only wraps the
+    // vfs::lseek call for the unsafe-fn dispatch convention.
     unsafe {
         match vfs::lseek(token, off, whence) {
             Ok(pos) => pos as i64,
@@ -33,7 +45,14 @@ pub(in super::super) unsafe fn sys_lseek(token: u64, off: i64, whence: u32) -> i
     }
 }
 
+/// # Safety
+///
+/// Call only from the syscall path with a current process set; `fd` is
+/// bounds-checked via vfs::fd_check before use and no user memory is touched.
 pub(in super::super) unsafe fn sys_fcntl(fd: u64, cmd: u32, arg: u64) -> i64 {
+    // SAFETY: body performs no unsafe operations; the block only wraps the
+    // vfs fd-table calls (each takes its own fd_check bounds validation) for
+    // the unsafe-fn dispatch convention.
     unsafe {
         match cmd {
             F_DUPFD => vfs::dup(fd)

@@ -15,7 +15,13 @@ pub struct OnxLoadResult {
     pub ring: u8,
 }
 
+/// # Safety
+///
+/// Caller contract: `image` must be readable for `image_size` bytes (kernel
+/// buffer from spawn, or a user pointer validated by the syscall layer).
 pub unsafe fn load(image: *const u8, image_size: usize) -> KResult<OnxLoadResult> {
+    // SAFETY: image_slice is built from the caller-validated (ptr, len)
+    // pair; the constructed slice length is exactly image_size.
     unsafe {
         if image_size < 24 {
             return Err(Errno::Inval);
@@ -69,7 +75,15 @@ fn validate_image(hdr: &OnxHeader) -> KResult<()> {
 
 /// Allocate + map one zeroed user page (stack / initial heap), accounting
 /// it against the system-wide user-memory budget.
+///
+/// # Safety
+///
+/// Caller contract: `root_pa` is a valid root table owned by this loader;
+/// `va` must lie in the user range (validated by validate_image callers).
 unsafe fn map_user_page(root_pa: u64, va: u64) -> KResult<()> {
+    // SAFETY: pmm::alloc_zero returns a valid zeroed page frame which is
+    // either linked into the root table or explicitly freed on every error
+    // path below (budget slot likewise released on rollback).
     unsafe {
         crate::proc::limits::user_page_take()?;
         let page_pa = match pmm::alloc_zero() {
@@ -96,6 +110,10 @@ unsafe fn map_user_page(root_pa: u64, va: u64) -> KResult<()> {
     }
 }
 
+/// # Safety
+///
+/// Caller contract: `root_pa` is a fresh (unaliased) root table; `hdr` was
+/// validated by validate_image(); `image` is readable for `image_size` bytes.
 unsafe fn load_into(
     root_pa: u64,
     hdr: &OnxHeader,
@@ -103,10 +121,16 @@ unsafe fn load_into(
     image_size: usize,
     compressed: bool,
 ) -> KResult<OnxLoadResult> {
+    // SAFETY: root_pa is a newly created root table owned exclusively by
+    // this loader until it is returned to the caller; the 1 GiB identity
+    // leaf PTEs are written before any user mapping (see segments.rs note).
     unsafe {
         let root = root_pa as *mut u64;
         let leaf = PTE_V | PTE_R | PTE_W | PTE_X | PTE_A | PTE_D;
         for i in 0..3u64 {
+            // SAFETY: root table is a fresh page (3 root PTE slots fit);
+            // volatile store is required because the table is only accessed
+            // via physical addresses / page-table walks.
             ptr::write_volatile(
                 root.add(i as usize),
                 PTE_V | leaf | ((i << 30) >> 12 << PTE_PPN_SHIFT),

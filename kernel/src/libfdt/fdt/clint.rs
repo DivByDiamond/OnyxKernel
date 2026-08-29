@@ -1,8 +1,14 @@
 use super::reader::{cstr_at, reg_base};
 use super::walk::walk;
 
+/// # Safety
+///
+/// `fdt::init()` must have succeeded; called once during single-threaded
+/// boot (before secondary harts start).
 pub unsafe fn find_clint() -> Option<u64> {
     unsafe {
+        // SAFETY: caller contract: init() validated the DTB; walk only reads
+        // the magic-checked struct block single-threaded.
         let mut result: Option<u64> = None;
         walk(&mut |_name, props: &[(u32, &[u8])]| {
             for (name_off, data) in props {

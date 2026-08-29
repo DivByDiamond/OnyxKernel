@@ -8,6 +8,11 @@ use onyx_core::errno::KResult;
 use onyx_core::formats::{ONYFS_BLOCK_SIZE, ONYFS_DIRECT_BLKS, OnyfsInode};
 
 pub unsafe fn write(ino: u32, buf: *const u8, off: u32, len: u32) -> KResult<u32> {
+    // SAFETY: buf must point to len bytes of valid memory that stays valid for
+    // the call (syscall layer translates user buffers before reaching fs/).
+    // Single-threaded onyxfs exclusion is required for the G_BUF scratch
+    // global, G_JOURNAL_HEAD, and the non-atomic inode read-modify-write.
+    // Chunk offsets are clamped to ONYFS_BLOCK_SIZE and remaining length.
     unsafe {
         check_v2()?;
         let mut inode = OnyfsInode {

@@ -3,7 +3,19 @@ use onyx_core::errno::KResult;
 
 use super::super::{G_SPC, fat_entry, is_eoc, is_valid_cluster, read_cluster_sector};
 
+/// Read `len` bytes at `off` from the cluster chain starting at `cluster`,
+/// following the FAT until EOC. Returns the number of bytes actually read.
+///
+/// # Safety
+///
+/// `buf` must be writable for at least the bytes this call reports; the
+/// syscall layer translates user buffers before reaching fs/. Caller must
+/// not invoke FAT32 I/O concurrently from multiple harts; `cluster` must be
+/// a valid data cluster and is re-validated on every chain hop below.
 pub unsafe fn read(cluster: u32, buf: *mut u8, off: u32, len: u32) -> KResult<u32> {
+    // SAFETY: see # Safety for buf validity; total_copied only advances by
+    // the clamped chunk sizes, so writes stay within the caller's buffer,
+    // and sec_buf access stays within its 512-byte bounds.
     unsafe {
         if len == 0 || cluster == 0 {
             return Ok(0);

@@ -6,7 +6,14 @@ use onyx_core::formats::{
     ONYFS_DIRECT_BLKS, ONYFS_DT_DIR, ONYFS_NAME_MAX, ONYFS_ROOT_INO, OnyfsInode,
 };
 
+/// # Safety
+///
+/// Caller must not invoke onyxfs operations concurrently from multiple harts
+/// (shared G_BUF scratch global). `dir_ino` must be a valid directory inode;
+/// `name` is a kernel-owned slice compared in-bounds against dirent names.
 pub unsafe fn lookup_in(dir_ino: u32, name: &[u8], out: &mut OnyfsStat) -> KResult<u32> {
+    // SAFETY: single-threaded onyxfs exclusion (see # Safety); dirent slots
+    // are bounds-checked inside parse_dirent before each G_BUF read.
     unsafe {
         let mut inode = OnyfsInode {
             mode: 0,
@@ -64,14 +71,28 @@ pub unsafe fn lookup_in(dir_ino: u32, name: &[u8], out: &mut OnyfsStat) -> KResu
 /// point used by open/stat/chmod/chown/utimens; wiring symlink resolution
 /// here closes the contract gap where symlinks could be created
 /// (sys_symlink) but were never resolved during path traversal.
+///
+/// # Safety
+///
+/// Caller must not invoke onyxfs operations concurrently from multiple harts.
+/// `path` must be a kernel-owned byte string (syscall layer parses user
+/// paths first); `out` is a caller-owned writable OnyfsStat.
 pub unsafe fn lookup(path: &[u8], out: &mut OnyfsStat) -> KResult<u32> {
+    // SAFETY: delegates to lookup_follow, whose contract covers all raw access.
     unsafe { super::follow::lookup_follow(path, out, 0) }
 }
 
 /// Resolve `path` WITHOUT following a symlink at the final component
 /// (POSIX lstat/readlink/unlink/rename semantics). Used by operations that
 /// must act on the link itself rather than its target.
+///
+/// # Safety
+///
+/// Same contract as `lookup`: single-threaded onyxfs exclusion; `path` is a
+/// kernel-owned slice (user paths parsed by the syscall layer).
 pub unsafe fn lookup_nofollow(path: &[u8], out: &mut OnyfsStat) -> KResult<u32> {
+    // SAFETY: only slices the caller-owned `path` in-bounds and delegates
+    // raw block access to the bounds-checked lookup_in/stat helpers.
     unsafe {
         let mut cur_ino = ONYFS_ROOT_INO;
         let mut remaining = path;
@@ -101,7 +122,12 @@ pub unsafe fn lookup_nofollow(path: &[u8], out: &mut OnyfsStat) -> KResult<u32> 
     }
 }
 
+/// # Safety
+///
+/// Same contract as `lookup`: single-threaded onyxfs exclusion; `path` is a
+/// kernel-owned slice (user paths parsed by the syscall layer).
 pub unsafe fn resolve_dir(path: &[u8]) -> KResult<u32> {
+    // SAFETY: delegates to lookup, whose contract covers all raw access.
     unsafe {
         let mut st = OnyfsStat::default();
         let ino = lookup(path, &mut st)?;

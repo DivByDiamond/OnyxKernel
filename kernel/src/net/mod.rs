@@ -19,7 +19,14 @@ pub static mut G_GW: [u8; 4] = [0; 4];
 pub static mut G_MASK: [u8; 4] = [0; 4];
 pub static mut G_DNS: [u8; 4] = [0; 4];
 
+/// # Safety
+///
+/// Boot-time configuration: must run on the boot hart before secondary
+/// harts are released (kmain does this before `launch()`), so the config
+/// statics are written without concurrent access; afterwards they are
+/// only read.
 pub unsafe fn init(ip: [u8; 4], gateway: [u8; 4], netmask: [u8; 4]) {
+    // SAFETY: boot-hart-only write of the config statics, before any other hart runs.
     unsafe {
         G_IP = ip;
         G_GW = gateway;
@@ -27,7 +34,13 @@ pub unsafe fn init(ip: [u8; 4], gateway: [u8; 4], netmask: [u8; 4]) {
     }
 }
 
+/// # Safety
+///
+/// Drives the RX path: must not run concurrently on two harts. The
+/// virtio-net RX ring, the ARP cache and the socket/conn tables have no
+/// lock; SIE=0 only prevents same-hart preemption, not cross-hart races.
 pub unsafe fn poll() {
+    // SAFETY: single-poller contract above; ring and table state is unguarded.
     unsafe {
         // Reclaim expired TIMEWAIT TCP slots even when no packets arrive.
         tcp::tick();

@@ -6,6 +6,13 @@ use super::{
     is_eoc, is_valid_cluster, read_cluster_sector, scan_dir_entries,
 };
 
+/// Resolve one path component (8.3 name) in the directory at `dir_cluster`.
+///
+/// # Safety
+///
+/// Caller must not invoke FAT32 I/O concurrently from multiple harts;
+/// `dir_cluster` must be a valid data cluster. `component` is a kernel-owned
+/// slice converted to an 8.3 name on the stack.
 unsafe fn lookup_component(
     dir_cluster: u32,
     component: &[u8],
@@ -13,6 +20,8 @@ unsafe fn lookup_component(
     out_size: &mut u32,
     out_is_dir: &mut bool,
 ) -> KResult<()> {
+    // SAFETY: delegates to scan_dir_entries, whose contract covers all raw
+    // access; the scratch buffer is a valid 512-byte stack allocation.
     unsafe {
         let needle = fat32_name_8_3(component);
         let mut buf = [0u8; 512];
@@ -27,7 +36,16 @@ unsafe fn lookup_component(
     }
 }
 
+/// Resolve an absolute path from the FAT32 root to (cluster, size).
+///
+/// # Safety
+///
+/// Caller must not invoke FAT32 I/O concurrently from multiple harts.
+/// `path` must be a kernel-owned byte string - the syscall layer parses
+/// user paths (parse_user_path) before reaching fs/.
 pub unsafe fn lookup(path: &[u8], out_cluster: &mut u32, out_size: &mut u32) -> KResult<()> {
+    // SAFETY: single-threaded FAT32 exclusion (see # Safety); all raw access
+    // is delegated to lookup_component/scan_dir_entries (bounds-checked).
     unsafe {
         if path.is_empty() || path == b"/" || path == b"." {
             *out_cluster = G_ROOT_CLUSTER;
@@ -77,12 +95,25 @@ pub unsafe fn lookup(path: &[u8], out_cluster: &mut u32, out_size: &mut u32) -> 
 
 pub use read::*;
 
+/// Read one directory entry by index (stateful cursor maintained by VFS).
+/// Writes the 8.3-derived lowercase name (NUL-terminated) into `name_out`
+/// and returns the entry's cluster number, or None past end-of-directory.
+///
+/// # Safety
+///
+/// `name_out` must be writable for `name_len` bytes and stay valid for the
+/// call (the syscall layer translates user buffers before reaching fs/);
+/// every write below is capped at name_len - 1 plus a NUL. Caller must not
+/// invoke FAT32 I/O concurrently from multiple harts.
 pub unsafe fn readdir_entry(
     dir_cluster: u32,
     entry_idx: u32,
     name_out: *mut u8,
     name_len: usize,
 ) -> Option<u32> {
+    // SAFETY: see # Safety for name_out validity - out_pos is checked against
+    // name_len before each byte write; cluster numbers are validated via
+    // is_valid_cluster before each chain hop.
     unsafe {
         if !is_valid_cluster(dir_cluster) {
             return None;

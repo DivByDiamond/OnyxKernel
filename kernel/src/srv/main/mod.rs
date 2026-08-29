@@ -7,7 +7,13 @@ mod vfs;
 
 const BANNER: &str = "\n\x1b[32m░█▀█░█▀█░█░█░█░█\n░█░█░█░█░░█░░▄▀▄\n░▀▀▀░▀░▀░░▀░░▀░▀\x1b[0m\n  OnyxKernel v0.3 (Rust) — RISC-V 64 GC\n\n";
 
+/// # Safety
+///
+/// Boot entry: must be called once, on the boot hart, in S-mode, with a
+/// valid `fdt_addr` and the kernel address space live. It never returns:
+/// it either halts or enters user mode after releasing secondary harts.
 pub unsafe fn kmain(hartid: usize, fdt_addr: usize) -> ! {
+    // SAFETY: one-shot boot-hart call per the contract above; every callee carries its own unsafe preconditions.
     unsafe {
         crate::srv::klog::debug_mark(b'K');
         // Configure the console from the device tree before printing anything:

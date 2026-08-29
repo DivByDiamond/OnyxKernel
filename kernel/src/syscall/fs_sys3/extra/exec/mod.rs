@@ -10,7 +10,17 @@ use crate::proc::process::{ProcState, proc_list_lock, proc_list_unlock};
 use crate::syscall::abi::WNOHANG;
 use crate::syscall::handler::user_ptr_ok;
 
+/// # Safety
+///
+/// Call only from handler::handle's syscall path with a live trap frame;
+/// `status_out` is validated inside before any store, and the caller must
+/// not already hold proc_list_lock.
 pub unsafe fn sys_waitpid(tf: &mut TrapFrame, pid: u64, status_out: u64, options: u32) -> i64 {
+    // SAFETY: the G_ALL_PROCS traversal, exit-code reads and unlink all run
+    // under proc_list_lock, so no concurrent list mutation can race the
+    // walk; the reaped node is unlinked before kfree, so no list traversal
+    // can reach it afterwards; copy_to_user re-validates each page of the
+    // validated status_out before writing.
     unsafe {
         let my_pid = proc::current_pid();
 

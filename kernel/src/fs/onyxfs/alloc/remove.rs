@@ -12,8 +12,16 @@ use onyx_core::formats::{
 ///
 /// Bug #19 fix: previously this only scanned `dir_inode.blocks[0]`, so
 /// entries that lived in blocks[1..9] could never be removed (returned
-/// NoEnt). We now scan every direct block.
+///   NoEnt). We now scan every direct block.
+///
+/// # Safety
+///
+/// Caller must not invoke onyxfs operations concurrently from multiple harts:
+/// this uses the module-global G_BUF scratch block and reads G_VERSION/G_SB.
+/// `dir_ino` must be a valid directory inode; slot offsets are bounds-checked.
 pub unsafe fn remove_dirent(dir_ino: u32, name: &[u8]) -> KResult<()> {
+    // SAFETY: single-threaded onyxfs exclusion (see # Safety); slot offsets
+    // are bounds-checked (off + entry_size <= block size) before use.
     unsafe {
         let mut dir_inode = OnyfsInode {
             mode: 0,

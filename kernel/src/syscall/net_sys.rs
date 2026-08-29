@@ -4,7 +4,14 @@ use crate::net;
 use crate::proc;
 use onyx_core::errno::Errno;
 
+/// # Safety
+///
+/// Call only from the syscall path with a current process set; `ip_ptr` is
+/// validated inside before use.
 pub(super) unsafe fn sys_net_connect(ip_ptr: u64, port: u64) -> i64 {
+    // SAFETY: the 4-byte ip range passed user_ptr_ok and per-page
+    // check_user_range above; copy_from_user re-validates each page before
+    // reading it into the stack buffer.
     unsafe {
         if !user_ptr_ok(ip_ptr, 4) || port == 0 || port > 65535 {
             return Errno::Inval.as_i64();
@@ -23,7 +30,14 @@ pub(super) unsafe fn sys_net_connect(ip_ptr: u64, port: u64) -> i64 {
     }
 }
 
+/// # Safety
+///
+/// Call only from the syscall path with a current process set; `buf`/`len`
+/// are validated inside before use.
 pub(super) unsafe fn sys_net_send(conn_id: u64, buf: u64, len: u64) -> i64 {
+    // SAFETY: buf/len passed user_ptr_ok and the per-page readable
+    // check_user_range above, so the slice handed to net::tcp_send covers
+    // only mapped user pages.
     unsafe {
         if conn_id >= 8 || !user_ptr_ok(buf, len) {
             return Errno::Inval.as_i64();
@@ -41,7 +55,14 @@ pub(super) unsafe fn sys_net_send(conn_id: u64, buf: u64, len: u64) -> i64 {
     }
 }
 
+/// # Safety
+///
+/// Call only from the syscall path with a current process set; `buf`/`len`
+/// are validated inside before use.
 pub(super) unsafe fn sys_net_recv(conn_id: u64, buf: u64, len: u64) -> i64 {
+    // SAFETY: buf/len passed user_ptr_ok and the per-page writable
+    // check_user_range above, so the slice handed to net::tcp_recv covers
+    // only mapped, writable user pages.
     unsafe {
         if conn_id >= 8 || !user_ptr_ok(buf, len) {
             return Errno::Inval.as_i64();
@@ -58,7 +79,13 @@ pub(super) unsafe fn sys_net_recv(conn_id: u64, buf: u64, len: u64) -> i64 {
     }
 }
 
+/// # Safety
+///
+/// Call only from the syscall path; `conn_id` is bounds-checked inside and
+/// no user memory is touched.
 pub(super) unsafe fn sys_net_close(conn_id: u64) -> i64 {
+    // SAFETY: body performs no unsafe operations; the block only wraps the
+    // bounds check and net::tcp_close for the unsafe-fn dispatch convention.
     unsafe {
         if conn_id >= 8 {
             return Errno::Inval.as_i64();

@@ -13,6 +13,12 @@ mod wait;
 
 pub use wait::*;
 
+/// # Safety
+///
+/// Caller contract: `root_pa` is a freshly-created user root table owned by
+/// the new process; `root_refcount` (if non-null) points at a shared 4-byte
+/// refcount cell; on success the caller must not destroy root_pa (the proc
+/// owns it); on failure create_user keeps ownership semantics unchanged.
 pub unsafe fn create_user(
     entry: u64,
     ustack: u64,
@@ -25,6 +31,9 @@ pub unsafe fn create_user(
     argv_sp: u64,
     root_refcount: *mut u32,
 ) -> KResult<()> {
+    // SAFETY: alloc_proc's node is fully initialized before enqueue; the
+    // enqueue happens under rq_lock(caller_hart); root_refcount (when
+    // shared) is only accessed via atomic dec_root_refcount.
     unsafe {
         if entry == 0 {
             crate::kerr!("create_user", "entry=0 — would cause page fault, rejecting");
@@ -94,7 +103,15 @@ pub unsafe fn create_user(
     }
 }
 
+/// # Safety
+///
+/// Caller contract: kernel context with SIE clear; `path` is a valid NUL-
+/// terminated kernel slice; `argv_user` (if non-zero) must be a valid user
+/// pointer in the PARENT address space validated by the syscall layer.
 pub unsafe fn spawn(path: &[u8], argv_user: u64, ring_hint: u8, parent_pid: u32) -> KResult<u32> {
+    // SAFETY: vfs token/heap buffer handling is safe within the kernel;
+    // onx::load and copy_argv_to_stack operate on the freshly allocated
+    // root table and kernel-owned buffers per their own caller contracts.
     unsafe {
         use crate::fs::vfs;
         let token = vfs::open(path, vfs::PERM_READ | vfs::PERM_SEEK)?;

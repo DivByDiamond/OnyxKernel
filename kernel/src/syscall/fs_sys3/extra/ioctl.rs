@@ -20,7 +20,15 @@ const C_CC_VTIME: usize = 5;
 const TERMIOS_SIZE: usize = 60;
 
 /// Copyout of a fixed-size kernel buffer to user memory (EFAULT-safe).
+/// # Safety
+///
+/// Caller must be on the syscall path with a live current-process root_pa;
+/// `src` must be valid for reads of `len` bytes; `buf_va` is untrusted and
+/// validated here.
 unsafe fn put_user(buf_va: u64, src: *const u8, len: usize) -> i64 {
+    // SAFETY: buf_va passed user_ptr_ok above and copy_to_user re-validates
+    // each page as a writable user mapping before writing; `src` validity is
+    // the caller's contract documented above.
     unsafe {
         if !user_ptr_ok(buf_va, len as u64) {
             return Errno::Fault.as_i64();
@@ -33,7 +41,15 @@ unsafe fn put_user(buf_va: u64, src: *const u8, len: usize) -> i64 {
 }
 
 /// Copyin of a fixed-size user buffer into kernel memory (EFAULT-safe).
+/// # Safety
+///
+/// Caller must be on the syscall path with a live current-process root_pa;
+/// `dst` must be valid for writes of `len` bytes; `buf_va` is untrusted and
+/// validated here.
 unsafe fn get_user(dst: *mut u8, buf_va: u64, len: usize) -> i64 {
+    // SAFETY: buf_va passed user_ptr_ok above and copy_from_user re-validates
+    // each page as a readable user mapping before reading; `dst` validity is
+    // the caller's contract documented above.
     unsafe {
         if !user_ptr_ok(buf_va, len as u64) {
             return Errno::Fault.as_i64();
@@ -45,7 +61,15 @@ unsafe fn get_user(dst: *mut u8, buf_va: u64, len: usize) -> i64 {
     }
 }
 
+/// # Safety
+///
+/// Call only from handler::handle's syscall path: current process set, ACL
+/// checked; `arg` is validated per request inside before any user write.
 pub unsafe fn sys_ioctl(fd: u64, request: u64, arg: u64) -> i64 {
+    // SAFETY: termios writes go into a 60-byte stack buffer read back via
+    // put_user/get_user (which validate `arg` per page); the TIOCGWINSZ path
+    // checks user_ptr_ok and resolves a live translation before the 8-byte
+    // write; the devfs FB_INFO path pre-validates arg via check_user_range.
     unsafe {
         let token = fd;
         if let Ok(idx) = vfs::fd_check(token) {
@@ -172,6 +196,10 @@ pub unsafe fn sys_ioctl(fd: u64, request: u64, arg: u64) -> i64 {
     }
 }
 
+/// # Safety
+///
+/// Call only from the syscall path; the body is a stub that ignores `fd`
+/// and touches no memory.
 pub unsafe fn sys_isatty(fd: u64) -> i64 {
     let _ = fd;
     1

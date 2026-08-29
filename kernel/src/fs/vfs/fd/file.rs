@@ -5,7 +5,16 @@ use crate::fs::vfs::{
 use crate::fs::{devfs, fat32, ipcfs, onyxfs, procfs};
 use onyx_core::errno::{Errno, KResult};
 
+/// # Safety
+///
+/// Caller contract: path comes from the syscall layer's parse_user_path
+/// (NUL-terminated, copied into kernel memory) or a kernel-side literal;
+/// runs in the fd-owning context (kernel boot or the current process's
+/// syscall on this hart).
 pub unsafe fn open(path: &[u8], perms: u32) -> KResult<FdToken> {
+    // SAFETY: the per-process fd slot is claimed via alloc_fd in this
+    // context; G_ROOT_FS is read-only after boot-time mounting; all fd-table
+    // writes use the checked idx from alloc_fd (see ops.rs # Safety).
     unsafe {
         if path.is_empty() || path[0] != b'/' {
             return Err(Errno::Inval);
@@ -112,7 +121,13 @@ pub unsafe fn open(path: &[u8], perms: u32) -> KResult<FdToken> {
     }
 }
 
+/// # Safety
+///
+/// Caller contract: token must come from the fd table of the calling
+/// context; close only touches this context's own fd table.
 pub unsafe fn close(token: FdToken) -> KResult<()> {
+    // SAFETY: fd_check validates idx and epoch; fd_clear only marks the
+    // owning context's slot unused.
     unsafe {
         let idx = fd_check(token)?;
         fd_clear(idx);

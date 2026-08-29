@@ -61,7 +61,13 @@ pub fn stat(ino: u32) -> KResult<DevfsStat> {
     }
 }
 
+/// # Safety
+///
+/// Caller contract: `buf` must be writable for `len` bytes (validated and
+/// translated by the syscall layer for user callers); ino must come from a
+/// devfs lookup/stat.
 pub unsafe fn read(ino: u32, buf: *mut u8, offset: u32, len: u32) -> KResult<u32> {
+    // SAFETY: buffer contract documented on the fn; per-branch bounds noted below.
     unsafe {
         if let Some(idx) = is_blk_ino(ino) {
             // SAFETY: caller guarantees buf points to a writable region of at
@@ -76,6 +82,9 @@ pub unsafe fn read(ino: u32, buf: *mut u8, offset: u32, len: u32) -> KResult<u32
                     return Ok(0);
                 }
                 let fb_base = fb::fb_base_ptr();
+                // SAFETY: to_read = min(len, size - offset) after the
+                // early-return, so offset + to_read <= fb size; buf covers
+                // `len` bytes per the caller contract, hence to_read too.
                 ptr::copy_nonoverlapping(fb_base.add(offset as usize), buf, to_read as usize);
                 Ok(to_read)
             }
@@ -84,7 +93,13 @@ pub unsafe fn read(ino: u32, buf: *mut u8, offset: u32, len: u32) -> KResult<u32
     }
 }
 
+/// # Safety
+///
+/// Caller contract: `buf` must be readable for `len` bytes (validated and
+/// translated by the syscall layer for user callers); ino must come from a
+/// devfs lookup/stat.
 pub unsafe fn write(ino: u32, buf: *const u8, offset: u32, len: u32) -> KResult<u32> {
+    // SAFETY: buffer contract documented on the fn; per-branch bounds checked.
     unsafe {
         if let Some(idx) = is_blk_ino(ino) {
             // SAFETY: caller guarantees buf points to a readable region of at
@@ -99,6 +114,9 @@ pub unsafe fn write(ino: u32, buf: *const u8, offset: u32, len: u32) -> KResult<
                     return Ok(0);
                 }
                 let fb_base = fb::fb_base_ptr();
+                // SAFETY: to_write = min(len, size - offset) after the
+                // early-return, so offset + to_write <= fb size; buf covers
+                // `len` readable bytes per the caller contract.
                 ptr::copy_nonoverlapping(buf, fb_base.add(offset as usize), to_write as usize);
                 Ok(to_write)
             }
@@ -132,13 +150,23 @@ pub fn readdir_entry(idx: u32, name_out: *mut u8, name_len: usize) -> Option<u32
     }
 }
 
+/// # Safety
+///
+/// Caller contract: vaddr/length/pte_flags come from the mmap syscall after
+/// address-space validation (resolve_vaddr); runs in the mmap'ing process's
+/// syscall context, so p.root_pa is its own page table.
 pub unsafe fn mmap(ino: u32, vaddr: u64, length: u64, pte_flags: u64) -> KResult<u64> {
+    // SAFETY: mapping scoped to the caller's own page table; see # Safety.
     unsafe {
         match ino {
             DEVFS_FB0_INO => {
                 let fb_pa = fb::fb_base_pa();
                 let fb_size = fb::size_bytes() as u64;
                 let map_len = length.min(fb_size);
+                // SAFETY: maps the device's physical fb range (fb_base_pa,
+                // bounded by map_len <= fb_size) into the current process's
+                // own address space; vaddr validity is established by the
+                // mmap syscall path (resolve_vaddr) before dispatch.
                 let p = crate::proc::current();
                 let flags = pte_flags | crate::arch::regs::PTE_A | crate::arch::regs::PTE_D;
                 crate::mm::vmm::map(p.root_pa, vaddr, fb_pa as u64, map_len as usize, flags)?;
@@ -151,12 +179,23 @@ pub unsafe fn mmap(ino: u32, vaddr: u64, length: u64, pte_flags: u64) -> KResult
 
 pub const FB_IOCTL_GET_INFO: u64 = 0x4600;
 
+/// # Safety
+///
+/// Caller contract: for FB_IOCTL_GET_INFO the syscall layer (sys_ioctl) has
+/// validated `arg` as a writable user range of 20 bytes via check_user_range
+/// before dispatching; arg must be page-aligned to a mapped user page.
 pub unsafe fn ioctl(ino: u32, request: u64, arg: u64) -> KResult<i64> {
+    // SAFETY: user-pointer contract for `arg` upheld by sys_ioctl; see below.
     unsafe {
         match ino {
             DEVFS_FB0_INO => match request {
                 FB_IOCTL_GET_INFO => {
                     let p = crate::proc::current();
+                    // SAFETY: sys_ioctl pre-validated arg as a writable user
+                    // range of 20 bytes (check_user_range); translate()
+                    // re-walks the page table and 0 here means unmapped,
+                    // which we reject. The 5-u32 store stays within the
+                    // validated range.
                     let pa = crate::mm::vmm::translate(p.root_pa, arg);
                     if pa == 0 {
                         return Err(Errno::Inval);
@@ -178,6 +217,9 @@ pub unsafe fn ioctl(ino: u32, request: u64, arg: u64) -> KResult<i64> {
 
 fn copy_name(name: &[u8], out: *mut u8, max_len: usize) {
     let n = name.len().min(max_len);
+    // SAFETY: n <= max_len by construction, so the copy stays within the
+    // caller-provided name_out buffer of max_len bytes (no NUL is written
+    // by this helper).
     unsafe {
         ptr::copy_nonoverlapping(name.as_ptr(), out, n);
     }

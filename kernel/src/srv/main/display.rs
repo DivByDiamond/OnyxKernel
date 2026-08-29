@@ -2,7 +2,13 @@ use crate::drivers::fb;
 use crate::mm::pmm;
 use onyx_core::fmt::Arg;
 
+/// # Safety
+///
+/// Boot-time framebuffer init: must run single-threaded on the boot hart
+/// after pmm/heap are up (it may allocate framebuffer pages); draws the
+/// banner exactly once.
 pub(crate) unsafe fn init_and_draw() {
+    // SAFETY: framebuffer memory is the DTB simple-framebuffer region or fresh pmm pages; single-threaded boot call.
     unsafe {
         // Prefer the device-tree simple-framebuffer (OC2R/sedna monitor): it is an
         // MMIO region the host actually samples, whereas private RAM is invisible

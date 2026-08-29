@@ -9,7 +9,11 @@ use onyx_core::errno::Errno;
 use super::handler::{parse_user_path, user_ptr_ok};
 
 #[inline(never)]
+/// # Safety: call only from handler::handle's syscall path (current process set, ACL checked); user pointers validated inside.
 pub(super) unsafe fn sys_exec(tf: &mut TrapFrame, path: u64, argv: u64) -> i64 {
+    // SAFETY: parse_user_path validates the path internally; root_refcount is
+    // this process's own live heap u32 (null-checked) and the old root table
+    // is only destroyed once its refcount drops to zero.
     unsafe {
         let mut path_buf = [0u8; 256];
         let path_len = match parse_user_path(path, &mut path_buf) {
@@ -122,7 +126,9 @@ pub(super) unsafe fn sys_exec(tf: &mut TrapFrame, path: u64, argv: u64) -> i64 {
     }
 }
 
+/// # Safety: call only from handler::handle's syscall path (current process set, ACL checked); no user pointers dereferenced.
 pub(super) unsafe fn sys_sbrk(incr: i64) -> i64 {
+    // SAFETY: by_pid() takes proc_list_lock for the lookup; heap_brk is only mutated by the owning process's own context.
     unsafe {
         let pid = proc::current_pid();
         // Audit fix (🔴 #8): replace `proc::by_pid(pid).unwrap()` with a
@@ -152,7 +158,11 @@ pub(super) unsafe fn sys_sbrk(incr: i64) -> i64 {
 }
 
 #[inline(never)]
+/// # Safety: call only from handler::handle's syscall path (current process set, ACL checked); user pointers validated inside.
 pub(super) unsafe fn sys_readdir(dir: u64, name_out: u64, len: u64) -> i64 {
+    // SAFETY: name_out/len passed user_ptr_ok and the per-page writable
+    // check_user_range above, so vfs::readdir writes only mapped, writable
+    // user pages.
     unsafe {
         let mut dir_buf = [0u8; 256];
         let dir_len = match parse_user_path(dir, &mut dir_buf) {
@@ -180,7 +190,9 @@ pub(super) unsafe fn sys_readdir(dir: u64, name_out: u64, len: u64) -> i64 {
 }
 
 #[inline(never)]
+/// # Safety: call only from handler::handle's syscall path (current process set, ACL checked); user pointers validated inside.
 pub(super) unsafe fn sys_write_fd(token: u64, buf: u64, len: u64) -> i64 {
+    // SAFETY: buf/len passed user_ptr_ok and the per-page readable check_user_range above, so vfs::write reads only mapped user pages.
     unsafe {
         if !user_ptr_ok(buf, len)
             || crate::mm::vmm::check_user_range(proc::current().root_pa, buf, len, false).is_err()
@@ -195,7 +207,10 @@ pub(super) unsafe fn sys_write_fd(token: u64, buf: u64, len: u64) -> i64 {
 }
 
 #[inline(never)]
+/// # Safety: call only from handler::handle's syscall path (current process set, ACL checked); user pointers validated inside.
 pub(super) unsafe fn sys_create(path: u64, mode: u64, _reserved: u64) -> i64 {
+    // SAFETY: parse_user_path validates the user path internally and copies
+    // it into a kernel stack buffer; only that kernel copy is used after.
     unsafe {
         let mut path_buf = [0u8; 256];
         let path_len = match parse_user_path(path, &mut path_buf) {
@@ -216,7 +231,10 @@ pub(super) unsafe fn sys_create(path: u64, mode: u64, _reserved: u64) -> i64 {
 }
 
 #[inline(never)]
+/// # Safety: call only from handler::handle's syscall path (current process set, ACL checked); user pointers validated inside.
 pub(super) unsafe fn sys_mkdir(path: u64) -> i64 {
+    // SAFETY: parse_user_path validates the user path internally and copies
+    // it into a kernel stack buffer; only that kernel copy is used after.
     unsafe {
         let mut path_buf = [0u8; 256];
         let path_len = match parse_user_path(path, &mut path_buf) {

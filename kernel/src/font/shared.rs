@@ -29,6 +29,12 @@ pub(crate) static mut G_UNI_MAP: [UniMapEntry; UNICODE_MAP_SIZE] = [UniMapEntry 
 }; UNICODE_MAP_SIZE];
 pub(crate) static mut G_UNI_MAP_LEN: usize = 0;
 
+/// # Safety
+///
+/// Caller must be the single-threaded boot font parser (font::init before
+/// secondary harts are released); G_UNI_MAP/G_UNI_MAP_LEN are only written
+/// on that path and merely read afterwards, and the len check keeps the
+/// write inside the fixed UNICODE_MAP_SIZE array.
 pub(crate) unsafe fn uni_map_insert(cp: u32, idx: u32) {
     unsafe {
         if G_UNI_MAP_LEN < UNICODE_MAP_SIZE {
@@ -42,18 +48,22 @@ pub(crate) unsafe fn uni_map_insert(cp: u32, idx: u32) {
 }
 
 pub fn font() -> Option<PcfFont> {
+    // SAFETY: G_FONT is plain-data (Copy Option<PcfFont>) written once by font::init during single-threaded boot, read-only afterwards.
     unsafe { G_FONT }
 }
 
 pub fn font_height() -> usize {
+    // SAFETY: G_FONT is set once during boot before secondary harts start; reading plain-data static mut has no concurrent writers.
     unsafe { G_FONT.map(|f| f.height as usize).unwrap_or(FONT_H) }
 }
 
 pub fn font_width() -> usize {
+    // SAFETY: G_FONT is set once during boot before secondary harts start; reading plain-data static mut has no concurrent writes.
     unsafe { G_FONT.map(|f| f.width as usize).unwrap_or(FONT_W) }
 }
 
 pub fn font_charsize() -> usize {
+    // SAFETY: G_FONT is set once during boot before secondary harts start; reading plain-data static mut has no concurrent writes.
     unsafe {
         G_FONT
             .map(|f| f.charsize as usize)

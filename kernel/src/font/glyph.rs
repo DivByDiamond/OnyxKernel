@@ -11,11 +11,13 @@ pub struct GlyphData {
 
 pub fn glyph_for_unicode(cp: u32) -> Option<u32> {
     if cp < 256 {
+        // SAFETY: G_FONT is plain data set once by font::init during boot, read-only afterwards.
         let f = unsafe { G_FONT? };
         if cp < f.num_glyphs {
             return Some(cp);
         }
     }
+    // SAFETY: G_UNI_MAP/G_UNI_MAP_LEN are set once by the boot font parser; iterating .take(G_UNI_MAP_LEN) stays inside the fixed array.
     unsafe {
         for entry in G_UNI_MAP.iter().take(G_UNI_MAP_LEN) {
             if entry.codepoint == cp {
@@ -27,6 +29,7 @@ pub fn glyph_for_unicode(cp: u32) -> Option<u32> {
 }
 
 pub fn glyph_bitmap(c: u8) -> &'static [u8; FONT_GLYPH_BYTES] {
+    // SAFETY: G_FONT is set once during boot; idx is clamped to num_glyphs-1 and both parsers validate that the glyph area fits the blob, so `ptr` stays inside the loaded PSF data (readers consume height <= FONT_GLYPH_BYTES rows).
     unsafe {
         if let Some(f) = G_FONT {
             let idx = (c as u32).min(f.num_glyphs - 1) as usize;
@@ -41,6 +44,7 @@ pub fn glyph_bitmap(c: u8) -> &'static [u8; FONT_GLYPH_BYTES] {
 
 pub fn glyph_bitmap_unicode(cp: u32) -> GlyphData {
     if let Some(idx) = glyph_for_unicode(cp) {
+        // SAFETY: G_FONT set once during boot; safe_idx clamped to num_glyphs-1 and the glyph area was validated by the parsers, so data stays inside the blob (consumers bounds-check reads against charsize).
         unsafe {
             if let Some(f) = G_FONT {
                 let safe_idx = (idx as usize).min(f.num_glyphs as usize - 1);
@@ -54,6 +58,7 @@ pub fn glyph_bitmap_unicode(cp: u32) -> GlyphData {
             }
         }
     }
+    // SAFETY: G_FONT set once during boot; fallback offset clamps b'?' to num_glyphs-1 inside the validated glyph area, and the BLANK_GLYPH arm touches only a static array.
     unsafe {
         if let Some(f) = G_FONT {
             let off = (b'?' as usize).min(f.num_glyphs as usize - 1) * f.charsize as usize;
@@ -75,6 +80,7 @@ pub fn glyph_bitmap_unicode(cp: u32) -> GlyphData {
 }
 
 pub fn glyph_for_cp(cp: u32) -> Option<u8> {
+    // SAFETY: G_FONT is set once during boot; the u16 table walk checks pos + 1 < unicode_len before each f.unicode.add read and caps glyph at num_glyphs.
     unsafe {
         let f = G_FONT?;
         if f.unicode.is_null() || f.unicode_len == 0 {

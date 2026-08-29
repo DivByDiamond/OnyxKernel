@@ -6,7 +6,15 @@ use crate::libfdt::{fdt, periph};
 use crate::module::{self, ModuleType};
 use onyx_core::fmt::Arg;
 
+/// # Safety
+///
+/// Boot-time device probe: reads MMIO at DTB-derived and hardcoded
+/// candidate bases. Must run single-threaded on the boot hart before
+/// secondary harts are released; candidate bases are magic-probed before
+/// any driver touches them.
 pub(crate) unsafe fn probe_devices() -> usize {
+    // SAFETY: single-threaded boot probe; bases validated via magic/device-id reads first, and the
+    // hardcoded QEMU fallbacks are gated off on OC2R/sedna where they are unmapped.
     unsafe {
         let mut ndevs = 0;
         let mut virtio_devs = [fdt::FdtMmio {
@@ -94,7 +102,13 @@ pub(crate) unsafe fn probe_devices() -> usize {
     }
 }
 
+/// # Safety
+///
+/// Boot-time peripheral probe, same contract as probe_devices: boot hart
+/// only, DTB-derived bases; the hardcoded USB bases are skipped on
+/// QEMU/OC2R where those MMIO regions are unmapped.
 pub(crate) unsafe fn probe_peripherals() {
+    // SAFETY: single-threaded boot probe; every MMIO base comes from the FDT or is platform-gated.
     unsafe {
         if let Some(rtc_info) = periph::find_rtc() {
             rtc::probe(rtc_info.base as usize);

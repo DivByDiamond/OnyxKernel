@@ -8,7 +8,14 @@ use onyx_core::formats::{
     ONYFS_BLOCK_SIZE, ONYFS_DIRECT_BLKS, ONYFS_DT_LNK, ONYFS_NAME_MAX, OnyfsInode,
 };
 
+/// # Safety
+///
+/// Caller must not invoke onyxfs operations concurrently from multiple harts
+/// (shared G_BUF scratch global, journal head, dirent slots). `dir_ino` must
+/// be a valid directory inode; `name` and `target` are length-checked in-line.
 pub unsafe fn symlink(dir_ino: u32, name: &[u8], target: &[u8]) -> KResult<u32> {
+    // SAFETY: single-threaded onyxfs exclusion (see # Safety); the target
+    // copy into G_BUF is clamped to ONYFS_BLOCK_SIZE.
     unsafe {
         if G_VERSION == ONYFS_V1 {
             return Err(Errno::NoSys);
@@ -54,7 +61,15 @@ pub unsafe fn symlink(dir_ino: u32, name: &[u8], target: &[u8]) -> KResult<u32> 
     }
 }
 
+/// # Safety
+///
+/// `buf` must be writable for `len` bytes and stay valid for the call (the
+/// syscall layer translates user buffers before reaching fs/); the copy is
+/// clamped to the inode size and `len`. Caller must not invoke onyxfs
+/// operations concurrently from multiple harts (shared G_BUF scratch global).
 pub unsafe fn readlink(ino: u32, buf: *mut u8, len: u32) -> KResult<u32> {
+    // SAFETY: see # Safety for buf validity; target_len is min(inode.size,
+    // len) and each byte written stays within both bounds.
     unsafe {
         if G_VERSION == ONYFS_V1 {
             return Err(Errno::NoSys);

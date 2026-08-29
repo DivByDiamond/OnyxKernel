@@ -7,7 +7,13 @@ use crate::module::{self, ModuleType};
 use crate::srv::{timer, trap};
 use onyx_core::fmt::Arg;
 
+/// # Safety
+///
+/// Boot bring-up ordering: must run once on the boot hart before any
+/// other hart or user code exists; performs FDT parse, PMM/VMM/heap
+/// init, scheduler runqueue init, trap/timer init and PLIC setup in order.
 pub(crate) unsafe fn early_init(fdt_addr: usize) {
+    // SAFETY: single boot-hart call; each subsystem init establishes its invariants before the next step consumes them.
     unsafe {
         // Console address comes from the device tree. On QEMU-virt it is the
         // legacy 0x10000000, but on OC2R/sedna the UART may be allocated at a

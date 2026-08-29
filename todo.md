@@ -36,16 +36,39 @@
 ## ❌ Осталось сделать:
 
 ### Найдено 2026-08-29 (верификация SAFETY-комментариев):
-- [ ] xHCI init: количество scratchpad-буферов читается из HCSPARAMS1 (sparams1 >> 16),
-      что НЕ является spec-полем MaxScratchpad (HCSPARAMS2 bits [27:4]) — при
-      ненулевом настоящем MaxScratchpad указатели уйдут в слоты контекстов устройств.
-      На QEMU virt HCC_SPS=0, цикл не выполняется. Файл: drivers/bus/usb/xhci/init.rs.
-- [ ] virtio-blk: submit_and_wait требует сериализации (один запрос в полёте на очередь),
-      но цепочка вызовов fs/vfs/fd/rw.rs → fs/devfs/blk.rs не лочится — два harts могут
-      обслуживать чтение /dev/blkN одновременно (гонка desc/avail/used). Pre-existing.
-      Файл: drivers/virtio/virtio_req.rs.
-- [ ] SAFETY-комментарии, волна 2: fs/ (139), syscall/ (84), net/ (37), proc/ (60),
-      ipc/ (14), font/ (16), libfdt/ (30), srv/ (16) — ~420 блоков вне drivers/vmm/trap.
+- [x] xHCI init: MaxScratchpad читался из HCSPARAMS1 (MaxPorts!) → исправлено на
+      HCSPARAMS2: MSB[31:27]<<5 | LSB[8:4] (первая попытка с bits [27:4] была неверной —
+      поймал верификатор) + guard 1+i < max_slots+1 (xhci/init.rs). QEMU virt HCC_SPS=0.
+- [x] virtio-blk сериализация: per-device SpinLock G_QLOCK (drivers/virtio/mod.rs);
+      request() держит лок на весь жизненный цикл (copy-in, submit, poll, copy-out);
+      read_multi/write_multi не рекурсивны (лок берётся per-sector). API не изменён.
+- [x] font UAF (находка волны 2): srv load_font делал kfree буфера, на который
+      font::init оставил указатели (G_FONT.glyphs/unicode) → каждый рендер глифа
+      читал освобождённую память. Фикс: буфер намеренно не освобождается (leak
+      ограничен размером шрифта, blob живёт до конца работы ядра).
+- [x] SAFETY-комментарии, волна 2: fs/, syscall/, net/, proc/, ipc/, font/, libfdt/,
+      srv/ — ~1200 строк комментариев, 0 непокрытых unsafe-блоков во всём крейте
+      (grep-аудит). ringbuf.rs ужат до 250 (компакт # Safety-доки).
+- [ ] **Реальные гонки/дыры, найденные при волне 2 (не фикшено — фиксить волне 3):**
+      1) fork: create_user ставит ребёнка Ready+enqueue ДО копирования fds/signal_handlers/
+         cwd/mmap_brk/tf (fs_sys3/extra/exec/fork.rs) — work-stealing харт может забрать
+         ребёнка с нулевыми fd.
+      2) sys_waitpid пишет state=Waiting вне proc_list_lock (exec/mod.rs:115) — формальный
+         data race; proc::dump_all тоже итерирует G_ALL_PROCS без лока.
+      3) sys_sched_setaffinity: p.affinity пишется без лока, by_pid может вернуть Exited
+         proc — узкое окно UAF с конкурентным waitpid.
+      4) Сеть: нет синхронизации между хартами вообще — UDP_SOCKS/CONNS/ARP cache/
+         IP_ID/NEXT_PORT/VX rings мутируются из syscall-пути (net_sys.rs) без лока.
+      5) procfs: G_PROCBUF — shared static mut scratch-буфер без лока (procfs/content.rs).
+      6) chown/fchown: нет проверки владельца (любой процесс может chown любой файл —
+         vfs/meta/chown.rs + owner.rs).
+      7) libfdt: walk читает токены за границей struct-block на кривом DTB; is_sedna/
+         is_qemu сканируют 256KiB за G_DTB без totalsize-бонда; cstr_at может уйти за
+         strings block (reader.rs/walk.rs/model.rs).
+      8) ip::send_packet вызывает net::poll() изнутри RX-dispatch (reentrancy) — учесть
+         при добавлении локов в сеть.
+      9) klog::panic_handler зовёт kdump без восстановления его SIE-контракта
+         (диагностика только volatile/CSR — косметика).
 
 ### Тесты:
 - [~] Осталось из плана покрытия: journal crash-recovery с реальным блочным I/O

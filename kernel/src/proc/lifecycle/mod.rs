@@ -25,7 +25,14 @@ pub use exit::*;
 ///
 /// Returns `true` when the caller dropped the LAST reference and must free
 /// the refcount cell and destroy the page table.
+///
+/// # Safety
+///
+/// Caller contract: `rc` must point at the shared 4-byte refcount cell
+/// (or be null); atomic RMW makes concurrent decrements safe.
 pub unsafe fn dec_root_refcount(rc: *mut u32) -> bool {
+    // SAFETY: rc is a valid aligned u32 cell per the caller contract (null
+    // checked); AtomicU32::from_ptr + fetch_sub makes concurrent drops race-free.
     unsafe {
         if rc.is_null() {
             return false;
@@ -34,7 +41,15 @@ pub unsafe fn dec_root_refcount(rc: *mut u32) -> bool {
     }
 }
 
+/// # Safety
+///
+/// Caller contract: early init / spawn path with SIE clear; the new node is
+/// linked into G_ALL_PROCS before any field of it is read by other harts
+/// (list is the publication point).
 pub(super) unsafe fn alloc_proc() -> KResult<*mut Proc> {
+    // SAFETY: p comes from a successful kmalloc of size_of::<Proc>(); every
+    // field is initialized below before the node becomes visible in
+    // G_ALL_PROCS, and ptr::write_bytes covers padding.
     unsafe {
         let p = heap::kmalloc(core::mem::size_of::<Proc>())? as *mut Proc;
         ptr::write_bytes(p as *mut u8, 0, core::mem::size_of::<Proc>());
@@ -90,7 +105,14 @@ pub(super) unsafe fn alloc_proc() -> KResult<*mut Proc> {
     }
 }
 
+/// # Safety
+///
+/// Caller contract: `p` must be a heap-allocated Proc linked in G_ALL_PROCS
+/// that is no longer referenced by any runqueue or as another hart's current.
 pub unsafe fn free_proc(p: *mut Proc) {
+    // SAFETY: list unlink runs under proc_list_lock (nodes are only
+    // traversed/mutated under it); after unlink, p is exclusively owned by
+    // this caller and kfree is safe.
     unsafe {
         proc_list_lock();
         if G_ALL_PROCS == p {
@@ -109,7 +131,15 @@ pub unsafe fn free_proc(p: *mut Proc) {
     }
 }
 
+/// # Safety
+///
+/// Caller contract: boot/init path that drops this hart into the first user
+/// process (see srv/main/init.rs); called before user processes exist, so
+/// the unlocked G_ALL_PROCS scan sees a stable list.
 pub unsafe fn enter_user(pid: u32) -> ! {
+    // SAFETY: unlocked G_ALL_PROCS scan is fine per the caller contract
+    // (single-hart boot, list not yet concurrently mutated); the found node
+    // is a live heap Proc this hart then owns as current.
     unsafe {
         crate::srv::klog::debug_mark(b'U');
         let mut p = G_ALL_PROCS;
@@ -134,6 +164,9 @@ pub unsafe fn enter_user(pid: u32) -> ! {
 }
 
 pub fn count() -> usize {
+    // SAFETY: debug/stat traversal of G_ALL_PROCS (procfs, kdump). Caller
+    // contract: best-effort count from diagnostic contexts; unlike
+    // limits::live_proc_count this path does NOT take proc_list_lock.
     unsafe {
         let mut n = 0;
         let mut cur = G_ALL_PROCS;

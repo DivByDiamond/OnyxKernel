@@ -27,7 +27,16 @@ pub(super) const SNAPSHOT_SLOT_BLKS: u32 = 2;
 /// (inode-table + data-bitmap + used data blocks), RLE-compress each block,
 /// and store the compressed data in the snapshot area. Also writes a
 /// `SnapshotMeta` record and bumps `snapshot_count`. Returns the new ID.
+///
+/// # Safety
+///
+/// Caller must not invoke onyxfs operations concurrently from multiple harts:
+/// this reads/writes the shared G_BUF scratch global and mutates
+/// G_SB.snapshot_count non-atomically. `name` is truncated to 32 bytes.
 pub unsafe fn snapshot_create(name: &[u8]) -> KResult<u32> {
+    // SAFETY: single-threaded onyxfs exclusion (see # Safety); blocks list is
+    // capped at SNAPSHOT_SLOTS, rle_compress is bounds-checked, and the
+    // meta offset is validated against the block size before the write.
     unsafe {
         let sb_ptr = &raw const G_SB;
         if (*sb_ptr).snapshot_area_start == 0 || (*sb_ptr).feature_flags & ONYFS_FEAT_SNAPSHOTS == 0

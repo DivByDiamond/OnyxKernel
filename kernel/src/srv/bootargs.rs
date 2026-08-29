@@ -51,6 +51,8 @@ pub fn init() {
     }
     let mut len = 0usize;
     let mut src = [0u8; BUF_LEN];
+    // SAFETY: PARSED.swap above admits exactly one caller; the FDT walk only reads the
+    // boot DTB into a local buffer, and parse() runs before any consumer or other hart.
     unsafe {
         crate::libfdt::fdt::walk(&mut |name, props: &[(u32, &[u8])]| {
             if name != "chosen" {
@@ -75,6 +77,7 @@ pub fn init() {
 /// Caller must hold exclusive access to the statics (init runs once, before
 /// secondary harts start logging).
 unsafe fn parse(src: &[u8]) {
+    // SAFETY: per the contract above -- exclusive boot-time access; bounds checks (MAX_ENTRIES, BUF_LEN) precede every write.
     unsafe {
         let mut i = 0usize;
         while i < src.len() {
@@ -119,6 +122,8 @@ unsafe fn parse(src: &[u8]) {
 /// Looks up `key` in the parsed command line. Returns the value slice for
 /// `key=value`, an empty slice for a bare `key`, or `None` when absent.
 pub fn get(key: &[u8]) -> Option<&'static [u8]> {
+    // SAFETY: read-only view of statics written once at boot (init is PARSED-gated) before
+    // secondary harts start; no concurrent writer exists afterwards.
     unsafe {
         let buf = &BUF;
         let n = N_ENTRIES;

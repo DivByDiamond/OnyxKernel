@@ -3,7 +3,14 @@ use super::super::{G_BUF, G_SB, read_block, write_block};
 use onyx_core::errno::{Errno, KResult};
 use onyx_core::formats::ONYFS_BLOCK_SIZE;
 
+/// # Safety
+///
+/// Caller must not invoke onyxfs allocation from multiple harts concurrently:
+/// this mutates the module-global G_BUF scratch block and reads G_SB (set by
+/// mount()). Bit indices stay in range by construction (scan of one block).
 pub unsafe fn alloc_data_block() -> KResult<u32> {
+    // SAFETY: single-threaded onyxfs exclusion for G_BUF/G_SB (see # Safety);
+    // byte/bit indices are bounded by the 0..ONYFS_BLOCK_SIZE scan loops.
     unsafe {
         let bm_blk = (G_SB).data_bitmap_start;
         let pb = &raw mut G_BUF;
@@ -26,7 +33,14 @@ pub unsafe fn alloc_data_block() -> KResult<u32> {
     }
 }
 
+/// # Safety
+///
+/// Same single-threaded onyxfs exclusion contract as `alloc_data_block`.
+/// `blk_num` is bounds-checked against the data region and the single-block
+/// bitmap capacity before any write below.
 pub unsafe fn free_data_block(blk_num: u32) -> KResult<()> {
+    // SAFETY: see # Safety; blk_num has been validated (>= data_start, bit
+    // index < ONYFS_BLOCK_SIZE*8) so byte_idx/bit are in range for G_BUF.
     unsafe {
         let bm_blk = (G_SB).data_bitmap_start;
         let data_start = (G_SB).data_blocks_start;

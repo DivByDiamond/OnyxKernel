@@ -8,7 +8,14 @@ use crate::syscall::abi::{CLOCK_MONOTONIC, CLOCK_REALTIME};
 
 /// Copyout helper: validate + copy a fixed 16-byte `{u64, u64}` struct to
 /// user memory, re-translating across page boundaries.
+/// # Safety
+///
+/// Caller must be on the syscall path with a live current-process root_pa;
+/// `out_va` is an untrusted user address validated here before any write.
 unsafe fn put_time_pair(out_va: u64, a: u64, b: u64) -> i64 {
+    // SAFETY: out_va passed user_ptr_ok (16 bytes) above and copy_to_user
+    // re-validates each page as a writable user mapping before writing the
+    // 16-byte stack pair.
     unsafe {
         if !user_ptr_ok(out_va, 16) {
             return Errno::Fault.as_i64();
@@ -26,14 +33,28 @@ unsafe fn put_time_pair(out_va: u64, a: u64, b: u64) -> i64 {
     }
 }
 
+/// # Safety
+///
+/// Call only from the syscall path with a current process set; `tv` is
+/// validated inside put_time_pair before any write.
 pub unsafe fn sys_gettimeofday(tv: u64) -> i64 {
+    // SAFETY: the only unsafe operation is put_time_pair, which validates
+    // `tv` (range + per-page mapping) internally; uptime_us is a safe timer
+    // read.
     unsafe {
         let us = crate::srv::timer::uptime_us();
         put_time_pair(tv, us / 1_000_000, us % 1_000_000)
     }
 }
 
+/// # Safety
+///
+/// Call only from handler::handle's syscall path: current process set, ACL
+/// checked; `path` and `times` are validated inside before use.
 pub unsafe fn sys_utimens(path: u64, times: u64) -> i64 {
+    // SAFETY: parse_user_path validates the path internally; the 16-byte
+    // times range passed user_ptr_ok above and copy_from_user re-validates
+    // each page before reading into the kernel stack array.
     unsafe {
         let mut path_buf = [0u8; 256];
         let path_len = match parse_user_path(path, &mut path_buf) {
@@ -72,7 +93,15 @@ pub unsafe fn sys_utimens(path: u64, times: u64) -> i64 {
 /// req.tv_nsec` nanoseconds have elapsed. The old implementation busy-looped
 /// with `set_need_resched`, which burnt CPU; this version yields properly
 /// while still polling the timer tick counter (`timer::jiffies`).
+/// # Safety
+///
+/// Call only from the syscall path with a current process set; `req` is
+/// validated inside before use and `_rem` is never written.
 pub unsafe fn sys_nanosleep(req: u64, _rem: u64) -> i64 {
+    // SAFETY: the 16-byte req range passed user_ptr_ok above and
+    // copy_from_user re-validates each page before reading into the kernel
+    // stack array; the `wfi` asm only idles the hart until the next
+    // interrupt and touches no memory.
     unsafe {
         if !user_ptr_ok(req, 16) {
             return Errno::Fault.as_i64();
@@ -109,7 +138,14 @@ pub unsafe fn sys_nanosleep(req: u64, _rem: u64) -> i64 {
 /// clock_gettime(clk_id, *ts) — POSIX clock query. Fills `ts` with
 /// `{tv_sec, tv_nsec}`. CLOCK_REALTIME and CLOCK_MONOTONIC both return the
 /// kernel uptime for now (no RTC synchronization yet).
+/// # Safety
+///
+/// Call only from the syscall path with a current process set; `ts` is
+/// validated inside before any write.
 pub unsafe fn sys_clock_gettime(clk_id: u64, ts: u64) -> i64 {
+    // SAFETY: the only unsafe operation is put_time_pair, which validates
+    // `ts` (range + per-page mapping) internally; uptime_us is a safe timer
+    // read.
     unsafe {
         if !user_ptr_ok(ts, 16) {
             return Errno::Fault.as_i64();
@@ -126,7 +162,13 @@ pub unsafe fn sys_clock_gettime(clk_id: u64, ts: u64) -> i64 {
 
 /// clock_getres(clk_id, *res) — resolution of the given clock. OnyxKernel's
 /// timer ticks at 100 Hz (10 ms), so we report 10 ms for both clocks.
+/// # Safety
+///
+/// Call only from the syscall path with a current process set; `res` is
+/// validated inside before any write.
 pub unsafe fn sys_clock_getres(clk_id: u64, res: u64) -> i64 {
+    // SAFETY: the only unsafe operation is put_time_pair, which validates
+    // `res` (range + per-page mapping) internally.
     unsafe {
         if !user_ptr_ok(res, 16) {
             return Errno::Fault.as_i64();

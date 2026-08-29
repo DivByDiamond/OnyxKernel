@@ -27,7 +27,16 @@ fn protected_mask() -> u32 {
     (1u32 << SIG_KILL) | (1u32 << SIG_STOP)
 }
 
+/// # Safety
+///
+/// Caller contract: kernel context (syscall/trap path, SIE clear); must NOT
+/// already hold proc_list_lock (by_pid takes it internally); the target may
+/// be on another hart; pending_signals is a single OR-set flag.
 pub unsafe fn signal_send(pid: u32, signal: u32) -> KResult<()> {
+    // SAFETY: by_pid() takes proc_list_lock for the lookup (globals.rs
+    // contract); the returned node stays valid until reaped (kfree only
+    // after unlink under that lock), so the field updates below are on a
+    // live node. The wake path follows the rq_lock discipline.
     unsafe {
         if signal == 0 || signal >= 32 {
             return Err(Errno::Inval);
@@ -50,7 +59,15 @@ pub unsafe fn signal_send(pid: u32, signal: u32) -> KResult<()> {
 /// kill anything. SIGINT is catchable/blockable like POSIX (only SIG_KILL and
 /// SIG_STOP are protected); with no user handler installed, signal_check's
 /// default path terminates the target with code 128+SIGINT.
+///
+/// # Safety
+///
+/// Caller contract: syscall/trap context with SIE clear; may be called
+/// from any hart (by_pid takes proc_list_lock internally).
 pub unsafe fn signal_foreground(signal: u32) -> KResult<()> {
+    // SAFETY: reads G_FG_PID (atomic acquire) then delegates to
+    // signal_send, whose own caller contract applies; a stale/None pid is
+    // handled as a no-op above.
     unsafe {
         if signal == 0 || signal >= 32 {
             return Err(Errno::Inval);
@@ -66,7 +83,16 @@ pub unsafe fn signal_foreground(signal: u32) -> KResult<()> {
     }
 }
 
+/// # Safety
+///
+/// Caller contract: syscall context of the calling process (current() is
+/// this hart's process); act_ptr/oldact_ptr are user pointers already
+/// validated as in-range by the syscall layer.
 pub unsafe fn sigaction(signum: u32, act_ptr: u64, oldact_ptr: u64) -> KResult<()> {
+    // SAFETY: user pointers are range-checked by the syscall layer and
+    // re-translated through the caller's own root table (translate_user /
+    // translate_user_write) before each write; the Proc is this hart's
+    // current process, only mutated by its own context.
     unsafe {
         if signum == 0 || signum >= 32 {
             return Err(Errno::Inval);
@@ -103,7 +129,14 @@ pub unsafe fn sigaction(signum: u32, act_ptr: u64, oldact_ptr: u64) -> KResult<(
     }
 }
 
+/// # Safety
+///
+/// Caller contract: syscall context of the calling process; set_ptr /
+/// oldset_ptr are user pointers validated as in-range by the syscall layer.
 pub unsafe fn sigprocmask(how: u32, set_ptr: u64, oldset_ptr: u64) -> KResult<()> {
+    // SAFETY: user pointers are range-checked by the syscall layer and
+    // re-translated through the caller's own root table before access;
+    // the Proc is this hart's own current process.
     unsafe {
         let p = crate::proc::current();
         let user_root = p.root_pa;

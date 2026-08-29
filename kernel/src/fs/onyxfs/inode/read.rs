@@ -5,6 +5,9 @@ use onyx_core::errno::{Errno, KResult};
 use onyx_core::formats::{ONYFS_BLOCK_SIZE, ONYFS_DIRECT_BLKS, OnyfsInode};
 
 pub unsafe fn read_inode(ino: u32, out: &mut OnyfsInode) -> KResult<()> {
+    // SAFETY: single-threaded onyxfs exclusion for the G_BUF scratch global
+    // (caller contract); ino is validated (nonzero, inside the inode table)
+    // and slot offsets are bounds-checked before every slice of G_BUF.
     unsafe {
         // Bug (fs SERIOUS #10): bounds-check the inode number. A bogus ino
         // (e.g. 0, or > max inodes) would compute a blk/slot that reads
@@ -75,7 +78,14 @@ pub unsafe fn read_inode(ino: u32, out: &mut OnyfsInode) -> KResult<()> {
     }
 }
 
+/// # Safety
+///
+/// Caller must not invoke onyxfs operations concurrently from multiple harts.
+/// `ino` must be a valid inode number (validated inside read_inode); `out`
+/// is a caller-owned writable OnyfsStat.
 pub unsafe fn stat(ino: u32, out: &mut OnyfsStat) -> KResult<()> {
+    // SAFETY: only writes through the caller-provided `out` reference and
+    // delegates to read_inode, whose contract covers G_BUF access.
     unsafe {
         let mut inode = OnyfsInode {
             mode: 0,

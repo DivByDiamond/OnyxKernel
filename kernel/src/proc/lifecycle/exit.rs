@@ -9,7 +9,15 @@ use crate::{
     proc::scheduler::{rq_lock, rq_unlock},
 };
 
+/// # Safety
+///
+/// Caller contract: called from the exiting process's own context (trap
+/// path / signal default action); `pid` identifies a live process.
 pub unsafe fn exit(pid: u32, code: i32) {
+    // SAFETY: runqueue removals hold each queue's rq_lock; the Exited
+    // publish + parent wake + orphan re-parent all run under proc_list_lock
+    // (B4 fix, comment below); by_pid takes proc_list_lock itself and the
+    // returned node stays valid until reaped.
     unsafe {
         if let Some(p) = by_pid(pid) {
             crate::kerr!(

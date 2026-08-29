@@ -4,6 +4,8 @@ use super::{
 };
 
 pub fn current_pid() -> u32 {
+    // SAFETY: reads this hart's own G_HART_CURRENT slot (written only by the
+    // owning hart's scheduler); non-null points at a live heap-allocated Proc.
     unsafe {
         let p = G_HART_CURRENT[hart_id()];
         if p.is_null() {
@@ -14,6 +16,7 @@ pub fn current_pid() -> u32 {
 }
 
 pub fn current_ring() -> u8 {
+    // SAFETY: same discipline as current_pid (own-hart slot, live Proc).
     unsafe {
         let p = G_HART_CURRENT[hart_id()];
         if p.is_null() {
@@ -24,20 +27,35 @@ pub fn current_ring() -> u8 {
 }
 
 pub fn current_opt() -> Option<&'static mut Proc> {
+    // SAFETY: own-hart slot; Some(&mut) is handed out only while the process
+    // is current on this hart and not yet freed by the reaper.
     unsafe {
         let p = G_HART_CURRENT[hart_id()];
         if p.is_null() { None } else { Some(&mut *p) }
     }
 }
 
+/// # Safety
+///
+/// Caller contract: must run in process context on this hart (current is
+/// non-null); returns a reference to the per-hart current Proc, valid only
+/// while it stays current on this hart.
 pub unsafe fn current() -> &'static mut Proc {
+    // SAFETY: caller contract guarantees the slot is non-null and points at
+    // a live heap-allocated Proc that stays current on this hart.
     unsafe {
         let p = G_HART_CURRENT[hart_id()];
         &mut *p
     }
 }
 
+/// # Safety
+///
+/// Caller contract: process context on this hart; writes only this
+/// process's own fixed-size cwd buffer.
 pub unsafe fn set_cwd(path: &[u8]) {
+    // SAFETY: current() is valid per the caller contract; copy length is
+    // clamped to the 256-byte cwd buffer (n <= 255 leaves room for NUL).
     unsafe {
         let p = current();
         let n = path.len().min(255);
@@ -48,6 +66,8 @@ pub unsafe fn set_cwd(path: &[u8]) {
 }
 
 pub fn cwd() -> &'static [u8] {
+    // SAFETY: same as current_pid; slice is bounded by cwd_len <= 255 inside
+    // the fixed 256-byte cwd array.
     unsafe {
         let p = current();
         &p.cwd[..p.cwd_len as usize]
@@ -62,8 +82,16 @@ pub fn cwd() -> &'static [u8] {
 /// traversal — mutate the fields per each caller's own locking discipline as
 /// before.
 ///
-/// Callers already holding `proc_list_lock` must use [`by_pid_unlocked`].
+/// callers already holding `proc_list_lock` must use [`by_pid_unlocked`].
+///
+/// # Safety
+///
+/// Caller contract: must NOT already hold `proc_list_lock` (self-deadlock);
+/// the returned reference stays valid until the process is reaped (kfree
+/// under proc_list_lock in wait()).
 pub unsafe fn by_pid(pid: u32) -> Option<&'static mut Proc> {
+    // SAFETY: list traversal happens entirely under proc_list_lock taken
+    // here; nodes are unlinked/freed only while holding the same lock.
     unsafe {
         super::globals::proc_list_lock();
         let found = by_pid_unlocked(pid);
@@ -75,7 +103,14 @@ pub unsafe fn by_pid(pid: u32) -> Option<&'static mut Proc> {
 /// Unlocked variant of [`by_pid`] for contexts that already hold
 /// `proc_list_lock` (e.g. the exit path's burst state update). Calling this
 /// without the lock held is a data-race bug against concurrent list mutation.
+///
+/// # Safety
+///
+/// Caller contract: proc_list_lock MUST already be held; otherwise the
+/// traversal races with concurrent unlink/reap of list nodes.
 pub unsafe fn by_pid_unlocked(pid: u32) -> Option<&'static mut Proc> {
+    // SAFETY: per the caller contract, proc_list_lock is held, excluding
+    // concurrent list mutation while nodes are dereferenced.
     unsafe {
         let mut cur = G_ALL_PROCS;
         while !cur.is_null() {
@@ -89,6 +124,10 @@ pub unsafe fn by_pid_unlocked(pid: u32) -> Option<&'static mut Proc> {
 }
 
 pub fn dump_all<W: onyx_core::fmt::Write>(w: &mut W) {
+    // SAFETY: debug traversal of G_ALL_PROCS. Caller contract: this is
+    // best-effort diagnostics (klog dump path) run from a context where the
+    // process list is not being concurrently reaped; unlike live_proc_count
+    // in limits.rs it does NOT take proc_list_lock.
     unsafe {
         let mut cur = G_ALL_PROCS;
         while !cur.is_null() {

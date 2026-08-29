@@ -1,7 +1,12 @@
 use crate::fs::vfs::{FdToken, PERM_SEEK, fd_check_perm, fd_get, fd_update_pos};
 use onyx_core::errno::{Errno, KResult};
 
+/// # Safety
+///
+/// Caller contract: token must be a live fd token of the calling context.
 pub unsafe fn lseek(token: FdToken, off: i64, whence: u32) -> KResult<u32> {
+    // SAFETY: fd_check_perm validates idx and epoch; new_pos is range-checked
+    // to 0..=u32::MAX before the fd_update_pos write.
     unsafe {
         let idx = fd_check_perm(token, PERM_SEEK)?;
         let fd = fd_get(idx);

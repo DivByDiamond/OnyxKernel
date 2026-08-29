@@ -8,7 +8,15 @@ use onyx_core::errno::Errno;
 use onyx_core::fmt::Arg;
 
 #[inline(never)]
+/// # Safety
+///
+/// Call only from handler::handle's syscall path: current process set, ACL
+/// checked; `path` is validated inside before use and no other user memory
+/// is dereferenced.
 pub unsafe fn sys_open(path: u64, flags: u64, mode: u64) -> i64 {
+    // SAFETY: parse_user_path validates the user path (range + per-page
+    // mapping) internally and copies it into a kernel stack buffer; only
+    // that kernel copy is used for all vfs calls below.
     unsafe {
         let mut path_buf = [0u8; 256];
         let path_len = match parse_user_path(path, &mut path_buf) {

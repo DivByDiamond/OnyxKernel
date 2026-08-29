@@ -34,6 +34,12 @@ pub fn parse_name(name: &[u8]) -> Option<usize> {
     Some(n)
 }
 
+/// # Safety
+///
+/// Caller contract: `buf` must be writable for `len` bytes - for user
+/// callers the syscall layer validated and translated the range
+/// (user_ptr_ok/check_user_range); dev_idx is re-checked inside against
+/// virtio::count().
 pub unsafe fn read(dev_idx: usize, buf: *mut u8, offset: u32, len: u32) -> KResult<u32> {
     if dev_idx >= virtio::count() {
         return Err(Errno::NoEnt);
@@ -41,10 +47,17 @@ pub unsafe fn read(dev_idx: usize, buf: *mut u8, offset: u32, len: u32) -> KResu
     let Some((lba, n_sectors)) = sector_range(offset, len)? else {
         return Ok(0);
     };
+    // SAFETY: dev_idx is bounds-checked above (< virtio::count()); buf
+    // covers n_sectors * 512 bytes per the read_multi contract.
     unsafe { virtio_req::read_multi(dev_idx, lba, n_sectors, buf)? };
     Ok(n_sectors * 512)
 }
 
+/// # Safety
+///
+/// Caller contract: `buf` must be readable for `len` bytes - for user
+/// callers the syscall layer validated and translated the range (user_ptr_ok);
+/// dev_idx is re-checked inside against virtio::count().
 pub unsafe fn write(dev_idx: usize, buf: *const u8, offset: u32, len: u32) -> KResult<u32> {
     if dev_idx >= virtio::count() {
         return Err(Errno::NoEnt);
@@ -52,6 +65,8 @@ pub unsafe fn write(dev_idx: usize, buf: *const u8, offset: u32, len: u32) -> KR
     let Some((lba, n_sectors)) = sector_range(offset, len)? else {
         return Ok(0);
     };
+    // SAFETY: dev_idx is bounds-checked above (< virtio::count()); buf
+    // covers n_sectors * 512 bytes per the write_multi contract.
     unsafe { virtio_req::write_multi(dev_idx, lba, n_sectors, buf)? };
     Ok(n_sectors * 512)
 }

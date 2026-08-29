@@ -1,4 +1,5 @@
 use crate::arch::mmio::Mmio;
+use crate::sync::SpinLock;
 use core::ptr;
 
 pub const VIRTIO_MAX_DEVS: usize = 8;
@@ -107,6 +108,13 @@ pub(crate) static mut G_DEVS: [VirtioBlkDev; VIRTIO_MAX_DEVS] = [VirtioBlkDev {
     req_buf: ptr::null_mut(),
 }; VIRTIO_MAX_DEVS];
 pub(crate) static mut G_NDEVS: usize = 0;
+
+/// Per-device queue serialization for virtio-blk requests (audit fix):
+/// descriptor table, avail/used rings, `req_buf` and `last_used` are
+/// single-instance per device; concurrent harts must not interleave request
+/// lifecycles (see `virtio_req::request`). Index parallels `G_DEVS`.
+pub(crate) static G_QLOCK: [SpinLock; VIRTIO_MAX_DEVS] =
+    [const { SpinLock::new() }; VIRTIO_MAX_DEVS];
 
 /// # Safety
 ///

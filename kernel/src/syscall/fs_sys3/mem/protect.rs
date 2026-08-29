@@ -5,7 +5,14 @@ use onyx_core::errno::Errno;
 
 use super::brk::{page_align_up, user_range_ok};
 
+/// # Safety
+///
+/// Call only from handler::handle's syscall path: current process set, ACL
+/// checked; operates exclusively on the current process's own root table.
 pub unsafe fn sys_munmap(addr: u64, length: u64) -> i64 {
+    // SAFETY: addr/size passed user_range_ok ([USER_BASE, USER_TOP), no
+    // overflow) above, and vmm::unmap only touches the current process's
+    // own root table (p.root_pa satisfies the vmm translate contract).
     unsafe {
         if addr & 0xFFF != 0 || length == 0 {
             return Errno::Inval.as_i64();
@@ -25,7 +32,14 @@ pub unsafe fn sys_munmap(addr: u64, length: u64) -> i64 {
     }
 }
 
+/// # Safety
+///
+/// Call only from handler::handle's syscall path: current process set, ACL
+/// checked; operates exclusively on the current process's own root table.
 pub unsafe fn sys_mprotect(addr: u64, length: u64, prot: u64) -> i64 {
+    // SAFETY: map_one_pub is only invoked for VAs where translate_user
+    // resolved a live PTE_U user leaf in the current process's own root
+    // table, so kernel VAs (no PTE_U) return 0 and are never re-flagged.
     unsafe {
         if addr & 0xFFF != 0 || length == 0 {
             return Errno::Inval.as_i64();

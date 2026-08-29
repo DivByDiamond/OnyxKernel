@@ -27,8 +27,18 @@ use onyx_core::formats::{
 /// of `block_num`. Called BEFORE the actual `write_block` so that a crash
 /// between the journal append and the data write leaves a recoverable redo
 /// entry on disk. No-op if the filesystem has no journal configured.
+///
+/// # Safety
+///
+/// Caller must not invoke onyxfs operations concurrently from multiple harts:
+/// G_JOURNAL_HEAD is a non-atomic module global and two racing journal_log
+/// calls could overwrite each other's entries.
+/// NOTE: no FS-level lock exists; the VFS layer does not serialize callers.
 #[inline(never)]
 pub(super) unsafe fn journal_log(block_num: u32, data: &[u8; ONYFS_BLOCK_SIZE]) -> KResult<()> {
+    // SAFETY: single-threaded onyxfs exclusion (see # Safety); head is
+    // bounds-checked against journal_size and `data` is a fixed-size
+    // caller-owned block buffer.
     unsafe {
         let sb_ptr = &raw const G_SB;
         let journal_start = (*sb_ptr).journal_start;
@@ -67,8 +77,18 @@ pub(super) unsafe fn journal_log(block_num: u32, data: &[u8; ONYFS_BLOCK_SIZE]) 
 /// the old commit_end — silently corrupting the filesystem. Zeroing the
 /// entries after commit ensures the next transaction always starts with
 /// a clean slate on disk.
+///
+/// # Safety
+///
+/// Caller must not invoke onyxfs operations concurrently from multiple harts:
+/// G_JOURNAL_HEAD is a non-atomic module global and racing commits would
+/// interleave their zeroing writes.
+/// NOTE: no FS-level lock exists; the VFS layer does not serialize callers.
 #[inline(never)]
 pub(super) unsafe fn journal_commit() -> KResult<()> {
+    // SAFETY: single-threaded onyxfs exclusion (see # Safety); head is
+    // bounds-checked against journal_size and only fixed-size stack
+    // buffers are written.
     unsafe {
         let sb_ptr = &raw const G_SB;
         let journal_start = (*sb_ptr).journal_start;
@@ -108,7 +128,15 @@ pub(super) unsafe fn journal_commit() -> KResult<()> {
 /// re-applied to its target block (redo). Incomplete transactions (no
 /// `commit_end`) are discarded. The journal is then zeroed so future mounts
 /// start with a clean log.
+///
+/// # Safety
+///
+/// Must be called only from mount(), i.e. during single-threaded boot init
+/// before secondary harts are released, since it rewrites G_JOURNAL_HEAD and
+/// the journal area without a lock.
 pub unsafe fn journal_recover() -> KResult<()> {
+    // SAFETY: boot-time single-threaded exclusion (see # Safety); entry
+    // scanning is bounded by journal_size and buffers are fixed-size.
     unsafe {
         let sb_ptr = &raw const G_SB;
         let journal_start = (*sb_ptr).journal_start;

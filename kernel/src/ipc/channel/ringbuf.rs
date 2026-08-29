@@ -3,18 +3,16 @@ use onyx_core::errno::{Errno, KResult};
 use super::types::{CHAN_BUF_SIZE, CHAN_MAX, Channel, G_CHANNELS};
 use crate::arch::trap_frame::TrapFrame;
 
-/// Fill level of a ring: `head`/`tail` are monotonically increasing u32
-/// counters, so the wrapping difference is always correct.
+/// Fill level of a ring: counters are monotonically increasing, so the wrapping difference is always correct.
 fn ring_used(head: u32, tail: u32) -> u32 {
     tail.wrapping_sub(head)
 }
 
-/// Free space left in a ring.
+/// Free space left in a ring (buffer capacity minus used).
 fn ring_free(head: u32, tail: u32) -> u32 {
     CHAN_BUF_SIZE as u32 - ring_used(head, tail)
 }
 
-/// Copy as many bytes of `src` as fit, advancing `tail`; returns the count.
 fn ring_write(buf: &mut [u8; CHAN_BUF_SIZE], head: u32, tail: &mut u32, src: &[u8]) -> u32 {
     let n = (src.len() as u32).min(ring_free(head, *tail));
     let mut written = 0u32;
@@ -27,7 +25,6 @@ fn ring_write(buf: &mut [u8; CHAN_BUF_SIZE], head: u32, tail: &mut u32, src: &[u
     written
 }
 
-/// Read up to `dst.len()` bytes, advancing `head`; returns the count.
 fn ring_read(buf: &[u8; CHAN_BUF_SIZE], head: &mut u32, tail: u32, dst: &mut [u8]) -> u32 {
     let n = (dst.len() as u32).min(ring_used(*head, tail));
     let mut read = 0u32;
@@ -52,6 +49,7 @@ fn pid_allowed(ch: &Channel, pid: u32) -> bool {
     false
 }
 
+/// # Safety: caller must hold the channel spinlock owning `*wait_head`; `current()` must be the live Proc of the calling context (its state/wait_next are mutated under that lock).
 unsafe fn wait_enqueue(wait_head: &mut *mut crate::proc::Proc) {
     unsafe {
         let p = crate::proc::current() as *mut crate::proc::Proc;
@@ -61,6 +59,7 @@ unsafe fn wait_enqueue(wait_head: &mut *mut crate::proc::Proc) {
     }
 }
 
+/// # Safety: caller must hold the channel spinlock owning `*wait_head`; every pointer was enqueued by `wait_enqueue` and is still a valid Proc (waiters are only cleared here).
 unsafe fn wait_wake_all(wait_head: &mut *mut crate::proc::Proc) {
     unsafe {
         let mut cur = *wait_head;
@@ -74,6 +73,7 @@ unsafe fn wait_wake_all(wait_head: &mut *mut crate::proc::Proc) {
     }
 }
 
+/// # Safety: `buf` must point to `len` readable bytes; `tf`, if given, must be the caller's current trap frame for sched_yield; chan_id is bounds-checked against CHAN_MAX; ring/wait-list mutation runs under the channel spinlock, always released before sched_yield.
 pub unsafe fn send(
     chan_id: u32,
     buf: *const u8,
@@ -84,9 +84,7 @@ pub unsafe fn send(
         if chan_id as usize >= CHAN_MAX {
             return Err(Errno::Inval);
         }
-        // B5 fix: all state checks + ring mutation + sleep/wake decision happen
-        // under the per-channel spinlock. The lock is ALWAYS released before
-        // sched_yield — never hold a SpinLock across a context switch.
+        // B5 fix: state checks + ring mutation + wake decision under the per-channel spinlock; lock ALWAYS released before sched_yield.
         let ch = &mut G_CHANNELS[chan_id as usize];
         ch.lock.lock();
         if !ch.used || ch.closed {
@@ -127,6 +125,7 @@ pub unsafe fn send(
     }
 }
 
+/// # Safety: `buf` must point to `len` writable bytes; `tf`, if given, must be the caller's current trap frame for sched_yield; chan_id is bounds-checked against CHAN_MAX; ring/wait-list mutation runs under the channel spinlock, always released before sched_yield.
 pub unsafe fn recv(
     chan_id: u32,
     buf: *mut u8,
@@ -199,7 +198,7 @@ mod tests {
     fn test_ring_wraparound_and_partial_io() {
         let mut buf = [0u8; CHAN_BUF_SIZE];
         let (mut head, mut tail) = (0u32, 0u32);
-        // Push past the physical end of the buffer: indices must wrap.
+        // Indices must wrap past the physical end of the buffer.
         let n = CHAN_BUF_SIZE as u32;
         let src: alloc::vec::Vec<u8> = (0..5000u32).map(|i| (i * 7) as u8).collect();
         assert_eq!(ring_write(&mut buf, head, &mut tail, &src), n);
@@ -227,6 +226,7 @@ mod tests {
 
     #[test]
     fn test_send_recv_error_paths() {
+        // SAFETY: single-threaded host test; bad ids error before any G_CHANNELS deref, chan 0 re-zeroed after.
         unsafe {
             let one = [0x42u8];
             let n = CHAN_BUF_SIZE as u32;
@@ -236,7 +236,6 @@ mod tests {
             assert_eq!(recv(bad, drain.as_mut_ptr(), 1, None), Err(Errno::Inval));
             assert_eq!(send(0, one.as_ptr(), 1, None), Err(Errno::Pipe));
             assert_eq!(recv(0, drain.as_mut_ptr(), 1, None), Err(Errno::Pipe));
-            // Live channel owned by pid 0 (host current_pid()==0).
             G_CHANNELS[0] = Channel::zeroed();
             G_CHANNELS[0].used = true;
             let blob = alloc::vec![0x11u8; CHAN_BUF_SIZE];

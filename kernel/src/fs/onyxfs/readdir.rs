@@ -9,12 +9,21 @@ use onyx_core::formats::{ONYFS_DIRECT_BLKS, ONYFS_DT_DIR, ONYFS_NAME_MAX, OnyfsI
 /// Read a directory entry by index. Returns (inode, name_len, is_dir).
 /// Used by SYS_readdir and getdents64.
 /// Scans across all direct blocks, skipping zero-inode (deleted/unused) entries.
+///
+/// # Safety
+///
+/// `name_out` must be writable for `name_len` bytes and stay valid for the
+/// call (the syscall layer translates user buffers before reaching fs/);
+/// writes into it are capped at name_len - 1 plus a NUL. Caller must not
+/// invoke onyxfs operations concurrently from multiple harts (shared G_BUF).
 pub unsafe fn readdir_entry(
     dir_ino: u32,
     entry_idx: u32,
     name_out: *mut u8,
     name_len: usize,
 ) -> KResult<Option<u32>> {
+    // SAFETY: see # Safety for name_out validity; copy length is clamped to
+    // name_len - 1 and dirent slots are bounds-checked in parse_dirent.
     unsafe {
         let mut inode = OnyfsInode {
             mode: 0,

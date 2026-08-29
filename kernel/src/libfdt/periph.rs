@@ -8,6 +8,12 @@ use super::fdt::{FdtMmio, walk};
 use onyx_core::parser::be32;
 
 /// Match a `compatible` string list against any of `candidates`.
+///
+/// # Safety
+///
+/// No unsafe operations; the body only reads the `data` slice and the
+/// candidate list. Kept `unsafe` to match the discovery-API convention;
+/// `data` must be a valid slice as produced by the FDT walker.
 unsafe fn compat_matches(data: &[u8], candidates: &[&[u8]]) -> bool {
     let mut start = 0;
     while start < data.len() {
@@ -29,8 +35,15 @@ unsafe fn compat_matches(data: &[u8], candidates: &[&[u8]]) -> bool {
 /// Walk the tree and return the first MMIO node whose `compatible`
 /// matches any of `candidates`. `default_irq` is used when the node
 /// has no `interrupts` property.
+///
+/// # Safety
+///
+/// `fdt::init()` must have succeeded; must run once during single-threaded
+/// boot (before secondary harts start), since it reads global DTB state.
 unsafe fn find_mmio(candidates: &[&[u8]], default_irq: u32) -> Option<FdtMmio> {
     unsafe {
+        // SAFETY: caller contract: init() validated the DTB; walk only reads
+        // the magic-checked struct block single-threaded.
         let mut result: Option<FdtMmio> = None;
         walk(&mut |_name, props: &[(u32, &[u8])]| {
             let mut base = 0u64;
@@ -62,13 +75,23 @@ unsafe fn find_mmio(candidates: &[&[u8]], default_irq: u32) -> Option<FdtMmio> {
 }
 
 #[inline]
+/// # Safety
+///
+/// No unsafe operations; `data` must be a valid slice with `len >= 8`
+/// (the caller guards with `data.len() >= 8`).
 unsafe fn be64_pair(data: &[u8]) -> u64 {
     ((be32(&data[..4]) as u64) << 32) | (be32(&data[4..8]) as u64)
 }
 
 /// Find the first RTC node.
+///
+/// # Safety
+///
+/// `fdt::init()` must have succeeded; single-threaded boot-time call.
 pub unsafe fn find_rtc() -> Option<FdtMmio> {
     unsafe {
+        // SAFETY: caller contract: init() validated the DTB; find_mmio only
+        // reads the magic-checked struct block single-threaded.
         find_mmio(
             &[
                 b"google,goldfish-rtc",
@@ -82,8 +105,14 @@ pub unsafe fn find_rtc() -> Option<FdtMmio> {
 }
 
 /// Find the first GPIO controller.
+///
+/// # Safety
+///
+/// `fdt::init()` must have succeeded; single-threaded boot-time call.
 pub unsafe fn find_gpio() -> Option<FdtMmio> {
     unsafe {
+        // SAFETY: caller contract: init() validated the DTB; find_mmio only
+        // reads the magic-checked struct block single-threaded.
         find_mmio(
             &[
                 b"sifive,fu540-c000-gpio",
@@ -97,8 +126,14 @@ pub unsafe fn find_gpio() -> Option<FdtMmio> {
 }
 
 /// Find the first I2C controller.
+///
+/// # Safety
+///
+/// `fdt::init()` must have succeeded; single-threaded boot-time call.
 pub unsafe fn find_i2c() -> Option<FdtMmio> {
     unsafe {
+        // SAFETY: caller contract: init() validated the DTB; find_mmio only
+        // reads the magic-checked struct block single-threaded.
         find_mmio(
             &[
                 b"sifive,fu540-c000-i2c",
@@ -112,8 +147,14 @@ pub unsafe fn find_i2c() -> Option<FdtMmio> {
 }
 
 /// Find the first SPI controller.
+///
+/// # Safety
+///
+/// `fdt::init()` must have succeeded; single-threaded boot-time call.
 pub unsafe fn find_spi() -> Option<FdtMmio> {
     unsafe {
+        // SAFETY: caller contract: init() validated the DTB; find_mmio only
+        // reads the magic-checked struct block single-threaded.
         find_mmio(
             &[
                 b"sifive,fu540-c000-spi",
@@ -127,8 +168,14 @@ pub unsafe fn find_spi() -> Option<FdtMmio> {
 }
 
 /// Find the first watchdog.
+///
+/// # Safety
+///
+/// `fdt::init()` must have succeeded; single-threaded boot-time call.
 pub unsafe fn find_watchdog() -> Option<FdtMmio> {
     unsafe {
+        // SAFETY: caller contract: init() validated the DTB; find_mmio only
+        // reads the magic-checked struct block single-threaded.
         find_mmio(
             &[b"sifive,fu540-c000-wdt", b"sifive,wdt", b"snps,dw-wdt"],
             6,

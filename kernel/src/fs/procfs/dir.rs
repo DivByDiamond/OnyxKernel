@@ -2,6 +2,10 @@ use onyx_core::errno::{Errno, KResult};
 
 use super::consts::*;
 
+/// # Safety
+///
+/// No unsafe operations inside; pure name-to-inode match. Kept unsafe for
+/// signature symmetry with the other procfs entry points.
 pub unsafe fn lookup(name: &[u8]) -> KResult<u32> {
     match name {
         b"" | b"/" | b"." => Ok(PROCFS_ROOT_INO),
@@ -16,6 +20,11 @@ pub unsafe fn lookup(name: &[u8]) -> KResult<u32> {
     }
 }
 
+/// # Safety
+///
+/// Caller contract: name_out must be writable for name_len bytes (validated
+/// and translated by the syscall layer for user callers); idx is a plain
+/// cursor rejected for values past the table.
 pub unsafe fn readdir_entry(idx: u32, name_out: *mut u8, name_len: usize) -> Option<u32> {
     let (name, ino): (&[u8], u32) = match idx {
         0 => (b"." as &[u8], PROCFS_ROOT_INO),
@@ -30,6 +39,8 @@ pub unsafe fn readdir_entry(idx: u32, name_out: *mut u8, name_len: usize) -> Opt
         _ => return None,
     };
     let n = name.len().min(name_len.saturating_sub(1));
+    // SAFETY: n = min(name.len(), name_len - 1) < name_len, so the copy and
+    // the NUL at index n both stay within name_out's name_len bytes.
     unsafe {
         core::ptr::copy_nonoverlapping(name.as_ptr(), name_out, n);
         *name_out.add(n) = 0;

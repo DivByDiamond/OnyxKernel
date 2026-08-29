@@ -10,7 +10,17 @@ use super::fat::{alloc_cluster, extend_chain, free_chain, write_cluster_sector};
 /// The file's first cluster is `first_cluster` (must already exist —
 /// if 0, a new chain is allocated). Extends the chain as needed.
 /// Returns the number of bytes written.
+///
+/// # Safety
+///
+/// `buf` must point to `len` bytes of valid, initialized memory that stays
+/// valid for the duration of the call (the syscall layer translates user
+/// buffers before reaching fs/). Caller must not invoke FAT32 I/O
+/// concurrently from multiple harts (module globals are unsynchronized).
 pub unsafe fn write(first_cluster: u32, buf: *const u8, off: u32, len: u32) -> KResult<u32> {
+    // SAFETY: see # Safety for buf validity; total_written only advances by
+    // clamped chunk sizes so writes stay within the caller's buffer, and
+    // cluster numbers are validated on every FAT hop.
     unsafe {
         if len == 0 {
             return Ok(0);
@@ -90,7 +100,16 @@ pub unsafe fn write(first_cluster: u32, buf: *const u8, off: u32, len: u32) -> K
 /// Truncate a file's cluster chain to release clusters past `keep_bytes`.
 /// The dirent's size field is NOT updated here — caller's responsibility
 /// (VFS layer does this via stat / setattr).
+///
+/// # Safety
+///
+/// Caller must not invoke FAT32 I/O concurrently from multiple harts;
+/// `first_cluster` must be a valid data cluster (0 or invalid values are
+/// rejected below), and every FAT hop is validated via is_valid_cluster.
 pub unsafe fn truncate_chain(first_cluster: u32, keep_bytes: u64) -> KResult<()> {
+    // SAFETY: single-threaded FAT32 exclusion (see # Safety); all raw access
+    // is delegated to fat_entry/free_chain/write_fat_entry under validated
+    // cluster numbers.
     unsafe {
         if first_cluster == 0 || !is_valid_cluster(first_cluster) {
             return Ok(());

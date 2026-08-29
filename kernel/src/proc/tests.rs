@@ -3,6 +3,10 @@ use crate::arch::trap_frame::TrapFrame;
 
 #[test]
 fn test_alloc_pid_unique() {
+    // SAFETY: host test; resets and exercises the process globals directly.
+    // Caller contract: single-threaded access - but the host harness runs
+    // #[test] fns in parallel, and both alloc_pid tests touch G_NEXT_PID
+    // and G_ALL_PROCS (pre-existing flakiness hazard, see report note).
     unsafe {
         super::process::init();
         let pid1 = alloc_pid();
@@ -15,6 +19,8 @@ fn test_alloc_pid_unique() {
 
 #[test]
 fn test_alloc_pid_increment() {
+    // SAFETY: same host-test contract as test_alloc_pid_unique (parallel
+    // #[test] fns share the process globals (pre-existing flakiness).
     unsafe {
         super::process::init();
         let base = alloc_pid();

@@ -6,6 +6,11 @@ use onyx_core::formats::{ONYFS_BLOCK_SIZE, ONYFS_DIRECT_BLKS, OnyfsInode};
 
 #[inline(never)]
 pub unsafe fn read(ino: u32, buf: *mut u8, off: u32, len: u32) -> KResult<u32> {
+    // SAFETY: buf must be writable for len bytes and stay valid for the call;
+    // the syscall layer translates user buffers before reaching fs/. Caller
+    // must not invoke onyxfs operations concurrently from multiple harts
+    // (shared G_BUF scratch global). Chunk sizes are clamped to the block
+    // size, remaining length, and the validated inode size.
     unsafe {
         let mut inode = OnyfsInode {
             mode: 0,

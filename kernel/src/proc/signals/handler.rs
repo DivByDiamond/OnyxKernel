@@ -7,7 +7,14 @@ use super::protected_mask;
 use super::{G_NEED_RESCHED, ProcState, current_for_hart, hart_id};
 use crate::proc::lifecycle::exit;
 
+/// # Safety
+///
+/// Caller contract: trap-return context of the process invoking sigreturn
+/// on this hart; tf is that process's current user trap frame.
 pub unsafe fn sigreturn(tf: &mut TrapFrame) {
+    // SAFETY: p is this hart's current process (own context); saved_tf /
+    // saved_mask were written by signal_check on this same hart before the
+    // handler was entered, so no cross-hart race on these fields.
     unsafe {
         let p = crate::proc::current();
         if !p.in_signal_handler {
@@ -19,7 +26,15 @@ pub unsafe fn sigreturn(tf: &mut TrapFrame) {
     }
 }
 
+/// # Safety
+///
+/// Caller contract: trap-return path on this hart with a non-null current;
+/// tf is the user trap frame about to be restored (may be retargeted to a
+/// handler or cause exit()).
 pub unsafe fn signal_check(tf: &mut TrapFrame) {
+    // SAFETY: all dereferences are of this hart's own current Proc (never
+    // freed while current); the SIG_KILL/STOP default actions and handler
+    // dispatch only touch per-process state owned by this hart's context.
     unsafe {
         let hartid = hart_id();
         let cur = current_for_hart(hartid);

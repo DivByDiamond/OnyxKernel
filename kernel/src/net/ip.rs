@@ -25,7 +25,13 @@ pub fn checksum(data: &[u8]) -> u16 {
     !(sum as u16)
 }
 
+/// # Safety
+///
+/// TX path: reads G_IP, RMWs IP_ID and drives the rings; must not run
+/// concurrently with another sender/poller on a different hart (IP_ID
+/// and the ARP cache are unguarded; SIE=0 only bars same-hart preemption).
 pub unsafe fn send_packet(dst_ip: [u8; 4], protocol: u8, payload: &[u8]) -> KResult<()> {
+    // SAFETY: header vector sized IP_HLEN + payload.len(); IP_ID RMW and ARP cache unguarded per the single-sender contract above.
     unsafe {
         let dst_mac = if dst_ip == [255, 255, 255, 255] {
             [0xFF; 6]
@@ -77,6 +83,10 @@ pub unsafe fn send_packet(dst_ip: [u8; 4], protocol: u8, payload: &[u8]) -> KRes
     }
 }
 
+/// # Safety
+///
+/// RX dispatcher: requires the net single-poller contract; protocol
+/// dispatches to sub-handlers that validate their own offsets.
 pub unsafe fn handle_ip(frame: &[u8]) {
     if frame.len() < eth::ETH_HLEN + IP_HLEN {
         return;
@@ -86,14 +96,22 @@ pub unsafe fn handle_ip(frame: &[u8]) {
     let total_len = u16::from_be_bytes([frame[ip_start + 2], frame[ip_start + 3]]) as usize;
     let protocol = frame[ip_start + 9];
     match protocol {
+        // SAFETY: callee re-validates offsets against frame.len(); RX single-poller contract.
         IP_PROTO_ICMP => unsafe { handle_icmp(frame, ip_start, ihl, total_len) },
+        // SAFETY: callee re-validates offsets against frame.len(); RX single-poller contract.
         IP_PROTO_TCP => unsafe { crate::net::tcp::handle_tcp(frame, ip_start, ihl, total_len) },
+        // SAFETY: callee re-validates offsets against frame.len(); RX single-poller contract.
         IP_PROTO_UDP => unsafe { crate::net::udp::handle_udp(frame, ip_start) },
         _ => {}
     }
 }
 
+/// # Safety
+///
+/// RX path: reads the frame with explicit bounds checks and replies via
+/// send_frame; net single-poller contract applies to the statics.
 unsafe fn handle_icmp(frame: &[u8], ip_start: usize, _ihl: usize, _total_len: usize) {
+    // SAFETY: icmp_start offset checked against frame.len() before indexing; reply buffers sized from checked lengths.
     unsafe {
         let icmp_start = ip_start + IP_HLEN;
         if frame.len() < icmp_start + 8 {

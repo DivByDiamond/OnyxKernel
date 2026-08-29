@@ -138,6 +138,8 @@ fn test_conn_table_alloc_port_sweep() {
     // Sole owner of the process-global CONNS table within this test binary:
     // run every table-level assertion in one function to stay race-free
     // under the parallel test harness.
+    // SAFETY: sole owner of the process-global CONNS table within this test binary (see above);
+    // every slot is initialized, and indices come from alloc_conn.
     unsafe {
         let cid = alloc_conn().expect("a free slot exists");
         let sport = alloc_local_port();

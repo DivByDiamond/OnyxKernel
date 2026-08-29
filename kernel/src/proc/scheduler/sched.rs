@@ -9,6 +9,10 @@ use crate::{
     },
 };
 
+/// # Safety
+///
+/// Caller contract: trap context on this hart (hart_id() valid); merely
+/// sets this hart's G_NEED_RESCHED flag (release store).
 pub unsafe fn sched_tick() {
     let hartid = hart_id();
     // SMP (wave 2): idle harts (current == null) must also request
@@ -19,13 +23,25 @@ pub unsafe fn sched_tick() {
     G_NEED_RESCHED[hartid].store(true, Ordering::Release);
 }
 
+/// # Safety
+///
+/// Caller contract: bounds-checked store of another hart's resched flag;
+/// the flag is per-hart atomics, so cross-hart stores are data-race-free.
 pub unsafe fn set_need_resched(hartid: usize, v: bool) {
     if hartid < MAX_HARTS {
         G_NEED_RESCHED[hartid].store(v, Ordering::Release);
     }
 }
 
+/// # Safety
+///
+/// Caller contract: init() has run (G_RQ initialized); kernel context with
+/// SIE clear. The victim queue lock is held (try_lock) across dequeue and
+/// any re-enqueue; the returned Proc (if any) is owned by the caller.
 pub unsafe fn steal(hartid: usize) -> *mut Proc {
+    // SAFETY: G_RQ was initialized by runqueue::init(); each victim queue
+    // is only dereferenced/mutated while its try_lock() is held below, and
+    // dequeued procs are valid live heap nodes under the rq lock discipline.
     unsafe {
         let n = MAX_HARTS;
         for i in 1..n {
@@ -62,7 +78,15 @@ pub unsafe fn steal(hartid: usize) -> *mut Proc {
     }
 }
 
+/// # Safety
+///
+/// Caller contract: trap-return/yield context on this hart; this hart's
+/// runqueue may be locked only via the rq_lock calls below (no nested
+/// rq_lock for the same hart by the caller); tf is the current trap frame.
 pub unsafe fn sched_yield(tf: &mut TrapFrame) {
+    // SAFETY: all G_RQ / G_HART_* accesses follow the per-hart rq_lock
+    // discipline (local queue under rq_lock, remote queues under try_lock);
+    // procs dequeued are live heap nodes owned by this hart for the switch.
     unsafe {
         let hartid = hart_id();
         let current = current_for_hart(hartid);

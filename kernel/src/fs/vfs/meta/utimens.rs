@@ -2,7 +2,14 @@ use crate::fs::onyxfs;
 use crate::fs::vfs::{Fs, resolve_mount};
 use onyx_core::errno::{Errno, KResult};
 
+/// # Safety
+///
+/// Caller contract: path comes from the syscall layer's parse_user_path
+/// (kernel-side slice); timestamps are opaque u64 values.
 pub unsafe fn utimens(path: &[u8], mtime: u64, atime: u64) -> KResult<()> {
+    // SAFETY: path slice is kernel-side. onyxfs::set_timestamps takes no
+    // cross-hart lock (journal is crash recovery only); concurrent utimens
+    // calls are not serialized — caller must not race across harts.
     unsafe {
         if path.is_empty() || path[0] != b'/' {
             return Err(Errno::Inval);

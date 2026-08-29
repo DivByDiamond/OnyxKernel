@@ -24,7 +24,15 @@ pub fn user_range_ok(addr: u64, size: u64) -> bool {
 /// Ensure that all pages in `[heap_brk, new_brk)` are mapped in the current
 /// process's root page table. Used by `brk`/`sbrk` to grow the heap on demand
 /// instead of pre-allocating the entire heap region at load time.
+/// # Safety
+///
+/// `root_pa` must satisfy the vmm translate contract (page-aligned PA of a
+/// live, direct-mapped root table); the caller owns the heap growth for this
+/// address space.
 unsafe fn ensure_heap_pages(root_pa: u64, old_brk: u64, new_brk: u64) -> Result<(), Errno> {
+    // SAFETY: root_pa satisfies the vmm translate contract per the caller;
+    // translate_user is a read-only PTE walk and map_one_pub installs a
+    // freshly allocated zeroed frame into that same table.
     unsafe {
         if new_brk <= old_brk {
             return Ok(());
@@ -60,7 +68,14 @@ unsafe fn ensure_heap_pages(root_pa: u64, old_brk: u64, new_brk: u64) -> Result<
     }
 }
 
+/// # Safety
+///
+/// Call only from handler::handle's syscall path: current process set, ACL
+/// checked; operates exclusively on the current process's own root table.
 pub unsafe fn sys_brk(addr: u64) -> i64 {
+    // SAFETY: p is this hart's current process and p.root_pa satisfies the
+    // vmm translate contract; unmap only touches that table and only above
+    // the page-aligned new brk, so live mid-page heap stays mapped.
     unsafe {
         let p = proc::current();
         let cur = p.heap_brk;

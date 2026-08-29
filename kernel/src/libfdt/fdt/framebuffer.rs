@@ -16,8 +16,14 @@ pub struct SimpleFramebuffer {
     pub stride: u32,
 }
 
+/// # Safety
+///
+/// `fdt::init()` must have succeeded; called once during single-threaded
+/// boot (before secondary harts start).
 pub unsafe fn find_simple_framebuffer() -> Option<SimpleFramebuffer> {
     unsafe {
+        // SAFETY: caller contract: init() validated the DTB; walk only reads
+        // the magic-checked struct block single-threaded.
         let mut result: Option<SimpleFramebuffer> = None;
         walk(&mut |_name, props: &[(u32, &[u8])]| {
             let mut compatible = false;
