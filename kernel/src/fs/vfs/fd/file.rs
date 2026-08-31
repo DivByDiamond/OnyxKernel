@@ -62,7 +62,20 @@ pub unsafe fn open(path: &[u8], perms: u32) -> KResult<FdToken> {
                     }
                 };
                 let st = devfs::stat(ino)?;
-                (ino, st.size)
+                // /dev/ptmx is a clone node: each open claims a fresh pair
+                // and the fd is rebound to that pair's master inode.
+                if ino == devfs::DEVFS_PTMX_INO {
+                    let pair = match crate::fs::pty::alloc() {
+                        Ok(p) => p,
+                        Err(e) => {
+                            fd_clear(idx);
+                            return Err(e);
+                        }
+                    };
+                    (devfs::ptym_ino(pair), u32::MAX)
+                } else {
+                    (ino, st.size)
+                }
             }
             _ => {
                 let mut st = onyxfs::OnyfsStat::default();
@@ -130,6 +143,13 @@ pub unsafe fn close(token: FdToken) -> KResult<()> {
     // owning context's slot unused.
     unsafe {
         let idx = fd_check(token)?;
+        // Master-close frees the PTY pair (slave fds then see EPIPE).
+        let f = fd_get(idx);
+        if f.fs == Fs::Devfs
+            && let Some(pair) = devfs::ptym_ino_idx(f.ino)
+        {
+            crate::fs::pty::free(pair);
+        }
         fd_clear(idx);
         Ok(())
     }

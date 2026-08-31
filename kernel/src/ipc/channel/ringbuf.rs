@@ -1,41 +1,8 @@
 use onyx_core::errno::{Errno, KResult};
+pub use onyx_core::ringbuf::{ring_free, ring_read, ring_used, ring_write};
 
 use super::types::{CHAN_BUF_SIZE, CHAN_MAX, Channel, G_CHANNELS};
 use crate::arch::trap_frame::TrapFrame;
-
-/// Fill level of a ring: counters are monotonically increasing, so the wrapping difference is always correct.
-fn ring_used(head: u32, tail: u32) -> u32 {
-    tail.wrapping_sub(head)
-}
-
-/// Free space left in a ring (buffer capacity minus used).
-fn ring_free(head: u32, tail: u32) -> u32 {
-    CHAN_BUF_SIZE as u32 - ring_used(head, tail)
-}
-
-fn ring_write(buf: &mut [u8; CHAN_BUF_SIZE], head: u32, tail: &mut u32, src: &[u8]) -> u32 {
-    let n = (src.len() as u32).min(ring_free(head, *tail));
-    let mut written = 0u32;
-    while written < n {
-        let idx = (*tail as usize) % CHAN_BUF_SIZE;
-        buf[idx] = src[written as usize];
-        *tail = tail.wrapping_add(1);
-        written += 1;
-    }
-    written
-}
-
-fn ring_read(buf: &[u8; CHAN_BUF_SIZE], head: &mut u32, tail: u32, dst: &mut [u8]) -> u32 {
-    let n = (dst.len() as u32).min(ring_used(*head, tail));
-    let mut read = 0u32;
-    while read < n {
-        let idx = (*head as usize) % CHAN_BUF_SIZE;
-        dst[read as usize] = buf[idx];
-        *head = head.wrapping_add(1);
-        read += 1;
-    }
-    read
-}
 
 fn pid_allowed(ch: &Channel, pid: u32) -> bool {
     if pid == ch.owner_pid {
@@ -97,7 +64,7 @@ pub unsafe fn send(
             return Err(Errno::Perm);
         }
 
-        let available = ring_free(ch.head, ch.tail);
+        let available = ring_free(CHAN_BUF_SIZE, ch.head, ch.tail);
         if available < len {
             if let Some(tf) = tf {
                 wait_enqueue(&mut ch.send_wait);
@@ -187,7 +154,7 @@ mod tests {
         let n = CHAN_BUF_SIZE as u32;
         let src: alloc::vec::Vec<u8> = (0..n).map(|i| i as u8).collect();
         assert_eq!(ring_write(&mut buf, head, &mut tail, &src), n);
-        assert_eq!(ring_free(head, tail), 0);
+        assert_eq!(ring_free(CHAN_BUF_SIZE, head, tail), 0);
         assert_eq!(ring_write(&mut buf, head, &mut tail, &[0xAA]), 0);
         let mut dst = alloc::vec![0u8; CHAN_BUF_SIZE];
         assert_eq!(ring_read(&buf, &mut head, tail, &mut dst), n);

@@ -9,6 +9,7 @@ pub mod errno;
 pub mod fmt;
 pub mod formats;
 pub mod parser;
+pub mod ringbuf;
 pub mod string;
 
 pub use errno::Errno;

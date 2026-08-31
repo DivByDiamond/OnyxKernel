@@ -149,7 +149,7 @@ fn test_journal_replay_entry_ignores_non_block_write() {
 fn test_journal_replay_ordering() {
     // Replay applies entries oldest-first, each carrying its own payload;
     // verify extraction order across a multi-entry transaction.
-    let tx = vec![
+    let tx = [
         entry(ONYFS_JOURNAL_BLOCK_WRITE, 100, 1),
         entry(ONYFS_JOURNAL_BLOCK_WRITE, 200, 2),
         entry(ONYFS_JOURNAL_COMMIT_END, 0, 0),
@@ -194,7 +194,7 @@ fn test_growth_capped_by_1gib_limit() {
     // ONYFS_MAX_TOTAL_BLOCKS < 300 + 32768? No — use a tiny data start so
     // only the global cap can bind... it cannot bind below bitmap capacity,
     // so instead assert the constant relationship directly.
-    assert!(ONYFS_MAX_TOTAL_BLOCKS >= ONYFS_BITMAP_CAPACITY_BLOCKS);
+    const { assert!(ONYFS_MAX_TOTAL_BLOCKS >= ONYFS_BITMAP_CAPACITY_BLOCKS) };
     assert_eq!(ONYFS_BITMAP_CAPACITY_BLOCKS, 32768);
     assert_eq!(ONYFS_MAX_TOTAL_BLOCKS, 262144);
 }

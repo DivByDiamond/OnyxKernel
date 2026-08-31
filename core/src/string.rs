@@ -137,16 +137,20 @@ mod tests {
     }
     #[test]
     fn test_strcmp() {
+        let a = b"abc\0";
+        let b = b"abd\0";
         unsafe {
-            assert_eq!(strcmp(b"abc\0".as_ptr(), b"abc\0".as_ptr()), 0);
-            assert!(strcmp(b"abc\0".as_ptr(), b"abd\0".as_ptr()) < 0);
+            assert_eq!(strcmp(a.as_ptr(), a.as_ptr()), 0);
+            assert!(strcmp(a.as_ptr(), b.as_ptr()) < 0);
         }
     }
     #[test]
     fn test_strncmp() {
+        let a = b"abcdef\0";
+        let b = b"abcxyz\0";
         unsafe {
-            assert_eq!(strncmp(b"abcdef\0".as_ptr(), b"abcxyz\0".as_ptr(), 3), 0);
-            let r = strncmp(b"abcdef\0".as_ptr(), b"abcxyz\0".as_ptr(), 4);
+            assert_eq!(strncmp(a.as_ptr(), b.as_ptr(), 3), 0);
+            let r = strncmp(a.as_ptr(), b.as_ptr(), 4);
             assert!(r < 0);
         }
     }

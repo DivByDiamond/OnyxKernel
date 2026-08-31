@@ -3,8 +3,13 @@ use core::ptr;
 use onyx_core::errno::{Errno, KResult};
 
 mod blk;
+mod pty_ioctl;
+mod pty_nodes;
 
 pub use blk::{blk_ino, is_blk_ino};
+pub use pty_ioctl::pty_ioctl;
+pub use pty_ioctl::{TIOCGPTN, TIOCGWINSZ, TIOCSWINSZ};
+pub use pty_nodes::{DEVFS_PTMX_INO, is_pty_ino, pty_poll, ptym_ino, ptym_ino_idx, ptys_ino_idx};
 
 pub const DEVFS_ROOT_INO: u32 = 1;
 pub const DEVFS_FB0_INO: u32 = 2;
@@ -23,6 +28,9 @@ pub fn lookup(name: &[u8]) -> KResult<u32> {
     if name.is_empty() || name == b"." {
         return Ok(DEVFS_ROOT_INO);
     }
+    if let Some(ino) = pty_nodes::lookup_name(name) {
+        return Ok(ino);
+    }
     if name == b"fb0" {
         return Ok(DEVFS_FB0_INO);
     }
@@ -35,28 +43,23 @@ pub fn lookup(name: &[u8]) -> KResult<u32> {
     Err(Errno::NoEnt)
 }
 
+fn st(ino: u32, size: u32, mode: u32) -> DevfsStat {
+    DevfsStat { ino, size, mode }
+}
+
 pub fn stat(ino: u32) -> KResult<DevfsStat> {
+    if let Some((ino, size)) = pty_nodes::stat(ino) {
+        return Ok(st(ino, size, 0o100666));
+    }
     if let Some(idx) = is_blk_ino(ino) {
         if idx >= crate::drivers::virtio::count() {
             return Err(Errno::NoEnt);
         }
-        return Ok(DevfsStat {
-            ino,
-            size: u32::MAX,
-            mode: 0o100666,
-        });
+        return Ok(st(ino, u32::MAX, 0o100666));
     }
     match ino {
-        DEVFS_ROOT_INO => Ok(DevfsStat {
-            ino,
-            size: 0,
-            mode: 0o040755,
-        }),
-        DEVFS_FB0_INO => Ok(DevfsStat {
-            ino,
-            size: fb::size_bytes() as u32,
-            mode: 0o100666,
-        }),
+        DEVFS_ROOT_INO => Ok(st(ino, 0, 0o040755)),
+        DEVFS_FB0_INO => Ok(st(ino, fb::size_bytes() as u32, 0o100666)),
         _ => Err(Errno::NoEnt),
     }
 }
@@ -69,6 +72,10 @@ pub fn stat(ino: u32) -> KResult<DevfsStat> {
 pub unsafe fn read(ino: u32, buf: *mut u8, offset: u32, len: u32) -> KResult<u32> {
     // SAFETY: buffer contract documented on the fn; per-branch bounds noted below.
     unsafe {
+        if pty_nodes::is_pty_ino(ino) {
+            // SAFETY: pty_nodes::read re-checks pair liveness under its lock.
+            return pty_nodes::read(ino, buf, offset, len);
+        }
         if let Some(idx) = is_blk_ino(ino) {
             // SAFETY: caller guarantees buf points to a writable region of at
             // least `len` bytes; blk::read validates the device index.
@@ -101,6 +108,10 @@ pub unsafe fn read(ino: u32, buf: *mut u8, offset: u32, len: u32) -> KResult<u32
 pub unsafe fn write(ino: u32, buf: *const u8, offset: u32, len: u32) -> KResult<u32> {
     // SAFETY: buffer contract documented on the fn; per-branch bounds checked.
     unsafe {
+        if pty_nodes::is_pty_ino(ino) {
+            // SAFETY: pty_nodes::write re-checks pair liveness under its lock.
+            return pty_nodes::write(ino, buf, offset, len);
+        }
         if let Some(idx) = is_blk_ino(ino) {
             // SAFETY: caller guarantees buf points to a readable region of at
             // least `len` bytes; blk::write validates the device index.
@@ -140,12 +151,14 @@ pub fn readdir_entry(idx: u32, name_out: *mut u8, name_len: usize) -> Option<u32
             Some(DEVFS_FB0_INO)
         }
         i => {
+            let n_devs = crate::drivers::virtio::count();
             let dev_idx = (i - 3) as usize;
-            if dev_idx >= crate::drivers::virtio::count() {
-                return None;
+            if dev_idx < n_devs {
+                copy_name(blk::name(dev_idx), name_out, name_len);
+                return Some(blk_ino(dev_idx));
             }
-            copy_name(blk::name(dev_idx), name_out, name_len);
-            Some(blk_ino(dev_idx))
+            // PTY nodes live right after the block devices (ptymx + pts/N).
+            pty_nodes::readdir_entry(i, name_out, name_len)
         }
     }
 }
@@ -187,6 +200,11 @@ pub const FB_IOCTL_GET_INFO: u64 = 0x4600;
 pub unsafe fn ioctl(ino: u32, request: u64, arg: u64) -> KResult<i64> {
     // SAFETY: user-pointer contract for `arg` upheld by sys_ioctl; see below.
     unsafe {
+        if pty_nodes::is_pty_ino(ino) {
+            // SAFETY: winsize/ptn writes go through the 8-byte user window
+            // validated by sys_ioctl (same contract as FB_IOCTL_GET_INFO).
+            return pty_ioctl(ino, request, arg);
+        }
         match ino {
             DEVFS_FB0_INO => match request {
                 FB_IOCTL_GET_INFO => {

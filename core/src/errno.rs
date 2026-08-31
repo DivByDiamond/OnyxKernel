@@ -87,13 +87,13 @@ mod tests {
     fn test_kresult_ok() {
         let r: KResult<i32> = Ok(42);
         assert!(r.is_ok());
-        assert_eq!(r.unwrap(), 42);
+        assert_eq!(r, Ok(42));
     }
     #[test]
     fn test_kresult_err() {
         let r: KResult<i32> = Err(Errno::NoMem);
         assert!(r.is_err());
-        assert_eq!(r.unwrap_err(), Errno::NoMem);
+        assert_eq!(r, Err(Errno::NoMem));
     }
     #[test]
     fn test_all_errno_variants() {
