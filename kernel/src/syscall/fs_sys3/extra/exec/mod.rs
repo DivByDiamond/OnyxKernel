@@ -93,20 +93,29 @@ pub unsafe fn sys_waitpid(tf: &mut TrapFrame, pid: u64, status_out: u64, options
             }
             cur = (*cur).all_next;
         }
-        proc_list_unlock();
         if !has_child {
+            proc_list_unlock();
             return Errno::Child.as_i64();
         }
 
         if options & WNOHANG != 0 {
+            proc_list_unlock();
             return 0;
         }
 
+        // Waitpid race fix (todo P1 #2): the Waiting publish now happens in
+        // the SAME proc_list_lock critical section that verified has_child
+        // (mirrors the B4 lost-wakeup protocol in proc::wait). Previously the
+        // lock was dropped first and the state written afterwards — an exiting
+        // child on another hart could observe Running (not Waiting), skip the
+        // parent wake and leave this parent asleep forever; a concurrent
+        // dump_all/exit scan could also race the unlocked state write.
         let hartid = proc::hart_id();
         let cur = proc::current_for_hart(hartid);
         if !cur.is_null() {
             (*cur).state = ProcState::Waiting;
         }
+        proc_list_unlock();
         crate::proc::scheduler::sched_yield(tf);
         Errno::NoEnt.as_i64()
     }

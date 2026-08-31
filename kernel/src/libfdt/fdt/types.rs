@@ -21,3 +21,11 @@ pub(crate) static mut G_DTB: usize = 0;
 pub(crate) static mut G_STRUCT: usize = 0;
 pub(crate) static mut G_STRINGS: usize = 0;
 pub(crate) static mut G_STRUCT_SIZE: usize = 0;
+/// Bounds-checking fix (todo P1 #7): totalsize from the FDT header (offset
+/// 4). Set by init_from once the magic validates; 0 before. Every global
+/// offset/size below is validated against it so a corrupt header cannot
+/// point the walker outside the blob.
+pub(crate) static mut G_TOTALSIZE: usize = 0;
+/// Bounds-checking fix (todo P1 #7): size_dt_strings (header offset 0x20).
+/// Bounds the string-block scans (cstr_at / prop_name).
+pub(crate) static mut G_STRINGS_SIZE: usize = 0;

@@ -1,6 +1,7 @@
 use core::sync::atomic::{AtomicU32, Ordering};
 
 use crate::net::G_IP;
+use crate::net::lock::{net_lock, net_unlock};
 use crate::net::poll;
 use onyx_core::errno::{Errno, KResult};
 
@@ -20,9 +21,28 @@ static BAD_CKSUM: AtomicU32 = AtomicU32::new(0);
 pub(super) const SEG_ACK: u8 = 1;
 pub(super) const SEG_FIN_ACK: u8 = 2;
 
-/// # Safety: allocates into the lock-free CONNS table; caller must serialize TCP calls across harts (no lock; SIE=0 only bars same-hart preemption).
+/// # Safety: kernel context with SIE clear; the connect (SYN send + ACK
+/// wait loop with poll) runs under net_lock(), serializing concurrent TCP
+/// operations across harts (net sync fix, todo P1 #4). The lock is held for
+/// the whole handshake wait — accepted cost, the old contract required the
+/// same exclusivity implicitly.
 pub unsafe fn tcp_connect(dst_ip: [u8; 4], port: u16) -> KResult<usize> {
-    // SAFETY: slot from alloc_conn, fully initialized before the SYN is sent; table contract above.
+    // SAFETY: slot from alloc_conn, fully initialized before the SYN is sent; CONNS mutations and poll re-entry (recursive) all under net_lock().
+    unsafe {
+        net_lock();
+        let r = tcp_connect_inner(dst_ip, port);
+        net_unlock();
+        r
+    }
+}
+
+/// Lock-free body of tcp_connect (caller holds net_lock).
+///
+/// # Safety
+///
+/// Caller contract: net_lock() held; poll() re-entry is recursive-safe.
+unsafe fn tcp_connect_inner(dst_ip: [u8; 4], port: u16) -> KResult<usize> {
+    // SAFETY: slot from alloc_conn, fully initialized before the SYN is sent; net_lock() held by caller.
     unsafe {
         let cid = alloc_conn().ok_or(Errno::Busy)?;
         let sport = alloc_local_port();
@@ -58,9 +78,24 @@ pub unsafe fn tcp_connect(dst_ip: [u8; 4], port: u16) -> KResult<usize> {
     }
 }
 
-/// # Safety: indexes CONNS[cid]; caller must own that slot (no concurrent recv/send/close on this cid from another hart).
+/// # Safety: indexes CONNS[cid] under net_lock() (net sync fix, todo P1 #4) — a concurrent recv/send/close or poll handler on another hart serializes behind the lock instead of racing the slot.
 pub unsafe fn tcp_send(cid: usize, data: &[u8]) -> KResult<usize> {
-    // SAFETY: conn checked non-empty; copy bounds-checked against BUF_SIZE - send_len; send per send_tcp_seg contract.
+    // SAFETY: conn checked non-empty; copy bounds-checked against BUF_SIZE - send_len; slot access under net_lock().
+    unsafe {
+        net_lock();
+        let r = tcp_send_inner(cid, data);
+        net_unlock();
+        r
+    }
+}
+
+/// Lock-free body of tcp_send (caller holds net_lock).
+///
+/// # Safety
+///
+/// Caller contract: net_lock() held; valid cid.
+unsafe fn tcp_send_inner(cid: usize, data: &[u8]) -> KResult<usize> {
+    // SAFETY: conn checked non-empty; copy bounds-checked against BUF_SIZE - send_len; net_lock() held by caller.
     unsafe {
         let conn = CONNS[cid].as_mut().ok_or(Errno::Inval)?;
         if conn.state != 2 {
@@ -76,9 +111,24 @@ pub unsafe fn tcp_send(cid: usize, data: &[u8]) -> KResult<usize> {
     }
 }
 
-/// # Safety: indexes CONNS[cid]; caller must own that slot exclusively (a concurrent recv would corrupt the ring indices).
+/// # Safety: indexes CONNS[cid] under net_lock() — a concurrent recv or poll handler would otherwise corrupt the ring indices.
 pub unsafe fn tcp_recv(cid: usize, buf: &mut [u8]) -> KResult<usize> {
-    // SAFETY: conn checked non-empty; ring reads masked % BUF_SIZE; head/len advanced under exclusive ownership.
+    // SAFETY: conn checked non-empty; ring reads masked % BUF_SIZE; head/len advanced under net_lock().
+    unsafe {
+        net_lock();
+        let r = tcp_recv_inner(cid, buf);
+        net_unlock();
+        r
+    }
+}
+
+/// Lock-free body of tcp_recv (caller holds net_lock).
+///
+/// # Safety
+///
+/// Caller contract: net_lock() held; valid cid.
+unsafe fn tcp_recv_inner(cid: usize, buf: &mut [u8]) -> KResult<usize> {
+    // SAFETY: conn checked non-empty; ring reads masked % BUF_SIZE; net_lock() held by caller.
     unsafe {
         let conn = CONNS[cid].as_mut().ok_or(Errno::Inval)?;
         if conn.recv_len == 0 {
@@ -94,10 +144,11 @@ pub unsafe fn tcp_recv(cid: usize, buf: &mut [u8]) -> KResult<usize> {
     }
 }
 
-/// # Safety: indexes CONNS[cid]; caller must guarantee no other hart touches this slot during close.
+/// # Safety: indexes CONNS[cid] under net_lock() (net sync fix, todo P1 #4).
 pub unsafe fn tcp_close(cid: usize) {
-    // SAFETY: FIN send reads a copy of the conn; slot cleared exactly once; valid-index contract on cid.
+    // SAFETY: FIN send reads a copy of the conn; slot cleared exactly once; slot access under net_lock().
     unsafe {
+        net_lock();
         if let Some(conn) = CONNS[cid].as_ref()
             && conn.state == 2
         {
@@ -105,6 +156,7 @@ pub unsafe fn tcp_close(cid: usize) {
             send_tcp_seg(&c, FIN | ACK, &[]);
         }
         CONNS[cid] = None;
+        net_unlock();
     }
 }
 
@@ -186,9 +238,24 @@ fn process_segment(c: &mut super::conn::TcpConn, seq: u32, ack: u32, flags: u8, 
     }
 }
 
-/// # Safety: RX path -- mutates CONNS and sends; must run under the net single-poller contract (no concurrent poll or socket syscalls).
+/// # Safety: RX path — mutates CONNS and sends under net_lock() (recursive
+/// when re-entered from poll inside send_packet; net sync fix, todo P1 #4).
 pub unsafe fn handle_tcp(frame: &[u8], ip_start: usize, ihl: usize, total_len: usize) {
-    // SAFETY: offsets validated against frame.len() before indexing; table mutation per the contract above.
+    // SAFETY: offsets validated against frame.len() before indexing; table mutation under net_lock().
+    unsafe {
+        net_lock();
+        handle_tcp_inner(frame, ip_start, ihl, total_len);
+        net_unlock();
+    }
+}
+
+/// Lock-free body of handle_tcp (caller holds net_lock).
+///
+/// # Safety
+///
+/// Caller contract: net_lock() held.
+unsafe fn handle_tcp_inner(frame: &[u8], ip_start: usize, ihl: usize, total_len: usize) {
+    // SAFETY: offsets validated against frame.len() before indexing; net_lock() held by caller.
     unsafe {
         sweep_timewait(now_us());
         let tcp_off = ip_start + ihl;

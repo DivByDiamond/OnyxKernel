@@ -1,38 +1,39 @@
 use crate::net::G_IP;
 use crate::net::ip;
+use crate::net::lock::{net_lock, net_unlock};
 use crate::srv::timer;
 
-pub(super) const MAX_CONNS: usize = 8;
-pub(super) const BUF_SIZE: usize = 2048;
-pub(super) const TCP_HLEN: usize = 20;
+pub(in crate::net) const MAX_CONNS: usize = 8;
+pub(in crate::net) const BUF_SIZE: usize = 2048;
+pub(in crate::net) const TCP_HLEN: usize = 20;
 
 /// How long a connection stays in state 4 (TIMEWAIT-equivalent) before
 /// its slot is reclaimed by sweep_timewait(). Bounded and short because
 /// this stack keeps no retransmission state — anything arriving for an
 /// expired slot is dropped by 4-tuple matching anyway.
-pub(super) const TIMEWAIT_US: u64 = 5_000_000;
+pub(in crate::net) const TIMEWAIT_US: u64 = 5_000_000;
 
 #[derive(Clone, Copy)]
-pub(super) struct TcpConn {
-    pub(super) state: u8,
-    pub(super) src_port: u16,
-    pub(super) dst_ip: [u8; 4],
-    pub(super) dst_port: u16,
+pub(in crate::net) struct TcpConn {
+    pub(in crate::net) state: u8,
+    pub(in crate::net) src_port: u16,
+    pub(in crate::net) dst_ip: [u8; 4],
+    pub(in crate::net) dst_port: u16,
     /// Oldest unacknowledged sequence number; send_buf[0] holds its byte.
-    pub(super) snd_una: u32,
-    pub(super) snd_nxt: u32,
-    pub(super) rcv_nxt: u32,
-    pub(super) send_buf: [u8; BUF_SIZE],
-    pub(super) send_len: usize,
-    pub(super) recv_buf: [u8; BUF_SIZE],
-    pub(super) recv_len: usize,
-    pub(super) recv_head: usize,
+    pub(in crate::net) snd_una: u32,
+    pub(in crate::net) snd_nxt: u32,
+    pub(in crate::net) rcv_nxt: u32,
+    pub(in crate::net) send_buf: [u8; BUF_SIZE],
+    pub(in crate::net) send_len: usize,
+    pub(in crate::net) recv_buf: [u8; BUF_SIZE],
+    pub(in crate::net) recv_len: usize,
+    pub(in crate::net) recv_head: usize,
     /// uptime_us() deadline past which a state-4 slot is freed.
     /// 0 = no deadline (connection not in TIMEWAIT).
-    pub(super) tw_deadline_us: u64,
+    pub(in crate::net) tw_deadline_us: u64,
 }
 
-pub(super) static mut CONNS: [Option<TcpConn>; MAX_CONNS] = [None; MAX_CONNS];
+pub(in crate::net) static mut CONNS: [Option<TcpConn>; MAX_CONNS] = [None; MAX_CONNS];
 static mut NEXT_PORT: u16 = 40000;
 
 /// TCP checksum over a full segment (header + payload) with the given
@@ -101,7 +102,7 @@ pub(super) fn send_tcp_seg(c: &TcpConn, flags: u8, data: &[u8]) {
     unsafe { ip::send_packet(c.dst_ip, 6, &seg) }.ok();
 }
 
-pub(super) fn alloc_conn() -> Option<usize> {
+pub(in crate::net) fn alloc_conn() -> Option<usize> {
     // SAFETY: read-only scan of CONNS; every slot is always initialized (None or Some).
     unsafe { CONNS.iter().position(Option::is_none) }
 }
@@ -110,8 +111,9 @@ pub(super) fn alloc_conn() -> Option<usize> {
 /// connection. Blind increment can wrap onto a port already bound by a
 /// connection to a different remote (legal in TCP but ambiguous for a
 /// matching engine), so scan until a genuinely free port is found.
-pub(super) fn alloc_local_port() -> u16 {
-    // SAFETY: RMW on NEXT_PORT plus read of CONNS -- unguarded statics; single-hart-at-a-time conn-op contract.
+pub(in crate::net) fn alloc_local_port() -> u16 {
+    // SAFETY: RMW on NEXT_PORT plus read of CONNS; callers hold net_lock()
+    // (net sync fix, todo P1 #4).
     unsafe {
         for _ in 0..4096 {
             let p = NEXT_PORT;
@@ -129,8 +131,9 @@ pub(super) fn alloc_local_port() -> u16 {
 /// net poll / packet processing so dead slots cannot accumulate and
 /// exhaust MAX_CONNS.
 pub(super) fn sweep_timewait(now_us: u64) {
-    // SAFETY: mutates lock-free CONNS slots; runs under the net single-poller contract (poll/tick call sites).
+    // SAFETY: mutates CONNS slots under net_lock() (recursive for poll/handle_tcp callers; net sync fix, todo P1 #4).
     unsafe {
+        net_lock();
         for slot in CONNS.iter_mut() {
             let expired = match slot {
                 Some(c) => c.state == 4 && now_us >= c.tw_deadline_us && c.tw_deadline_us != 0,
@@ -140,6 +143,7 @@ pub(super) fn sweep_timewait(now_us: u64) {
                 *slot = None;
             }
         }
+        net_unlock();
     }
 }
 

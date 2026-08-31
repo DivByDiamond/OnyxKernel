@@ -7,8 +7,9 @@ pub use current::{
     set_cwd,
 };
 pub use globals::{
-    G_ALL_PROCS, G_HART_IDLE_TF, G_NEED_RESCHED, MAX_HARTS, alloc_pid, current_for_hart, hart_id,
-    init, proc_list_lock, proc_list_unlock, set_cpu_online, set_current_for_hart,
+    G_ALL_PROCS, G_HART_IDLE_TF, G_NEED_RESCHED, G_PROC_LIST_LOCK, MAX_HARTS, alloc_pid,
+    current_for_hart, hart_id, init, proc_list_lock, proc_list_unlock, set_cpu_online,
+    set_current_for_hart,
 };
 pub use types::{
     KSTACK_CANARY, KSTACK_SIZE, PROC_MAX_FDS, PROC_PID_INIT, PROC_RING_KERNEL, PROC_RING_ROOT,

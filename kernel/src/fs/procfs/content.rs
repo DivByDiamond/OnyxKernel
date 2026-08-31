@@ -28,21 +28,44 @@ pub unsafe fn read(ino: u32, buf: *mut u8, offset: u32, len: u32) -> KResult<u32
     }
 }
 
+/// Procfs race fix (todo P1 #5): one scratch buffer PER HART instead of a
+/// single shared `static mut`. Two harts generating /proc content
+/// concurrently (e.g. two readers of /proc/cpuinfo) no longer race on the
+/// same bytes: every hart formats into (and reads back from) its own slot,
+/// keyed by the hart's thread pointer. No lock needed — the slot is only
+/// ever touched by its own hart, and kernel context runs with SIE=0, so
+/// same-hart preemption cannot interleave two generate_content calls.
+/// (Host tests: hart_id() returns 0, so all tests share slot 0 safely.)
+static mut G_PROCBUF_HARTS: [[u8; PROCFS_MAX_SIZE as usize]; crate::proc::MAX_HARTS] =
+    [[0; PROCFS_MAX_SIZE as usize]; crate::proc::MAX_HARTS];
+
 /// # Safety
 ///
 /// Caller contract: ino must be a valid procfs content inode (validated by
-/// the match below, NoEnt otherwise). NOTE (real race): G_PROCBUF is a
-/// shared `static mut` scratch buffer with NO lock - two harts generating
-/// content concurrently (e.g. two processes reading /proc/cpuinfo) race on
-/// it; safe only while procfs reads stay serialized in practice.
+/// the match below, NoEnt otherwise).
+///
+/// Returns the per-hart scratch buffer (Procfs race fix, todo P1 #5):
+/// `hart_id()` is masked defensively so an out-of-range thread pointer can
+/// never index out of the per-hart table.
+fn procbuf_for_hart() -> *mut [u8; PROCFS_MAX_SIZE as usize] {
+    // SAFETY: index is hart_id() clamped into 0..MAX_HARTS; each hart
+    // touches only its own slot (SIE=0 kernel context, no preemption of a
+    // hart while it formats into its buffer). Raw-pointer arithmetic only —
+    // no shared static-mut references are formed.
+    unsafe {
+        let hart = crate::proc::hart_id() % crate::proc::MAX_HARTS;
+        let base = &raw mut G_PROCBUF_HARTS;
+        &raw mut (*base)[hart]
+    }
+}
+
 unsafe fn generate_content(ino: u32) -> KResult<&'static [u8]> {
     // SAFETY: all writes go through the procfs::fmt helpers, which
-    // bounds-check every write against the fixed-size G_PROCBUF; the
+    // bounds-check every write against the fixed-size per-hart buffer; the
     // resulting byte range holds only ASCII literals/digits, so
     // from_utf8_unchecked is sound (valid UTF-8 by construction).
     unsafe {
-        static mut G_PROCBUF: [u8; PROCFS_MAX_SIZE as usize] = [0; PROCFS_MAX_SIZE as usize];
-        let pb = &raw mut G_PROCBUF;
+        let pb = procbuf_for_hart();
         let s = match ino {
             PROCFS_VERSION_INO => VERSION_STR,
             PROCFS_CPUINFO_INO => {

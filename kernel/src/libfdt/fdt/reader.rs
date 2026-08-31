@@ -65,19 +65,40 @@ pub(crate) unsafe fn rd64_hi(p: *const u8) -> u32 {
 ///
 /// `offset` must address a NUL-terminated string within the FDT strings
 /// block (i.e. `init()` must have succeeded and the offset must come from
-/// the parsed struct block, per the FDT spec). The scan stops at the first
-/// NUL; a corrupt/missing terminator reads past the strings block.
+/// the parsed struct block, per the FDT spec).
+///
+/// Bounds-checking fix (todo P1 #7): the NUL scan is bounded by the strings
+/// block (off_dt_strings + size_dt_strings, captured by init_from) and the
+/// offset itself is rejected when it falls outside the block. A corrupt or
+/// missing terminator now yields "" instead of reading past the strings
+/// block.
 pub(crate) unsafe fn cstr_at(offset: u32) -> &'static str {
     unsafe {
-        // SAFETY: caller contract: `init()` validated the DTB and `offset`
-        // comes from a parsed FDT_PROP header, so it indexes the strings
-        // block, which is NUL-terminated per the FDT spec.
-        let p = (super::G_STRINGS + offset as usize) as *const u8;
-        let mut len = 0;
-        while *p.add(len) != 0 {
+        // SAFETY: `init()` validated the DTB header (magic + block bounds);
+        // the scan below is bounded by the strings block end, so the raw
+        // reads stay inside the validated blob.
+        let base = super::G_STRINGS;
+        let size = super::G_STRINGS_SIZE;
+        if base == 0 {
+            return "";
+        }
+        let off = offset as usize;
+        // Reject offsets outside the strings block outright.
+        if size == 0 || off >= size {
+            return "";
+        }
+        let p = (base + off) as *const u8;
+        let end = (base + size) as *const u8;
+        let mut len = 0usize;
+        while p.add(len) < end && *p.add(len) != 0 {
             len += 1;
         }
-        // SAFETY: p..p+len was just read successfully; UTF-8 is checked.
+        // No NUL before the block end — malformed strings block, degrade to
+        // "" instead of running past it.
+        if p.add(len) >= end {
+            return "";
+        }
+        // SAFETY: p..p+len was just read successfully inside the block; UTF-8 is checked.
         core::str::from_utf8(core::slice::from_raw_parts(p, len)).unwrap_or("")
     }
 }
