@@ -91,6 +91,7 @@ pub const SYS_net_close: u64 = 83; // net_close(conn_id) -> 0
 // ── Multi-user syscalls (84–85) ──────────────────────────────────────────
 pub const SYS_chown: u64 = 84; // chown(path, uid, gid)
 pub const SYS_fchown: u64 = 85; // fchown(fd, uid, gid)
+pub const SYS_mouse_read: u64 = 86; // mouse_read(*event) -> 0 or -errno
 
 // ── Flags / constants used by syscalls ─────────────────────────────────
 
