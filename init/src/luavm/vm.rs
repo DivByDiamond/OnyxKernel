@@ -1,9 +1,9 @@
 //! Lua VM - stack machine implementation
 
 use super::value::*;
-use alloc::vec::Vec;
 use alloc::collections::BTreeMap;
 use alloc::string::{String, ToString};
+use alloc::vec::Vec;
 
 const MAX_STACK_DEPTH: usize = 1000;
 
@@ -234,7 +234,9 @@ impl VM {
 
             Instruction::GetLocal(idx) => {
                 let frame = self.call_stack.last().ok_or("no call frame")?;
-                let val = self.stack.get(frame.base + idx)
+                let val = self
+                    .stack
+                    .get(frame.base + idx)
                     .cloned()
                     .unwrap_or(Value::Nil);
                 self.push(val)?;
@@ -353,11 +355,13 @@ mod tests {
             Instruction::Add,
             Instruction::Return,
         ];
-        let result = vm.run(Function {
-            code,
-            upvalues: vec![],
-            arity: 0,
-        }).unwrap();
+        let result = vm
+            .run(Function {
+                code,
+                upvalues: vec![],
+                arity: 0,
+            })
+            .unwrap();
         assert_eq!(result, Value::Number(5.0));
     }
 }

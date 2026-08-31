@@ -1,5 +1,7 @@
 use super::reader::rd32;
-use super::{FDT_BEGIN_NODE, FDT_END, FDT_END_NODE, FDT_NOP, FDT_PROP, G_STRUCT, G_STRUCT_SIZE, G_TOTALSIZE};
+use super::{
+    FDT_BEGIN_NODE, FDT_END, FDT_END_NODE, FDT_NOP, FDT_PROP, G_STRUCT, G_STRUCT_SIZE, G_TOTALSIZE,
+};
 
 /// Walk the FDT struct block, invoking `cb` per node with its properties.
 ///
@@ -29,7 +31,11 @@ pub unsafe fn walk(cb: &mut dyn FnMut(&str, &[(u32, &[u8])]) -> bool) {
         let block_end = G_STRUCT + G_STRUCT_SIZE;
         let end = if G_TOTALSIZE != 0 {
             let dtb_end = super::G_DTB + G_TOTALSIZE;
-            if block_end > dtb_end { dtb_end } else { block_end }
+            if block_end > dtb_end {
+                dtb_end
+            } else {
+                block_end
+            }
         } else {
             block_end
         } as *const u8;

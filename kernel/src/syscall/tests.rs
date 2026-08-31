@@ -89,16 +89,18 @@ fn test_syscall_numbers_unique_and_complete() {
         SYS_net_close,
         SYS_chown,
         SYS_fchown,
+        SYS_mouse_read,
+        SYS_poll,
     ];
-    let mut seen = [false; 86];
+    let mut seen = [false; 88];
     for &nr in &all {
-        assert!(nr >= 1 && nr <= 85, "syscall {} out of range", nr);
+        assert!((1..=87).contains(&nr), "syscall {} out of range", nr);
         let idx = nr as usize;
         assert!(!seen[idx], "syscall {} duplicated", nr);
         seen[idx] = true;
     }
-    for i in 1..=85 {
-        assert!(seen[i], "syscall {} missing", i);
+    for (nr, found) in seen.iter().enumerate().skip(1) {
+        assert!(found, "syscall {} missing", nr);
     }
 }
 
@@ -149,6 +151,26 @@ fn test_open_flags() {
     assert_eq!(O_APPEND, 0x400);
     assert_eq!(O_NONBLOCK, 0x800);
     assert_eq!(O_DIRECTORY, 0x10000);
+}
+
+#[test]
+fn test_poll_constants() {
+    // Linux-compatible poll event bits (libonyxc include/io/poll.h mirrors).
+    assert_eq!(POLLIN, 0x001);
+    assert_eq!(POLLOUT, 0x004);
+    assert_eq!(POLLERR, 0x008);
+    assert_eq!(POLLNVAL, 0x020);
+}
+
+#[test]
+fn test_pollfd_layout() {
+    // ABI contract with libonyxc: no padding, fields packed as declared.
+    // The kernel stages pollfd arrays via raw byte copies, so the C mirror
+    // in poll.h must produce identical offsets.
+    assert_eq!(core::mem::size_of::<PollFd>(), 16);
+    assert_eq!(core::mem::offset_of!(PollFd, fd), 0);
+    assert_eq!(core::mem::offset_of!(PollFd, events), 8);
+    assert_eq!(core::mem::offset_of!(PollFd, revents), 12);
 }
 
 #[test]

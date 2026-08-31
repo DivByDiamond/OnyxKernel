@@ -44,8 +44,7 @@ impl Widget for Button {
     fn handle_event(&mut self, ev: &Event) -> bool {
         if let Event::MouseClick { x, y, button: 1 } = ev {
             // Check if click inside button bounds
-            if *x >= self.x && *x < self.x + self.width &&
-               *y >= self.y && *y < self.y + self.height
+            if *x >= self.x && *x < self.x + self.width && *y >= self.y && *y < self.y + self.height
             {
                 return true; // consumed
             }
@@ -108,7 +107,8 @@ impl Widget for TextBox {
 
     fn handle_event(&mut self, ev: &Event) -> bool {
         if let Event::KeyPress(key) = ev {
-            if *key == 127 { // backspace
+            if *key == 127 {
+                // backspace
                 if self.cursor > 0 {
                     self.cursor -= 1;
                     self.len -= 1;

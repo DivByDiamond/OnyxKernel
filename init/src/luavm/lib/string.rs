@@ -1,7 +1,7 @@
 //! Lua string library (minimal MVP)
 
-use crate::luavm::vm::VM;
 use crate::luavm::value::{Value, ValueKey};
+use crate::luavm::vm::VM;
 use alloc::collections::BTreeMap;
 
 /// Register string library

@@ -109,7 +109,7 @@ fn test_trap_frame_copy() {
 #[test]
 fn test_trap_frame_clone() {
     let tf = TrapFrame::zero();
-    let tf2 = tf.clone();
+    let tf2 = tf;
     assert_eq!(tf.ra, tf2.ra);
     assert_eq!(tf.sp, tf2.sp);
 }

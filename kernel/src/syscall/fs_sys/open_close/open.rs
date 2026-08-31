@@ -154,6 +154,13 @@ pub unsafe fn sys_open(path: u64, flags: u64, mode: u64) -> i64 {
             }
         }
 
+        // Record the open status flags (O_ACCMODE | O_NONBLOCK | O_APPEND |
+        // ...) so F_GETFL/F_SETFL and poll() see real per-fd state (todo P1
+        // #3/#4). fd_check revalidates the token and yields the slot idx.
+        if let Ok(idx) = vfs::fd_check(token) {
+            vfs::fd_set_flags(idx, flags32);
+        }
+
         token as i64
     }
 }

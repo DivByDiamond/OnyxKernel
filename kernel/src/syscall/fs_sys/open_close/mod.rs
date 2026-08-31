@@ -12,7 +12,10 @@ pub use open::sys_open;
 pub use stat::*;
 
 use crate::fs::vfs;
-use crate::syscall::abi::{F_DUPFD, F_GETFD, F_GETFL, F_SETFD, F_SETFL, FD_CLOEXEC, O_RDONLY};
+use crate::syscall::abi::{
+    F_DUPFD, F_GETFD, F_GETFL, F_SETFD, F_SETFL, FD_CLOEXEC, O_APPEND, O_NONBLOCK, O_RDONLY,
+    O_WRONLY,
+};
 use onyx_core::errno::Errno;
 
 /// # Safety
@@ -77,9 +80,42 @@ pub(in super::super) unsafe fn sys_fcntl(fd: u64, cmd: u32, arg: u64) -> i64 {
                 vfs::fd_set_cloexec(idx, (arg & FD_CLOEXEC as u64) != 0);
                 0
             }
-            F_GETFL => O_RDONLY as i64,
+            F_GETFL => {
+                // Real status flags (todo P1 #4). fds 0-2 are virtual UART
+                // console fds outside the fd table: stdin is read-only,
+                // stdout/stderr write-only, and fd 0 carries per-process
+                // status bits (stdin_flags, currently O_NONBLOCK only).
+                if fd == 0 {
+                    let p = crate::proc::current();
+                    return (O_RDONLY | (p.stdin_flags & O_NONBLOCK)) as i64;
+                }
+                if fd == 1 || fd == 2 {
+                    return O_WRONLY as i64;
+                }
+                let idx = match vfs::fd_check(fd) {
+                    Ok(i) => i,
+                    Err(e) => return e.as_i64(),
+                };
+                vfs::fd_get(idx).flags as i64
+            }
             F_SETFL => {
-                let _ = arg;
+                // POSIX settable subset: O_NONBLOCK and O_APPEND. Console
+                // stdout/stderr never block, so only fd 0 honors O_NONBLOCK
+                // (stored per-process); O_APPEND is meaningless there.
+                let settable = arg as u32 & (O_NONBLOCK | O_APPEND);
+                if fd == 0 {
+                    crate::proc::current().stdin_flags = settable & O_NONBLOCK;
+                    return 0;
+                }
+                if fd == 1 || fd == 2 {
+                    return 0;
+                }
+                let idx = match vfs::fd_check(fd) {
+                    Ok(i) => i,
+                    Err(e) => return e.as_i64(),
+                };
+                let old = vfs::fd_get(idx).flags;
+                vfs::fd_set_flags(idx, (old & !(O_NONBLOCK | O_APPEND)) | settable);
                 0
             }
             _ => Errno::NoSys.as_i64(),

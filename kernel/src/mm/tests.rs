@@ -41,7 +41,7 @@ fn test_pmm_initial_state() {
     assert!(!pmm::is_managed(0));
     assert!(!pmm::is_managed(0x1000));
     assert!(!pmm::is_managed(0x8000_0000));
-    assert!(!pmm::is_managed(!0u64 & !0xFFF));
+    assert!(!pmm::is_managed(!0xFFF));
 }
 
 #[test]
@@ -86,12 +86,22 @@ fn test_vmm_translate_leaf() {
             crate::arch::regs::PTE_V
                 | ((t.0.as_ptr() as u64 >> 12) << crate::arch::regs::PTE_PPN_SHIFT)
         };
-        l2.0[(vaddr >> 30) as usize & 0x1FF] = next_table_pte(&l1);
-        l1.0[(vaddr >> 21) as usize & 0x1FF] = next_table_pte(&l0);
-        l0.0[(vaddr >> 12) as usize & 0x1FF] = crate::arch::regs::PTE_V
-            | crate::arch::regs::PTE_R
-            | crate::arch::regs::PTE_W
-            | (paddr >> 12 << crate::arch::regs::PTE_PPN_SHIFT);
+        // Writes go through a helper so the compiler sees the tables'
+        // addresses escape (translate() reaches l1/l0 only via the PTE
+        // values, which unused-assignment analysis cannot track).
+        fn set_pte(t: &mut Page, idx: usize, pte: u64) {
+            t.0[idx] = pte;
+        }
+        set_pte(&mut l2, (vaddr >> 30) as usize & 0x1FF, next_table_pte(&l1));
+        set_pte(&mut l1, (vaddr >> 21) as usize & 0x1FF, next_table_pte(&l0));
+        set_pte(
+            &mut l0,
+            (vaddr >> 12) as usize & 0x1FF,
+            crate::arch::regs::PTE_V
+                | crate::arch::regs::PTE_R
+                | crate::arch::regs::PTE_W
+                | (paddr >> 12 << crate::arch::regs::PTE_PPN_SHIFT),
+        );
         let result = crate::mm::vmm::translate(l2.0.as_ptr() as u64, vaddr);
         assert_eq!(result, paddr);
     }

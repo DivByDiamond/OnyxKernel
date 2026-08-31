@@ -166,7 +166,10 @@ fn test_net_tables_concurrent_exclusivity() {
         assert_eq!(udp_recv(s, &mut buf), Err(Errno::NoEnt));
         udp_close(s);
         assert_eq!(udp_recv(s, &mut buf), Err(Errno::Inval));
-        assert_eq!(udp_recv(8 /* >= MAX_UDP_SOCKS */, &mut buf), Err(Errno::Inval));
+        assert_eq!(
+            udp_recv(8 /* >= MAX_UDP_SOCKS */, &mut buf),
+            Err(Errno::Inval)
+        );
 
         // 4) TCP conn slots: allocate all 8, the 9th alloc fails; ephemeral
         //    ports are never reused while a conn holds them (what two harts

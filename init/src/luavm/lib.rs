@@ -1,8 +1,8 @@
 //! Lua standard library modules
 
+pub mod math;
 pub mod string;
 pub mod table;
-pub mod math;
 
 use super::vm::VM;
 

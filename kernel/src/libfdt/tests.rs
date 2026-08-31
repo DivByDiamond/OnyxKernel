@@ -105,9 +105,11 @@ fn test_fdt_bounds_combined() {
                 for (name_off, data) in props {
                     if crate::libfdt::fdt::prop_name(*name_off) == "compatible" {
                         saw_compatible = true;
-                        assert!(core::str::from_utf8(data)
-                            .unwrap()
-                            .starts_with("testmodel,qemu-ish"));
+                        assert!(
+                            core::str::from_utf8(data)
+                                .unwrap()
+                                .starts_with("testmodel,qemu-ish")
+                        );
                     }
                 }
                 return false;
@@ -166,7 +168,7 @@ fn test_fdt_bounds_combined() {
         // ── 5) init_from rejections (direct, NOT via init): corrupt
         //    headers must be refused. (debug_mark is compiled out under
         //    cfg(test) so these are host-safe.)
-        let mut bad = valid_blob();
+        let bad = valid_blob();
 
         // 5a: struct offset beyond totalsize.
         let mut b = bad;
