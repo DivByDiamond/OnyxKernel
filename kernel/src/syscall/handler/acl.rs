@@ -70,6 +70,7 @@ fn syscall_allowed_uid(nr: u64, ring: u8, uid: Option<u32>) -> bool {
         | SYS_net_close
         | SYS_poll
         | SYS_kill
+        | SYS_mouse_read
         | SYS_setuid
         | SYS_setgid => true,
         SYS_spawn

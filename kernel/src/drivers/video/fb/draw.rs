@@ -1,5 +1,73 @@
-use super::{put_pixel, width};
+use super::{put_pixel, size_bytes, width};
 use crate::font;
+
+// ── Double buffering (todo P3 #2) ────────────────────────────────────────
+//
+// The back buffer is physically contiguous RAM (pmm::alloc_n) addressed
+// through the kernel's direct physical mapping, exactly like the front
+// buffer pointer. It is allocated lazily on the first get_back_buffer()
+// call: a full 1280x720x4 surface is ~3.7 MB (896 pages), which would
+// starve the 4 MB kernel heap if it were kmalloc'd. If the contiguous
+// allocation fails (fragmented or tiny RAM), get_back_buffer returns the
+// front buffer so callers keep working in single-buffer mode, and
+// swap_buffers degrades to a no-op.
+
+use core::sync::atomic::{AtomicUsize, Ordering};
+
+static G_BACK_PA: AtomicUsize = AtomicUsize::new(0);
+
+/// Back-buffer pointer (kernel direct-mapped VA == PA), or the front
+/// buffer when no back buffer could be allocated.
+pub fn get_back_buffer() -> *mut u32 {
+    let mut pa = G_BACK_PA.load(Ordering::Acquire) as u64;
+    if pa == 0 {
+        let pages = size_bytes().div_ceil(crate::mm::pmm::PAGE_SIZE);
+        // Lazy one-time allocation from arbitrary kernel context. The PMM
+        // lock serialises concurrent callers; on failure we retry on the
+        // next call rather than caching an error.
+        // SAFETY: pmm::init has completed by the time a framebuffer exists;
+        // alloc_n self-locks and zeroes the returned run.
+        let alloc = unsafe { crate::mm::pmm::alloc_n(pages) };
+        if let Ok(back) = alloc {
+            // Only publish on success so a lost race never overwrites a
+            // previously published buffer.
+            if G_BACK_PA
+                .compare_exchange(0, back as usize, Ordering::AcqRel, Ordering::Acquire)
+                .is_ok()
+            {
+                pa = back;
+            } else {
+                // Another hart won the race: return our (now orphaned)
+                // allocation to the pool before using theirs.
+                // SAFETY: `back` is a page-aligned allocation we own and
+                // never published; free_unlocked revalidates the range.
+                unsafe { crate::mm::pmm::free(back) };
+                pa = G_BACK_PA.load(Ordering::Acquire) as u64;
+            }
+        }
+    }
+    if pa == 0 {
+        return super::fb_base_ptr() as *mut u32;
+    }
+    pa as *mut u32
+}
+
+/// Present the back buffer: copy it over the visible front buffer.
+/// Call after a full redraw to eliminate tearing. No-op when running in
+/// single-buffer fallback mode (see get_back_buffer).
+pub fn swap_buffers() {
+    let pa = G_BACK_PA.load(Ordering::Acquire) as u64;
+    if pa == 0 {
+        return;
+    }
+    let bytes = size_bytes();
+    // SAFETY: both pointers are kernel direct-mapped RAM of size_bytes():
+    // the front buffer is the installed framebuffer surface and the back
+    // buffer is a pmm-owned contiguous run; non-overlapping by construction.
+    unsafe {
+        core::ptr::copy_nonoverlapping(pa as *const u8, super::fb_base_ptr(), bytes);
+    }
+}
 
 pub fn draw_char(x: usize, y: usize, c: u8, fg: u32, bg: u32) {
     let glyph = font::glyph_bitmap(c);

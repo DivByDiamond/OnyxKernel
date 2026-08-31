@@ -44,85 +44,85 @@
 ## ❌ КРИТИЧНО ДО 15 СЕНТЯБРЯ:
 
 ### 🔥 Приоритет 1 — Non-blocking I/O (БЛОКЕР #1: без него нет htop/UI с таймерами)
-**Статус: ❌ НЕ НАЧАТО** — проверено 2026-08-31, poll/select/epoll отсутствуют
+**Статус: ✅ СДЕЛАНО 2026-09-01** — poll (#87), FIONREAD, O_NONBLOCK, F_GETFL/F_SETFL, VMIN/VTIME
 
 Любая TUI-программа с автообновлением (htop, osysmon-стиль с `kbhit()`) блокируется
 навсегда на `read()` — это единственный принципиальный пробел ABI.
 
-- [ ] **`poll()` syscall** (~200 строк):
+- [x] **`poll()` syscall** (~200 строк):
       - Новый `kernel/src/syscall/poll_sys.rs` + диспетчеризация в `dispatch.rs`
       - Поддержка fd-массива с events/revents (POLLIN/POLLOUT/POLLERR)
       - Интеграция с termios (stdin poll = keyboard input ready)
       - Таймач через uptime_us() для POLLIN+timeout
 
-- [ ] **`FIONREAD` — реальный подсчёт** (~30 строк):
+- [x] **`FIONREAD` — реальный подсчёт** (~30 строк):
       - `kernel/src/syscall/fs_sys3/extra/ioctl.rs:187` — сейчас заглушка (всегда 0)
       - Читать `recv_len` из UDP_SOCKS[fd] или termios input buffer
 
-- [ ] **`O_NONBLOCK` — обработка в read/write** (~40 строк):
+- [x] **`O_NONBLOCK` — обработка в read/write** (~40 строк):
       - `kernel/src/syscall/fs_sys/read_write.rs` — проверять флаг до блокировки
       - Если nonblock и нет данных → вернуть EAGAIN вместо блокировки
 
-- [ ] **`F_GETFL`/`F_SETFL` — реальные флаги** (~20 строк):
+- [x] **`F_GETFL`/`F_SETFL` — реальные флаги** (~20 строк):
       - `kernel/src/syscall/fs_sys/open_close/mod.rs:80` — F_GETFL хардкодит O_RDONLY
       - Хранить flags в fd-таблице, возвращать/обновлять через fcntl
 
-- [ ] **`VMIN`/`VTIME` — non-canonical read** (~50 строк):
+- [x] **`VMIN`/`VTIME` — non-canonical read** (~50 строк):
       - `kernel/src/syscall/fs_sys/read_write.rs:135` — сейчас блокируется навсегда
       - VMIN: прочитать минимум N байт перед возвратом
       - VTIME: таймач между байтами (inter-byte timeout)
 
 ### 🔥 Приоритет 2 — Сигналы (БЛОКЕР #2: без него нет job control)
-**Статус: ❌ НЕ НАЧАТО** — проверено 2026-08-31, SIGTSTP/SIGCHLD/SIGWINCH отсутствуют
+**Статус: ✅ СДЕЛАНО 2026-09-01** — SIGTSTP/SIGCONT (ProcState::Stopped), SIGCHLD + SA_NOCLDWAIT, SIGWINCH, kill для ring 2 (своя группа)
 
 Без SIGCHLD родитель не знает о завершении детей; без SIGTSTP Ctrl+Z убивает процесс
 вместо остановки; без SIGWINCH resize не отслеживается.
 
-- [ ] **`SIGWINCH` — уведомление при resize** (~40 строк):
+- [x] **`SIGWINCH` — уведомление при resize** (~40 строк):
       - Генерировать при изменении framebuffer geometry
       - Доставлять foreground-группе (как SIGINT через `signal_foreground`)
       - Добавить в `TIOCGWINSZ` ioctl — уведомлять при первом чтении после resize
 
-- [ ] **`SIGCHLD` — авто-доставка родителю** (~60 строк):
+- [x] **`SIGCHLD` — авто-доставка родителю** (~60 строк):
       - В `proc/lifecycle/exit.rs`: при exit ребёнкаirim SIGCHLD родителю
       - Реализовать `SA_NOCLDWAIT` (sigaction flags) — auto-reap без zombie
       - Родитель может `waitpid(WNOHANG)` для неблокирующего reaping
 
-- [ ] **`SIGTSTP` (Ctrl+Z) — реальный stop** (~50 строк):
+- [x] **`SIGTSTP` (Ctrl+Z) — реальный stop** (~50 строк):
       - В `signals/handler.rs`: 상태 Running → Stopped (новый ProcState)
       - Не убивать процесс, а остановить (не ставить в runqueue)
       - `SIGCONT` → Stopped → Ready (возобновление)
 
-- [ ] **`SIGCONT` — возобновление** (~30 строк):
+- [x] **`SIGCONT` — возобновление** (~30 строк):
       - Посылать при `tcsetattr(TCSANOW, ...)` с resumed状态
       - Если обработчик установлен — вызвать его; иначе — просто de-freeze
 
-- [ ] **`kill()` — открыть для ring 2** (~10 строк):
+- [x] **`kill()` — открыть для ring 2** (~10 строк):
       - `kernel/src/srv/handler/acl.rs:78` — убрать из ring ≤ PROC_RING_ROOT блока
       - Оставить проверку: процесс может слать сигнал только в свою группу
 
 ### 🖥️ Приоритет 3 — TUI библиотека (виджеты с реальным рендерингом)
-**Статус: ⚠️ ЗАГЛУШКИ** — Button/Label не рисуют текст, demo с null fb
+**Статус: ✅ СДЕЛАНО 2026-09-01** — SYS_mouse_read, double buffering, event pump, PSF-текст в виджетах, tui_demo с mmap fb + poll event loop
 
-- [ ] **Mouse syscall** `SYS_mouse_read` (#86) (~80 строк):
+- [x] **Mouse syscall** `SYS_mouse_read` (#86) (~80 строк):
       - `kernel/src/syscall/input_sys.rs` — virtio-input → (x, y, buttons)
       - Event struct: {x: i16, y: i16, buttons: u8}
 
-- [ ] **Double buffering** `fb::swap_buffers()` (~60 строк):
+- [x] **Double buffering** `fb::swap_buffers()` (~60 строк):
       - `kernel/src/drivers/video/fb/mod.rs` — back buffer (3.7MB) + atomic swap
       - Устраняет tearing при полной перерисовке экрана
 
-- [ ] **Event loop** `kernel/src/srv/event.rs` (~100 строк):
+- [x] **Event loop** `kernel/src/srv/event.rs` (~100 строк):
       - poll клавиатуры/мыши через virtio-input
       - Таймеры через uptime_us() + callback
       - Интеграция с poll() syscall (P1 #1)
 
-- [ ] **Widget text rendering** (~150 строк):
+- [x] **Widget text rendering** (~150 строк):
       - `init/src/libtui/widget.rs` — Button/Label рисуют текст через PSF шрифт
       - Использовать существующий `fb::put_char()` из fb_term
       - TextBox: курсор, вставка, удаление
 
-- [ ] **tui_demo** — реальный framebuffer (~30 строк):
+- [x] **tui_demo** — реальный framebuffer (~30 строк):
       - `init/src/tui_demo.rs:24` — заменить `null_mut` на mmap /dev/fb0
       - Добавить event loop (ESC = выход)
 

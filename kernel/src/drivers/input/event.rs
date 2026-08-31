@@ -8,6 +8,7 @@
 //! The handler table is intentionally tiny: one global callback. If
 //! multiple subscribers are needed in the future, extend with a small
 //! array of `Option<Handler>` slots.
+use super::mouse;
 use crate::drivers::virtio_input;
 
 /// Logical key code. Extend as more keys are needed.
@@ -68,8 +69,10 @@ pub fn on_event(h: Handler) {
     }
 }
 
-/// Dispatch one event to the registered handler (if any).
+/// Dispatch one event: first into the kernel cursor model (SYS_mouse_read
+/// state), then to the registered consumer handler (if any).
 pub fn dispatch(ev: Event) {
+    mouse::handle(ev);
     // SAFETY: G_HANDLER is read and the fn(Event) pointer is invoked only if registered; registration raced nothing (kernel never runs with SIE set).
     unsafe {
         if let Some(h) = G_HANDLER {

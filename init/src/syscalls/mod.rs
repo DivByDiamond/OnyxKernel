@@ -12,6 +12,7 @@ pub use call::comm::{
     chmod, chown, fchmod, fchown, fsync, ftruncate, readlink, snapshot_create, snapshot_list,
     snapshot_rollback, symlink, truncate2, utimens,
 };
+pub use call::mouse_read;
 pub use call::proc::{
     dropping, exec, execve, exit, fork, getpgid, getpid, getppid, getring, kill, setpgid, setsid,
     sigaction, sigmask, sigprocmask, sigreturn, spawn, wait, waitpid, yield_cpu,
@@ -22,5 +23,5 @@ pub use call::timer::{
 };
 pub use call::{
     access, chdir, close, create, dup, fcntl, fstat, getcwd, getdents, getdents64, lseek, mkdir,
-    open, pipe, read, readdir, rename, stat, unlink, write, write_fd,
+    open, pipe, poll, read, readdir, rename, stat, unlink, write, write_fd,
 };
