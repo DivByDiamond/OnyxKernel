@@ -55,3 +55,7 @@ path = "src/su.rs"
 name = "onyx-lua"
 path = "src/lua.rs"
 
+[[bin]]
+name = "onyx-tui-demo"
+path = "src/tui_demo.rs"
+
