@@ -165,6 +165,9 @@ pub unsafe fn handle(tf: &mut TrapFrame) -> i64 {
             SYS_net_close => crate::syscall::net_sys::sys_net_close(a0),
             SYS_chown => crate::syscall::fs_sys3::sys_chown(a0, a1 as u32, a2 as u32),
             SYS_fchown => crate::syscall::fs_sys3::sys_fchown(a0, a1 as u32, a2 as u32),
+            SYS_mouse_read => {
+                crate::syscall::input_sys::sys_mouse_read(a0 as *mut crate::syscall::input_sys::MouseEvent)
+            }
             _ => Errno::NoSys.as_i64(),
         }
     }
