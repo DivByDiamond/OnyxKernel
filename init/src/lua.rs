@@ -12,7 +12,7 @@ mod luavm;
 mod syscalls;
 mod kalloc_lua; // global allocator
 
-use luavm::{VM, lib};
+use luavm::repl;
 
 #[unsafe(no_mangle)]
 /// # Safety
@@ -20,12 +20,7 @@ use luavm::{VM, lib};
 /// Process entry point: called directly by the kernel from the ELF entry
 /// address; the stack is freshly initialized per the RISC-V calling convention.
 pub unsafe extern "C" fn _start() -> ! {
-    let mut vm = VM::new();
-    lib::register_all(&mut vm);
-
-    // TODO: Start REPL
-    // For now, just exit
-    syscalls::exit(0);
+    repl::run_repl();
 }
 
 #[panic_handler]
