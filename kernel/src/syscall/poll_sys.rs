@@ -119,6 +119,21 @@ fn revents_token(token: u64, events: i32) -> i32 {
         };
         let f = vfs::fd_get(idx);
         let mut rv = 0;
+        if f.fs == vfs::Fs::Devfs {
+            // PTY fds report real ring occupancy instead of the positional
+            // pos/size heuristic (PTY nodes carry a sentinel size).
+            // SAFETY: pair index re-derived and liveness re-checked inside
+            // devfs::pty_poll (syscall context, bounds-checked).
+            if let Some((readable, writable)) = crate::fs::devfs::pty_poll(f.ino) {
+                if events & POLLIN != 0 && readable {
+                    rv |= POLLIN;
+                }
+                if events & POLLOUT != 0 && writable {
+                    rv |= POLLOUT;
+                }
+                return rv;
+            }
+        }
         if events & POLLIN != 0 && (f.pos < f.size || f.size == 0) {
             rv |= POLLIN;
         }

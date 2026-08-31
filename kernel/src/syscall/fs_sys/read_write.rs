@@ -61,6 +61,10 @@ pub(in super::super) unsafe fn sys_write(tf: &mut TrapFrame, fd: u64, buf: u64, 
             }
             let _ = tf;
             written
+        } else if let Some(rc) = crate::fs::pty::stream::write_hook(tf, fd, buf, len) {
+            // PTY master/slave fds are byte streams; they bypass the
+            // positional fd layer (see read_hook comment).
+            rc
         } else {
             match vfs::write(fd, buf as *const u8, len as u32) {
                 Ok(n) => n as i64,
@@ -88,6 +92,12 @@ pub(in super::super) unsafe fn sys_read(tf: &mut TrapFrame, _fd: u64, buf: u64, 
             console_read(tf, buf, len)
         } else if _fd <= 2 {
             Errno::BadFd.as_i64()
+        } else if let Some(rc) = crate::fs::pty::stream::read_hook(tf, _fd, buf, len) {
+            // PTY master/slave fds are byte streams, not position-based
+            // files: their readiness lives in the pty rings, so they run
+            // through this hook (blocking yield-loop / O_NONBLOCK here)
+            // instead of the positional vfs::read path.
+            rc
         } else {
             match vfs::read(_fd, buf as *mut u8, len as u32) {
                 Ok(n) => n as i64,

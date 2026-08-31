@@ -85,6 +85,20 @@ pub unsafe fn sys_ioctl(fd: u64, request: u64, arg: u64) -> i64 {
                 {
                     return Errno::Fault.as_i64();
                 }
+                // PTY ioctls move an 8-byte winsize / a 4-byte pts number
+                // through `arg` — direction-checked here for the same
+                // EFAULT-instead-of-fault guarantee (TIOCSWINSZ reads the
+                // user struct, the TIOCG* forms write it).
+                if devfs::is_pty_ino(f.ino) {
+                    let bytes = if request == devfs::TIOCGPTN { 4 } else { 8 };
+                    let write = request != devfs::TIOCSWINSZ;
+                    if arg != 0
+                        && vmm::check_user_range(proc::current().root_pa, arg, bytes, write)
+                            .is_err()
+                    {
+                        return Errno::Fault.as_i64();
+                    }
+                }
                 return match devfs::ioctl(f.ino, request, arg) {
                     Ok(v) => v,
                     Err(e) => e.as_i64(),
