@@ -1,3 +1,10 @@
+//! Network syscalls — `sys_net_connect/send/recv/close` (TCP).
+//!
+//! Net sync fix (todo P1 #4): every `net::` entry point below takes the
+//! recursive NET lock (`net::lock::net_lock`) internally, so no syscall-
+//! level wrapping is needed here (and must NOT be added — it would only
+//! duplicate the critical section and hold the lock across user-pointer
+//! validation). The net layer is the single locking boundary.
 use super::handler::user_ptr_ok;
 use crate::mm::vmm;
 use crate::net;

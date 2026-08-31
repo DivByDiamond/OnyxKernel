@@ -1,4 +1,5 @@
 use crate::drivers::virtio_net;
+use crate::net::lock::{net_lock, net_unlock};
 
 pub const ETH_HLEN: usize = 14;
 pub const ET_ARP: u16 = 0x0806;
@@ -22,14 +23,20 @@ static mut ARP_CACHE_LEN: usize = 0;
 /// concurrent `arp_insert` from another hart (SIE=0 only bars same-hart
 /// preemption, the kernel is SMP).
 pub unsafe fn arp_lookup(ip: [u8; 4]) -> Option<[u8; 6]> {
-    // SAFETY: read-only scan; indices derive from ARP_CACHE_LEN, which arp_insert keeps <= ARP_CACHE_MAX.
+    // SAFETY: read-only scan under net_lock(); indices derive from
+    // ARP_CACHE_LEN, which arp_insert keeps <= ARP_CACHE_MAX (net sync fix,
+    // todo P1 #4).
     unsafe {
+        net_lock();
+        let mut found = None;
         for i in 0..ARP_CACHE_LEN {
             if ARP_CACHE_IP[i] == ip {
-                return Some(ARP_CACHE_MAC[i]);
+                found = Some(ARP_CACHE_MAC[i]);
+                break;
             }
         }
-        None
+        net_unlock();
+        found
     }
 }
 
@@ -38,11 +45,15 @@ pub unsafe fn arp_lookup(ip: [u8; 4]) -> Option<[u8; 6]> {
 /// Mutates the lock-free ARP cache; caller must serialize cache access
 /// across harts (no lock guards ARP_CACHE_LEN or the entries).
 pub unsafe fn arp_insert(ip: [u8; 4], mac: [u8; 6]) {
-    // SAFETY: capacity checked against ARP_CACHE_MAX before every write; single-writer contract above.
+    // SAFETY: capacity checked against ARP_CACHE_MAX before every write;
+    // net_lock() excludes concurrent cache writers (net sync fix, todo P1
+    // #4). Recursive-safe: callers inside poll/send_packet already hold it.
     unsafe {
+        net_lock();
         for i in 0..ARP_CACHE_LEN {
             if ARP_CACHE_IP[i] == ip {
                 ARP_CACHE_MAC[i] = mac;
+                net_unlock();
                 return;
             }
         }
@@ -51,6 +62,7 @@ pub unsafe fn arp_insert(ip: [u8; 4], mac: [u8; 6]) {
             ARP_CACHE_MAC[ARP_CACHE_LEN] = mac;
             ARP_CACHE_LEN += 1;
         }
+        net_unlock();
     }
 }
 
@@ -85,7 +97,23 @@ pub unsafe fn arp_request(target_ip: [u8; 4]) {
 /// RX-path handler: frame length is checked (>= 42) before any indexed
 /// read; ARP-cache and G_IP access rely on the net single-poller contract.
 pub unsafe fn handle_arp(frame: &[u8]) {
-    // SAFETY: all frame indexing bounds-checked against the length check above; statics per net contract.
+    // SAFETY: all frame indexing bounds-checked against the length check
+    // above; cache/G_IP access under net_lock() (recursive when called from
+    // net::poll, exclusive otherwise — net sync fix, todo P1 #4).
+    unsafe {
+        net_lock();
+        handle_arp_inner(frame);
+        net_unlock();
+    }
+}
+
+/// Lock-free body of handle_arp (caller holds net_lock).
+///
+/// # Safety
+///
+/// Caller contract: net_lock() held.
+unsafe fn handle_arp_inner(frame: &[u8]) {
+    // SAFETY: all frame indexing bounds-checked against the length check above; net_lock() held by caller.
     unsafe {
         if frame.len() < 42 {
             return;

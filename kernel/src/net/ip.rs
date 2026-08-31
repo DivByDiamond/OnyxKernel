@@ -1,5 +1,6 @@
 use crate::net::G_IP;
 use crate::net::eth;
+use crate::net::lock::{net_lock, net_unlock};
 use onyx_core::errno::{Errno, KResult};
 
 pub const IP_HLEN: usize = 20;
@@ -31,7 +32,29 @@ pub fn checksum(data: &[u8]) -> u16 {
 /// concurrently with another sender/poller on a different hart (IP_ID
 /// and the ARP cache are unguarded; SIE=0 only bars same-hart preemption).
 pub unsafe fn send_packet(dst_ip: [u8; 4], protocol: u8, payload: &[u8]) -> KResult<()> {
-    // SAFETY: header vector sized IP_HLEN + payload.len(); IP_ID RMW and ARP cache unguarded per the single-sender contract above.
+    // SAFETY: header vector sized IP_HLEN + payload.len().
+    //
+    // Net sync fix (todo P1 #4) + reentrancy fix (todo P1 #6): the whole
+    // TX path runs under the recursive NET lock, which makes the IP_ID RMW
+    // and the ARP cache lookups atomic w.r.t. other harts AND makes the
+    // poll() call below (ARP-resolve wait loop) safe on this hart — poll's
+    // dispatch handlers re-acquire the same lock recursively (owner-only).
+    // The old "single-sender contract" is enforced by the lock now.
+    unsafe {
+        net_lock();
+        let result = send_packet_inner(dst_ip, protocol, payload);
+        net_unlock();
+        result
+    }
+}
+
+/// Lock-free body of send_packet (caller holds net_lock).
+///
+/// # Safety
+///
+/// Caller contract: net_lock() held; may re-enter poll() (recursive lock).
+unsafe fn send_packet_inner(dst_ip: [u8; 4], protocol: u8, payload: &[u8]) -> KResult<()> {
+    // SAFETY: header vector sized IP_HLEN + payload.len(); IP_ID RMW and ARP cache accessed under the caller's net_lock().
     unsafe {
         let dst_mac = if dst_ip == [255, 255, 255, 255] {
             [0xFF; 6]

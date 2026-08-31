@@ -164,9 +164,13 @@ pub unsafe fn enter_user(pid: u32) -> ! {
 }
 
 pub fn count() -> usize {
-    // SAFETY: debug/stat traversal of G_ALL_PROCS (procfs, kdump). Caller
-    // contract: best-effort count from diagnostic contexts; unlike
-    // limits::live_proc_count this path does NOT take proc_list_lock.
+    // Waitpid-race follow-up (todo P1 #2): traversal now under
+    // proc_list_lock; try_lock because count() is also called from the
+    // panic path (srv::kdump) which may fire while the lock is already
+    // held — degrade to a best-effort unlocked read rather than deadlock.
+    let locked = proc_list_lock_avail();
+    // SAFETY: locked path excludes concurrent list mutation; degraded panic
+    // path accepts a best-effort racy read (diagnostics only).
     unsafe {
         let mut n = 0;
         let mut cur = G_ALL_PROCS;
@@ -176,6 +180,15 @@ pub fn count() -> usize {
             }
             cur = (*cur).all_next;
         }
+        if locked {
+            proc_list_unlock();
+        }
         n
     }
+}
+
+/// Non-blocking variant used by diagnostic paths that must never deadlock
+/// against a lock already held in the current (panic) context.
+fn proc_list_lock_avail() -> bool {
+    super::process::G_PROC_LIST_LOCK.try_lock()
 }

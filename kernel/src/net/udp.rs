@@ -1,5 +1,6 @@
 use crate::net::G_IP;
 use crate::net::ip;
+use crate::net::lock::{net_lock, net_unlock};
 use onyx_core::errno::{Errno, KResult};
 
 pub const UDP_HLEN: usize = 8;
@@ -27,7 +28,8 @@ fn alloc_udp_sock() -> Option<usize> {
 }
 
 fn next_udp_port() -> u16 {
-    // SAFETY: RMW on the NEXT_UDP_PORT static -- unguarded; single-hart-at-a-time socket-op contract.
+    // SAFETY: RMW on the NEXT_UDP_PORT static; runs under net_lock() held
+    // by every caller (net sync fix, todo P1 #4).
     unsafe {
         let p = NEXT_UDP_PORT;
         NEXT_UDP_PORT = NEXT_UDP_PORT.wrapping_add(1);
@@ -73,6 +75,21 @@ fn udp_checksum(src_ip: &[u8; 4], dst_ip: &[u8; 4], segment: &[u8]) -> u16 {
 /// caller owns `socket` exclusively (a &mut reference) and must not run
 /// concurrent senders on other harts (net single-sender contract).
 pub unsafe fn udp_send(socket: &mut UdpSocket, data: &[u8]) -> KResult<()> {
+    // SAFETY: segment vector sized UDP_HLEN + data.len(); socket access is through the exclusive &mut above; net_lock() guards G_IP reads and the nested ip::send_packet (recursive, same hart).
+    unsafe {
+        net_lock();
+        let result = send_packet_inner(socket, data);
+        net_unlock();
+        result
+    }
+}
+
+/// Lock-free body of udp_send (caller holds net_lock; may already be nested).
+///
+/// # Safety
+///
+/// Caller contract: net_lock() held; `socket` exclusively owned by the caller.
+unsafe fn send_packet_inner(socket: &mut UdpSocket, data: &[u8]) -> KResult<()> {
     // SAFETY: segment vector sized UDP_HLEN + data.len(); socket access is through the exclusive &mut above.
     unsafe {
         if !socket.connected {
@@ -99,7 +116,21 @@ pub unsafe fn udp_send(socket: &mut UdpSocket, data: &[u8]) -> KResult<()> {
 /// slots; must run under the net single-poller contract (no concurrent
 /// socket syscalls on another hart).
 pub unsafe fn handle_udp(frame: &[u8], ip_start: usize) {
-    // SAFETY: offsets bounds-checked before indexing; ring writes masked % UDP_BUF_SIZE; table per contract above.
+    // SAFETY: offsets bounds-checked before indexing; ring writes masked % UDP_BUF_SIZE; table access under net_lock() (recursive: net::poll already holds it on this hart).
+    unsafe {
+        net_lock();
+        handle_udp_inner(frame, ip_start);
+        net_unlock();
+    }
+}
+
+/// Lock-free body of handle_udp (caller holds net_lock).
+///
+/// # Safety
+///
+/// Caller contract: net_lock() held.
+unsafe fn handle_udp_inner(frame: &[u8], ip_start: usize) {
+    // SAFETY: offsets bounds-checked before indexing; ring writes masked % UDP_BUF_SIZE; net_lock() held by caller.
     unsafe {
         let ip_ihl = (frame[ip_start] & 0x0F) as usize * 4;
         let udp_start = ip_start + ip_ihl;
@@ -141,9 +172,15 @@ pub unsafe fn handle_udp(frame: &[u8], ip_start: usize) {
 /// Allocates a slot in the lock-free UDP_SOCKS table; caller must
 /// serialize bind/close across harts (no lock guards the table).
 pub unsafe fn udp_bind(port: u16) -> KResult<usize> {
-    // SAFETY: idx comes from alloc_udp_sock (a free slot), fully initialized before publication.
+    // SAFETY: idx comes from alloc_udp_sock (a free slot), fully initialized
+    // before publication; net_lock() excludes concurrent bind/close races
+    // (net sync fix, todo P1 #4).
     unsafe {
-        let idx = alloc_udp_sock().ok_or(Errno::Busy)?;
+        net_lock();
+        let idx = alloc_udp_sock().ok_or_else(|| {
+            net_unlock();
+            Errno::Busy
+        })?;
         UDP_SOCKS[idx] = Some(UdpSocket {
             local_port: port,
             remote_ip: [0; 4],
@@ -154,6 +191,7 @@ pub unsafe fn udp_bind(port: u16) -> KResult<usize> {
             recv_len: 0,
             recv_head: 0,
         });
+        net_unlock();
         Ok(idx)
     }
 }
@@ -164,7 +202,24 @@ pub unsafe fn udp_bind(port: u16) -> KResult<usize> {
 /// single-sender contract as the other socket ops -- the alloc->send
 /// window is not lock-protected across harts.
 pub unsafe fn udp_sendto(dst_ip: [u8; 4], dst_port: u16, data: &[u8]) -> KResult<()> {
-    // SAFETY: temp slot fully initialized; alloc->use window re-checked fail-closed (see audit note below); single-sender contract.
+    // SAFETY: temp slot fully initialized; alloc->use window is now atomic
+    // w.r.t. other harts because the whole alloc->send->free sequence runs
+    // under net_lock() (net sync fix, todo P1 #4).
+    unsafe {
+        net_lock();
+        let result = udp_sendto_inner(dst_ip, dst_port, data);
+        net_unlock();
+        result
+    }
+}
+
+/// Lock-free body of udp_sendto (caller holds net_lock).
+///
+/// # Safety
+///
+/// Caller contract: net_lock() held.
+unsafe fn udp_sendto_inner(dst_ip: [u8; 4], dst_port: u16, data: &[u8]) -> KResult<()> {
+    // SAFETY: temp slot fully initialized; alloc->use window re-checked fail-closed (see audit note below); net_lock() held by caller.
     unsafe {
         let idx = alloc_udp_sock().ok_or(Errno::Busy)?;
         let port = next_udp_port();
@@ -203,8 +258,29 @@ pub unsafe fn udp_sendto(dst_ip: [u8; 4], dst_port: u16, data: &[u8]) -> KResult
 /// own that slot exclusively -- a concurrent udp_recv or handle_udp on
 /// the same slot from another hart would race the ring indices.
 pub unsafe fn udp_recv(sock_idx: usize, buf: &mut [u8]) -> KResult<usize> {
-    // SAFETY: valid-slot contract on sock_idx; ring reads masked % UDP_BUF_SIZE; head/len advanced under exclusive ownership.
+    // SAFETY: valid-slot contract on sock_idx; ring reads masked % UDP_BUF_SIZE; head/len advanced under net_lock() so a concurrent poll/handle_udp cannot race the ring (net sync fix, todo P1 #4).
     unsafe {
+        net_lock();
+        let r = udp_recv_inner(sock_idx, buf);
+        net_unlock();
+        r
+    }
+}
+
+/// Lock-free body of udp_recv (caller holds net_lock).
+///
+/// # Safety
+///
+/// Caller contract: net_lock() held; valid slot index.
+unsafe fn udp_recv_inner(sock_idx: usize, buf: &mut [u8]) -> KResult<usize> {
+    // SAFETY: sock_idx is bounds-checked below (a hostile/out-of-range
+    // index returns EINVAL instead of indexing out of the slot table and
+    // panicking the kernel); ring reads masked % UDP_BUF_SIZE; caller holds
+    // net_lock().
+    unsafe {
+        if sock_idx >= MAX_UDP_SOCKS {
+            return Err(Errno::Inval);
+        }
         let sock = UDP_SOCKS[sock_idx].as_mut().ok_or(Errno::Inval)?;
         if sock.recv_len == 0 {
             return Err(Errno::NoEnt);
@@ -224,8 +300,14 @@ pub unsafe fn udp_recv(sock_idx: usize, buf: &mut [u8]) -> KResult<usize> {
 /// Drops slot `sock_idx`; caller must guarantee no other hart is
 /// concurrently reading or writing that slot (no lock protects it).
 pub unsafe fn udp_close(sock_idx: usize) {
-    // SAFETY: plain slot overwrite; valid-index contract on sock_idx per the caller.
+    // SAFETY: plain slot overwrite under net_lock(); sock_idx is
+    // bounds-checked so an out-of-range index cannot panic the kernel.
     unsafe {
+        if sock_idx >= MAX_UDP_SOCKS {
+            return;
+        }
+        net_lock();
         UDP_SOCKS[sock_idx] = None;
+        net_unlock();
     }
 }

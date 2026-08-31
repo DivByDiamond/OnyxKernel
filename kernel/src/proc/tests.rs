@@ -129,3 +129,90 @@ fn test_proc_state_ordering() {
     assert!((ProcState::Running as u32) < (ProcState::Exited as u32));
     assert!((ProcState::Exited as u32) < (ProcState::Waiting as u32));
 }
+
+// ── Fork-race fix tests (todo P1 #1): Creating state + publish_ready ──────
+
+#[test]
+fn test_proc_state_creating_value() {
+    // The fork-race fix adds Creating = 5; a Creating process must never be
+    // confused with a runnable one.
+    assert_eq!(ProcState::Creating as u32, 5);
+    assert!(ProcState::Creating != ProcState::Ready);
+    assert!(ProcState::Creating != ProcState::Free);
+}
+
+/// Combined test: G_ALL_PROCS and the runqueues are process-global statics
+/// and the host harness runs #[test] fns in parallel, so every
+/// create/publish invariant lives in one function (same pattern as
+/// runqueue.rs).
+#[test]
+fn test_fork_creating_not_runnable_until_publish() {
+    use crate::proc::process::{G_ALL_PROCS, by_pid_unlocked, proc_list_lock, proc_list_unlock};
+    use crate::proc::scheduler::runqueue;
+
+    unsafe {
+        super::process::init();
+        runqueue::init();
+
+        // Hand-build a child exactly as create_user leaves it: linked into
+        // G_ALL_PROCS, state Creating, NOT enqueued on any runqueue.
+        let mut child = Box::new(Proc::new());
+        child.pid = 7001;
+        child.parent_pid = 7000;
+        child.state = ProcState::Creating;
+        child.affinity = -1;
+        child.on_rq = false;
+        let child_ptr = Box::into_raw(child);
+
+        proc_list_lock();
+        (*child_ptr).all_next = G_ALL_PROCS;
+        G_ALL_PROCS = child_ptr;
+        proc_list_unlock();
+
+        // Invariant 1 (the race fix): the scheduler must find NOTHING to run
+        // while the child is Creating — a work-stealing hart can never pick
+        // it up with zeroed fds.
+        assert!(crate::proc::scheduler::dequeue(0).is_null());
+        assert!(!(*child_ptr).on_rq);
+
+        // Invariant 2: the child IS visible to by_pid (waitpid's has_child
+        // scan must see it as a live child while it is being initialized).
+        proc_list_lock();
+        assert!(by_pid_unlocked(7001).is_some());
+        proc_list_unlock();
+
+        // Invariant 3: publish_ready flips Creating → Ready and enqueues —
+        // the atomic publication point at the END of the state copy.
+        assert!(crate::proc::publish_ready(7001));
+        assert!(matches!((*child_ptr).state, ProcState::Ready));
+        assert!((*child_ptr).on_rq);
+
+        // Invariant 4: after publication the scheduler can dequeue it.
+        let picked = crate::proc::scheduler::dequeue(0);
+        assert_eq!(picked, child_ptr);
+        assert!(!(*child_ptr).on_rq);
+
+        // Invariant 5: double publish is rejected (Creating-only transition).
+        assert!(!crate::proc::publish_ready(7001));
+        assert!(matches!((*child_ptr).state, ProcState::Ready));
+
+        // Invariant 6: publish of an unknown pid fails cleanly.
+        assert!(!crate::proc::publish_ready(424_242));
+
+        // Unlink + drop (host test cleanup; free_proc would kfree a Box).
+        proc_list_lock();
+        if G_ALL_PROCS == child_ptr {
+            G_ALL_PROCS = (*child_ptr).all_next;
+        } else {
+            let mut walk = G_ALL_PROCS;
+            while !walk.is_null() && (*walk).all_next != child_ptr {
+                walk = (*walk).all_next;
+            }
+            if !walk.is_null() {
+                (*walk).all_next = (*child_ptr).all_next;
+            }
+        }
+        proc_list_unlock();
+        drop(Box::from_raw(child_ptr));
+    }
+}

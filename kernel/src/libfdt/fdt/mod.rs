@@ -13,12 +13,13 @@ mod walk;
 
 pub(crate) use types::{
     FDT_BEGIN_NODE, FDT_END, FDT_END_NODE, FDT_MAGIC, FDT_NOP, FDT_PROP, G_DTB, G_STRINGS,
-    G_STRUCT, G_STRUCT_SIZE,
+    G_STRINGS_SIZE, G_STRUCT, G_STRUCT_SIZE, G_TOTALSIZE,
 };
 
 pub use clint::find_clint;
 pub use framebuffer::find_simple_framebuffer;
 pub use init::init;
+pub(crate) use init::init_from;
 pub use memory::memory;
 pub use model::{is_qemu, is_sedna, model};
 pub use plic::find_plic;

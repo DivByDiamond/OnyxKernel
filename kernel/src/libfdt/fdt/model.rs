@@ -65,24 +65,33 @@ pub unsafe fn model() -> &'static str {
     }
 }
 
-/// Detect the OC2R/sedna platform. The device tree carries the root
-/// compatible "riscv-sedna" and/or the model "riscv-virtio,sedna" — both
-/// contain "sedna", so scan the FDT memory for that substring. On this
-/// platform the peripheral nodes (UART/PLIC/CLINT/virtio) are NOT present in
-/// the device tree — the stock minux firmware uses hardcoded addresses, so
-/// we do too.
-pub unsafe fn is_sedna() -> bool {
+/// Scan the validated DTB blob (bounded by its real totalsize) for a
+/// substring. Shared by is_sedna/is_qemu.
+///
+/// Bounds-checking fix (todo P1 #7): the scan previously always swept a
+/// fixed 256 KiB window regardless of the actual blob size. It now reads
+/// totalsize from the DTB header (offset 4, the field init_from validated)
+/// and never touches bytes past `min(totalsize, 256 KiB) - needle.len()`.
+///
+/// # Safety
+///
+/// `init()` must have succeeded (G_DTB valid, magic checked, in mapped
+/// RAM); runs single-threaded during early boot.
+unsafe fn scan_blob(needle: &[u8]) -> bool {
     unsafe {
         // SAFETY: G_DTB was set by init() (magic-validated, in mapped RAM);
-        // the scan stays within 256 KiB of the DTB base. Caller contract:
-        // the firmware places the DTB far enough from the RAM top that this
-        // window is readable.
+        // the scan is bounded by the header's totalsize so it cannot run
+        // past the blob.
         let dtb = super::G_DTB;
-        if dtb == 0 {
+        if dtb == 0 || needle.is_empty() {
             return false;
         }
-        let needle = b"sedna";
-        for i in 0..0x40000usize {
+        let totalsize = rd32(dtb, 4) as usize;
+        // Belt and braces: clamp to the legacy 256 KiB window AND to the
+        // declared blob size; leave room for the needle itself.
+        let limit = totalsize.min(0x40000).saturating_sub(needle.len());
+        let mut i = 0usize;
+        while i <= limit {
             let p = (dtb + i) as *const u8;
             let mut ok = true;
             for (j, &nb) in needle.iter().enumerate() {
@@ -94,9 +103,32 @@ pub unsafe fn is_sedna() -> bool {
             if ok {
                 return true;
             }
+            i += 1;
         }
         false
     }
+}
+
+/// Read a big-endian u32 at `offset` in the DTB header.
+///
+/// # Safety
+///
+/// `base` must point at a mapped, magic-validated DTB; `offset` must be
+/// inside the 40-byte header.
+unsafe fn rd32(base: usize, offset: usize) -> u32 {
+    // SAFETY: header read per the caller contract (init validated the blob).
+    unsafe { super::reader::rd32((base + offset) as *const u8) }
+}
+
+/// Detect the OC2R/sedna platform. The device tree carries the root
+/// compatible "riscv-sedna" and/or the model "riscv-virtio,sedna" — both
+/// contain "sedna", so scan the FDT memory for that substring. On this
+/// platform the peripheral nodes (UART/PLIC/CLINT/virtio) are NOT present in
+/// the device tree — the stock minux firmware uses hardcoded addresses, so
+/// we do too.
+pub unsafe fn is_sedna() -> bool {
+    // SAFETY: scan_blob is bounded by the DTB totalsize (bounds fix, todo P1 #7).
+    unsafe { scan_blob(b"sedna") }
 }
 
 /// Detect the QEMU virt machine. The device tree model is
@@ -106,29 +138,6 @@ pub unsafe fn is_sedna() -> bool {
 /// SG2000 EHCI/OHCI addresses (0x04C00000) would raise a load access
 /// fault on unmapped MMIO.
 pub unsafe fn is_qemu() -> bool {
-    unsafe {
-        // SAFETY: G_DTB was set by init() (magic-validated, in mapped RAM);
-        // the scan stays within 256 KiB of the DTB base. Caller contract:
-        // the firmware places the DTB far enough from the RAM top that this
-        // window is readable.
-        let dtb = super::G_DTB;
-        if dtb == 0 {
-            return false;
-        }
-        let needle = b"qemu";
-        for i in 0..0x40000usize {
-            let p = (dtb + i) as *const u8;
-            let mut ok = true;
-            for (j, &nb) in needle.iter().enumerate() {
-                if *p.add(j) != nb {
-                    ok = false;
-                    break;
-                }
-            }
-            if ok {
-                return true;
-            }
-        }
-        false
-    }
+    // SAFETY: scan_blob is bounded by the DTB totalsize (bounds fix, todo P1 #7).
+    unsafe { scan_blob(b"qemu") }
 }

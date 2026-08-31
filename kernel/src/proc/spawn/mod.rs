@@ -1,6 +1,7 @@
 use super::lifecycle::{alloc_proc, free_proc};
 use super::process::{
-    PROC_PID_INIT, PROC_RING_ROOT, PROC_RING_USER, ProcState, alloc_pid, hart_id,
+    PROC_PID_INIT, PROC_RING_ROOT, PROC_RING_USER, Proc, ProcState, alloc_pid, by_pid_unlocked,
+    hart_id, proc_list_lock, proc_list_unlock,
 };
 use crate::arch::regs::*;
 use crate::arch::trap_frame::{TrapFrame, reg_truncate};
@@ -19,6 +20,14 @@ pub use wait::*;
 /// the new process; `root_refcount` (if non-null) points at a shared 4-byte
 /// refcount cell; on success the caller must not destroy root_pa (the proc
 /// owns it); on failure create_user keeps ownership semantics unchanged.
+///
+/// Fork-race fix (todo P1 #1): on success the new node is left in
+/// [`ProcState::Creating`] and is NOT placed on any runqueue. The caller
+/// must finish copying all inherited state (fds, signal handlers, cwd,
+/// trap frame, ...) and then atomically publish the child with
+/// [`publish_ready`]. Until that point no work-stealing hart can observe a
+/// half-initialized child: the scheduler only ever dequeues nodes that
+/// were explicitly enqueued by `publish_ready`.
 pub unsafe fn create_user(
     entry: u64,
     ustack: u64,
@@ -31,9 +40,10 @@ pub unsafe fn create_user(
     argv_sp: u64,
     root_refcount: *mut u32,
 ) -> KResult<()> {
-    // SAFETY: alloc_proc's node is fully initialized before enqueue; the
-    // enqueue happens under rq_lock(caller_hart); root_refcount (when
-    // shared) is only accessed via atomic dec_root_refcount.
+    // SAFETY: alloc_proc's node is fully initialized before publication; the
+    // node is linked into G_ALL_PROCS (state Creating, never enqueued) so
+    // waitpid/by_pid can find it; root_refcount (when shared) is only
+    // accessed via atomic dec_root_refcount.
     unsafe {
         if entry == 0 {
             crate::kerr!("create_user", "entry=0 — would cause page fault, rejecting");
@@ -47,7 +57,10 @@ pub unsafe fn create_user(
         let p = alloc_proc()?;
         (*p).pid = pid;
         (*p).ring = ring;
-        (*p).state = ProcState::Ready;
+        // Creating, not Ready: the node is visible in G_ALL_PROCS (waitpid
+        // has_child scans treat it as a live child) but deliberately not
+        // runnable until publish_ready runs.
+        (*p).state = ProcState::Creating;
         (*p).parent_pid = parent_pid;
         (*p).exit_code = 0;
         (*p).root_pa = root_pa;
@@ -89,10 +102,6 @@ pub unsafe fn create_user(
             (*p).tf.satp = crate::arch::bits::SATP_MODE_SV32
                 | (((root_pa >> 12) & 0x3FF_FFFF) as crate::arch::trap_frame::Reg);
         }
-        let caller_hart = hart_id();
-        rq_lock(caller_hart);
-        enqueue(caller_hart, p);
-        rq_unlock(caller_hart);
         // Every newly created process becomes the foreground process (console
         // Ctrl+C target) until the next one is created. init (pid 1) never
         // becomes foreground — Ctrl+C must not kill pid 1.
@@ -100,6 +109,46 @@ pub unsafe fn create_user(
             super::signals::set_foreground(pid);
         }
         Ok(())
+    }
+}
+
+/// Publish a `Creating` process as runnable: atomically transition
+/// Creating → Ready and enqueue it on the CALLING hart's runqueue.
+///
+/// Fork-race fix (todo P1 #1): this is the single publication point for
+/// fork/spawn children. The state write and the enqueue happen under the
+/// process-list lock (PROC_LIST_LOCK outermost, rq_lock nested — same lock
+/// order as the exit path's B4 fix), so a concurrent `waitpid`/`exit`
+/// observer either sees the child still Creating (not yet on any runqueue)
+/// or fully Ready+enqueued, never a half-published mix.
+///
+/// Returns `true` if `pid` identified a Creating process that is now
+/// runnable; `false` for unknown pids or processes in any other state
+/// (double-publish is rejected — the caller must publish exactly once).
+///
+/// # Safety
+///
+/// Caller contract: must NOT already hold proc_list_lock (self-deadlock);
+/// `pid` must have been allocated by this hart's own fork/spawn path.
+pub unsafe fn publish_ready(pid: u32) -> bool {
+    // SAFETY: list traversal and the state/enqueue publication run under
+    // proc_list_lock taken here; rq_lock is nested inside (documented
+    // order), so no runqueue can observe the node unlocked.
+    unsafe {
+        proc_list_lock();
+        let published = match by_pid_unlocked(pid) {
+            Some(p) if matches!(p.state, ProcState::Creating) => {
+                p.state = ProcState::Ready;
+                let caller_hart = hart_id();
+                rq_lock(caller_hart);
+                enqueue(caller_hart, p as *mut Proc);
+                rq_unlock(caller_hart);
+                true
+            }
+            _ => false,
+        };
+        proc_list_unlock();
+        published
     }
 }
 
@@ -159,6 +208,15 @@ pub unsafe fn spawn(path: &[u8], argv_user: u64, ring_hint: u8, parent_pid: u32)
             // the user pages stay mapped (and accounted) forever.
             crate::mm::vmm::destroy_root(r.root_pa);
             return Err(e);
+        }
+        // Fork-race fix: spawn copied ALL inherited state inside create_user
+        // (fresh image, zeroed fds), so publish immediately. create_user
+        // guarantees the child is Creating here; make it runnable.
+        if !publish_ready(new_pid) {
+            // Unreachable by contract (create_user left the node Creating);
+            // keep the address-space accounting honest if it ever trips.
+            crate::mm::vmm::destroy_root(r.root_pa);
+            return Err(Errno::Inval);
         }
         Ok(new_pid)
     }

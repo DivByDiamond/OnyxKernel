@@ -2,6 +2,7 @@
 //! `sys_spawn`, `sys_wait`, `sys_kill`, `sys_sigmask`.
 use crate::arch::trap_frame::TrapFrame;
 use crate::proc;
+use crate::proc::process::ProcState;
 use onyx_core::errno::Errno;
 
 use super::handler::user_ptr_ok;
@@ -168,11 +169,18 @@ pub(super) unsafe fn sys_sigmask(how: u32, sig: u32) -> i64 {
 /// # Safety
 ///
 /// Call only from the syscall path with this hart's current process set;
-/// the affinity field of the target is written after the ring/perm check.
+/// no user memory is touched.
+///
+/// sched_setaffinity UAF fix (todo P1 #3): the whole lookup → Exited check →
+/// affinity write now runs under proc_list_lock. Previously by_pid() dropped
+/// the lock before the write, so a concurrent waitpid could reap the target
+/// (state Exited → kfree) between lookup and write — a use-after-free. The
+/// Exited rejection additionally stops callers from pinning a zombie.
 pub(super) unsafe fn sys_sched_setaffinity(pid: u64, cpu: i64) -> i64 {
-    // SAFETY: by_pid() takes proc_list_lock internally for the lookup; the
-    // affinity store follows by_pid's documented per-caller field-mutation
-    // discipline.
+    // SAFETY: the G_ALL_PROCS traversal (by_pid_unlocked) and the affinity
+    // write both run under proc_list_lock taken here, excluding concurrent
+    // reap (waitpid takes the same lock to unlink+kfree); the ring check
+    // reads only this hart's own current Proc.
     unsafe {
         // Bug (syscall MINOR #12): validate pid range. The previous code did
         // `by_pid(pid as u32)` which silently truncated a u64 pid > u32::MAX
@@ -184,15 +192,28 @@ pub(super) unsafe fn sys_sched_setaffinity(pid: u64, cpu: i64) -> i64 {
         if cpu < -1 || cpu >= crate::proc::process::MAX_HARTS as i64 {
             return Errno::Inval.as_i64();
         }
-        if let Some(p) = crate::proc::by_pid(pid as u32) {
-            let cur = crate::proc::current();
-            if cur.pid != pid as u32 && cur.ring > crate::proc::PROC_RING_ROOT {
-                return Errno::Perm.as_i64();
+        let cur = crate::proc::current();
+        crate::proc::process::proc_list_lock();
+        let target = crate::proc::process::by_pid_unlocked(pid as u32);
+        let res = match target {
+            Some(p) => {
+                // UAF guard: an Exited (zombie) process may be reaped as soon
+                // as the lock is dropped — refuse it outright (ESRCH).
+                if matches!(p.state, ProcState::Exited) {
+                    Err(Errno::NoEnt)
+                } else if cur.pid != pid as u32 && cur.ring > crate::proc::PROC_RING_ROOT {
+                    Err(Errno::Perm)
+                } else {
+                    p.affinity = cpu as i32;
+                    Ok(())
+                }
             }
-            p.affinity = cpu as i32;
-            0
-        } else {
-            Errno::NoEnt.as_i64()
+            None => Err(Errno::NoEnt),
+        };
+        crate::proc::process::proc_list_unlock();
+        match res {
+            Ok(()) => 0,
+            Err(e) => e.as_i64(),
         }
     }
 }
@@ -200,16 +221,26 @@ pub(super) unsafe fn sys_sched_setaffinity(pid: u64, cpu: i64) -> i64 {
 /// # Safety
 ///
 /// Call only from the syscall path with this hart's current process set;
-/// the target's affinity field is only read.
+/// no user memory is touched. Same proc_list_lock discipline as
+/// sys_sched_setaffinity (the read would otherwise race a concurrent reap).
 pub(super) unsafe fn sys_sched_getaffinity(pid: u64) -> i64 {
-    // SAFETY: by_pid() takes proc_list_lock internally for the lookup; the
-    // affinity read follows by_pid's documented per-caller field-access
-    // discipline.
+    // SAFETY: traversal + affinity read under proc_list_lock taken here.
     unsafe {
-        if let Some(p) = crate::proc::by_pid(pid as u32) {
-            p.affinity as i64
-        } else {
-            Errno::NoEnt.as_i64()
+        if pid > u32::MAX as u64 {
+            return Errno::Inval.as_i64();
         }
+        crate::proc::process::proc_list_lock();
+        let res = match crate::proc::process::by_pid_unlocked(pid as u32) {
+            Some(p) => {
+                if matches!(p.state, ProcState::Exited) {
+                    Errno::NoEnt.as_i64()
+                } else {
+                    p.affinity as i64
+                }
+            }
+            None => Errno::NoEnt.as_i64(),
+        };
+        crate::proc::process::proc_list_unlock();
+        res
     }
 }

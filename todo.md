@@ -38,35 +38,51 @@
 
 ### 🔥 Приоритет 1 — Критические гонки и баги (БЛОКЕР СТАБИЛЬНОСТИ!)
 **Владелец: GLM** — объёмная работа, требует глубокого понимания concurrency
+**Статус: ✅ ВЫПОЛНЕНО 2026-08-31** (см. docs/CONCURRENCY.md, git-история)
 
-- [ ] **fork race**: create_user ставит ребёнка Ready+enqueue ДО копирования fds/signal_handlers/
+- [x] **fork race**: create_user ставит ребёнка Ready+enqueue ДО копирования fds/signal_handlers/
       cwd/mmap_brk/tf (fs_sys3/extra/exec/fork.rs) — work-stealing харт может забрать
       ребёнка с нулевыми fd.
-      **Фикс**: переместить enqueue после полного копирования состояния.
+      **Фикс (2026-08-31)**: новое ProcState::Creating; create_user больше не enqueue-ит;
+      sys_fork копирует всё состояние, затем атомарная публикация proc::publish_ready
+      (Creating→Ready+enqueue под PROC_LIST_LOCK, rq_lock внутри).
 
-- [ ] **waitpid data race**: sys_waitpid пишет state=Waiting вне proc_list_lock (exec/mod.rs:115);
+- [x] **waitpid data race**: sys_waitpid пишет state=Waiting вне proc_list_lock (exec/mod.rs:115);
       proc::dump_all тоже итерирует G_ALL_PROCS без лока.
-      **Фикс**: обернуть запись state в proc_list_lock или использовать AtomicU8.
+      **Фикс (2026-08-31)**: Waiting публикуется в той же крит-секции, что и has_child
+      (протокол B4); dump_all/count() обходят список под try_lock (panic-путь деградирует
+      в best-effort, а не дедлок).
 
-- [ ] **sched_setaffinity UAF**: p.affinity пишется без лока, by_pid может вернуть Exited
+- [x] **sched_setaffinity UAF**: p.affinity пишется без лока, by_pid может вернуть Exited
       proc — узкое окно UAF с конкурентным waitpid.
-      **Фикс**: проверка state + лок на весь критический участок.
+      **Фикс (2026-08-31)**: lookup+проверка Exited+запись affinity целиком под
+      proc_list_lock (by_pid_unlocked); Exited → ESRCH; getaffinity — так же.
 
-- [ ] **Сеть без синхронизации**: UDP_SOCKS/CONNS/ARP cache/IP_ID/NEXT_PORT/VX rings
+- [x] **Сеть без синхронизации**: UDP_SOCKS/CONNS/ARP cache/IP_ID/NEXT_PORT/VX rings
       мутируются из syscall-пути (net_sys.rs) без лока между хартами.
-      **Фикс**: SpinLock для каждой shared структуры; учесть reentrancy в ip::send_packet→net::poll.
+      **Фикс (2026-08-31)**: рекурсивный NET_LOCK (net/lock.rs: owner+depth) вокруг всех
+      pub-функций udp/tcp/arp/ip, poll и RX-обработчиков; udp_recv/udp_close получили
+      bounds-check индексов (раньше паниковали).
 
-- [ ] **procfs G_PROCBUF race**: shared static mut scratch-буфер без лока (procfs/content.rs).
-      **Фикс**: per-hart буфер или SpinLock.
+- [x] **procfs G_PROCBUF race**: shared static mut scratch-буфер без лока (procfs/content.rs).
+      **Фикс (2026-08-31)**: per-hart G_PROCBUF_HARTS[MAX_HARTS][PROCFS_MAX_SIZE],
+      индекс hart_id (маскирован) — нулевая контенция, SIE=0 покрывает same-hart.
 
-- [ ] **chown без проверки владельца**: любой процесс может chown любой файл (vfs/meta/chown.rs).
-      **Фикс**: проверка uid == inode.owner || ring <= 1.
+- [x] **chown без проверки владельца**: любой процесс может chown любой файл (vfs/meta/chown.rs).
+      **Фикс (2026-08-31)**: chown_allowed() (uid==owner || uid==0 || ring<=ROOT), EPERM
+      иначе; bypass is_kernel_boot как в chmod; применяется в chown и fchown (stat по ino).
 
-- [ ] **libfdt bounds checking**: walk читает токены за границей; is_sedna/is_qemu сканируют
+- [x] **libfdt bounds checking**: walk читает токены за границей; is_sedna/is_qemu сканируют
       256KiB без totalsize-бонда; cstr_at может уйти за strings block.
-      **Фикс**: добавить bounds-проверки на все операции с DTB.
+      **Фикс (2026-08-31)**: init_from валидирует offset/size против totalsize (cap 4MiB);
+      walk ограничивает токены/имена/prop-data концом блока; cstr_at ограничен
+      strings-блоком; is_sedna/is_qemu сканируют min(totalsize, 256KiB).
 
-**Тесты**: написать юнит-тесты для каждого фикса (race-симуляция через smp-режим).
+**Тесты (2026-08-31)**: хост 131/131 (`cargo test -p onyx_kernel`: proc fork-publish
+инварианты, net table exclusivity + NET_LOCK рекурсия, chown policy, fdt malformed-DTB);
+`cargo test -p onyx_core` зелёный; kbuild/kbuild32/smode собираются; clippy strict чистый;
+QEMU SMP 2 и 4: полный boot → login → fork-стресс фоновыми задачами → procfs → 0 паников
+(`scripts/test_concurrency.sh`).
 
 ### 🎮 Приоритет 2 — Lua runtime для OC2R
 **Владелец: boba** — быстрая реализация, видимый результат

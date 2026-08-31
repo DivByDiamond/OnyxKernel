@@ -116,14 +116,20 @@ pub unsafe fn sys_execve(tf: &mut TrapFrame, path: u64, argv: u64, envp: u64) ->
 /// # Safety
 ///
 /// Call only from handler::handle's syscall path with a live trap frame;
-/// the parent is the current process on this hart. The child is enqueued
-/// (and remotely stealable) inside proc::create_user BEFORE the fds/cwd/tf
-/// copies below run, so the caller relies on the child not being stolen
-/// mid-initialization (known race, reported in the audit).
+/// the parent is the current process on this hart.
+///
+/// Fork-race fix (todo P1 #1): `create_user` now leaves the child in
+/// `ProcState::Creating` and does NOT enqueue it, so no work-stealing hart
+/// can pick the child up while its fds/signal handlers/cwd/trap frame are
+/// still being copied below. All inherited state is copied FIRST; only then
+/// does `publish_ready` atomically flip the child to Ready and place it on
+/// the runqueue of this hart.
 pub unsafe fn sys_fork(tf: &mut TrapFrame) -> i64 {
     // SAFETY: parent is this hart's current process; the refcount cell is
     // a live heap u32 owned by the shared root table; by_pid() takes
-    // proc_list_lock for the child lookup before the field copies.
+    // proc_list_lock for the child lookup before the field copies, and
+    // publish_ready re-takes it for the Ready+enqueue publication, so the
+    // child is never observable half-initialized.
     unsafe {
         let parent = proc::current();
         let parent_pid = parent.pid;
@@ -165,8 +171,15 @@ pub unsafe fn sys_fork(tf: &mut TrapFrame) -> i64 {
             Ok(()) => {
                 let child = match proc::by_pid(new_pid) {
                     Some(p) => p,
+                    // by_pid right after create_user cannot fail (the node is
+                    // linked under the same lock); if it ever did, the child
+                    // would leak in Creating — never runnable, still reaped
+                    // as a has_child match by the parent's wait — instead of
+                    // running with a half-built state as before.
                     None => return new_pid as i64,
                 };
+                // Full state copy while the child is Creating (not on any
+                // runqueue): no other hart can touch it here.
                 child.fds = parent.fds;
                 child.signal_handlers = parent.signal_handlers;
                 child.signal_mask = parent.signal_mask;
@@ -174,6 +187,11 @@ pub unsafe fn sys_fork(tf: &mut TrapFrame) -> i64 {
                 child.cwd_len = parent.cwd_len;
                 child.mmap_brk = parent.mmap_brk;
                 child.tf = child_tf;
+                // Atomic publication: Creating → Ready + enqueue. From this
+                // point the child is fully initialized and may be stolen.
+                if !proc::publish_ready(new_pid) {
+                    return Errno::Again.as_i64();
+                }
                 new_pid as i64
             }
             Err(e) => {

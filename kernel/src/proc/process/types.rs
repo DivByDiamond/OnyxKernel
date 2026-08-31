@@ -36,6 +36,14 @@ pub enum ProcState {
     Running = 2,
     Exited = 3,
     Waiting = 4,
+    /// Fork-race fix (todo P1 #1): a freshly allocated child that has NOT
+    /// yet had its full state copied (fds / signal handlers / cwd / trap
+    /// frame). A Creating process is NEVER linked into any runqueue, so no
+    /// work-stealing hart can pick it up mid-initialization. The creating
+    /// hart publishes it atomically via `proc::publish_ready` once every
+    /// field is copied; the boot path (`enter_user`) may instead transition
+    /// Creating → Running directly.
+    Creating = 5,
 }
 
 #[repr(C, align(16))]

@@ -124,10 +124,15 @@ pub unsafe fn by_pid_unlocked(pid: u32) -> Option<&'static mut Proc> {
 }
 
 pub fn dump_all<W: onyx_core::fmt::Write>(w: &mut W) {
-    // SAFETY: debug traversal of G_ALL_PROCS. Caller contract: this is
-    // best-effort diagnostics (klog dump path) run from a context where the
-    // process list is not being concurrently reaped; unlike live_proc_count
-    // in limits.rs it does NOT take proc_list_lock.
+    // Waitpid-race follow-up (todo P1 #2): the traversal now runs under
+    // proc_list_lock so it cannot race concurrent unlink/reap. try_lock
+    // (not lock) because dump_all is also invoked from the panic path
+    // (srv::klog), which may fire while the lock is already held — then we
+    // degrade to a best-effort unlocked read instead of deadlocking the
+    // panic handler.
+    let locked = super::globals::G_PROC_LIST_LOCK.try_lock();
+    // SAFETY: with the lock held the list cannot be mutated under us; in the
+    // degraded panic path we accept a best-effort racy read (diagnostics).
     unsafe {
         let mut cur = G_ALL_PROCS;
         while !cur.is_null() {
@@ -137,7 +142,8 @@ pub fn dump_all<W: onyx_core::fmt::Write>(w: &mut W) {
                     ProcState::Running => "Running",
                     ProcState::Exited => "Exited",
                     ProcState::Waiting => "Waiting",
-                    _ => "???",
+                    ProcState::Creating => "Creating",
+                    ProcState::Free => "Free",
                 };
                 let args: &[onyx_core::fmt::Arg] = &[
                     onyx_core::fmt::Arg::from((*cur).pid),
@@ -149,5 +155,8 @@ pub fn dump_all<W: onyx_core::fmt::Write>(w: &mut W) {
             }
             cur = (*cur).all_next;
         }
+    }
+    if locked {
+        super::globals::proc_list_unlock();
     }
 }

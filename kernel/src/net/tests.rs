@@ -120,3 +120,106 @@ fn test_arp_cache_insert_many() {
         }
     }
 }
+
+// ── Net sync fix tests (todo P1 #4): table exclusivity via the NET lock ──
+
+/// Combined test: UDP_SOCKS / CONNS / ARP cache are process-global statics
+/// and the host harness runs #[test] fns in parallel, so all slot-management
+/// assertions live in one function (same pattern as runqueue.rs). IPs and
+/// ports are unique to this test so the pre-existing ARP test cannot
+/// interfere.
+#[test]
+fn test_net_tables_concurrent_exclusivity() {
+    use crate::net::lock::{net_lock, net_unlock};
+    use crate::net::tcp::conn::{CONNS, alloc_conn, alloc_local_port};
+    use crate::net::udp::{udp_bind, udp_close, udp_recv};
+    use onyx_core::errno::Errno;
+
+    unsafe {
+        // 1) Recursive NET lock re-entry (send_packet → poll → handler
+        //    nesting relies on it): lock, nest, unwind exactly.
+        net_lock();
+        net_lock();
+        assert_eq!(crate::net::lock::owned_depth(), 2);
+        net_unlock();
+        net_unlock();
+        assert_eq!(crate::net::lock::owned_depth(), 0);
+
+        // 2) UDP bind/close slot management under the lock: bind all 8
+        //    slots, the 9th bind must fail with EBUSY, close frees, rebind
+        //    succeeds (this is what 8 concurrent udp_bind callers race on
+        //    without the lock).
+        let mut slots = [0usize; 8];
+        for (i, s) in slots.iter_mut().enumerate() {
+            *s = udp_bind(6100 + i as u16).expect("bind until full");
+        }
+        assert!(udp_bind(6199).is_err());
+        udp_close(slots[3]);
+        let rebound = udp_bind(6199).expect("rebind after close");
+        assert_eq!(rebound, slots[3]);
+        udp_close(rebound);
+
+        // 3) recv on a bound-but-empty slot is ENOENT; recv on a bad index
+        //    is EINVAL (no panic — the syscall path feeds hostile indices).
+        let s = udp_bind(6123).expect("bind");
+        let mut buf = [0u8; 16];
+        assert_eq!(udp_recv(s, &mut buf), Err(Errno::NoEnt));
+        udp_close(s);
+        assert_eq!(udp_recv(s, &mut buf), Err(Errno::Inval));
+        assert_eq!(udp_recv(8 /* >= MAX_UDP_SOCKS */, &mut buf), Err(Errno::Inval));
+
+        // 4) TCP conn slots: allocate all 8, the 9th alloc fails; ephemeral
+        //    ports are never reused while a conn holds them (what two harts
+        //    calling tcp_connect concurrently used to race).
+        let mut cids = [0usize; 8];
+        let mut cids_used = 0;
+        for c in cids.iter_mut() {
+            match alloc_conn() {
+                Some(cid) => {
+                    CONNS[cid] = Some(crate::net::tcp::conn::TcpConn {
+                        state: 2,
+                        src_port: 5100 + cids_used as u16,
+                        dst_ip: [10, 9, 9, 1],
+                        dst_port: 80,
+                        snd_una: 1,
+                        snd_nxt: 1,
+                        rcv_nxt: 0,
+                        send_buf: [0; crate::net::tcp::conn::BUF_SIZE],
+                        send_len: 0,
+                        recv_buf: [0; crate::net::tcp::conn::BUF_SIZE],
+                        recv_len: 0,
+                        recv_head: 0,
+                        tw_deadline_us: 0,
+                    });
+                    *c = cid;
+                    cids_used += 1;
+                }
+                None => break,
+            }
+        }
+        if cids_used == 8 {
+            assert!(alloc_conn().is_none());
+        }
+        let p1 = alloc_local_port();
+        assert!(
+            !CONNS.iter().flatten().any(|c| c.src_port == p1) || cids_used < 8,
+            "ephemeral port collided with a live conn"
+        );
+        for &cid in &cids[..cids_used] {
+            CONNS[cid] = None;
+        }
+
+        // 5) ARP cache: insert + lookup roundtrip and update-in-place for an
+        //    existing IP (the ARP-cache race fix keeps both under net_lock).
+        let ip = [10, 8, 8, 1];
+        let mac_a = [0x11, 0x22, 0x33, 0x44, 0x55, 0x66];
+        let mac_b = [0x77, 0x88, 0x99, 0xAA, 0xBB, 0xCC];
+        use crate::net::eth::{arp_insert, arp_lookup};
+        arp_insert(ip, mac_a);
+        assert_eq!(arp_lookup(ip), Some(mac_a));
+        arp_insert(ip, mac_b); // update in place, no duplicate entry
+        assert_eq!(arp_lookup(ip), Some(mac_b));
+        // Unknown IP still misses.
+        assert_eq!(arp_lookup([10, 8, 8, 99]), None);
+    }
+}

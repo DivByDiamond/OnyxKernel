@@ -54,9 +54,20 @@ impl Write for UartWriter {
 }
 
 pub fn debug_mark(c: u8) {
-    uart::putc(b'[');
-    uart::putc(c);
-    uart::putc(b']');
+    // Host-test guard: boot-progress marks write UART MMIO (0x1000_0000),
+    // which would fault the host test process. Compile them out under
+    // cfg(test) so boot-path code (e.g. fdt::init_from rejection marks)
+    // stays unit-testable.
+    #[cfg(test)]
+    {
+        let _ = c;
+    }
+    #[cfg(not(test))]
+    {
+        uart::putc(b'[');
+        uart::putc(c);
+        uart::putc(b']');
+    }
 }
 
 pub fn puts(s: &str) {
