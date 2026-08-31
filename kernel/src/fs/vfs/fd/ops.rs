@@ -122,9 +122,8 @@ pub(crate) unsafe fn fd_set_cloexec(idx: usize, cloexec: bool) {
 
 /// # Safety
 ///
-/// Caller contract: idx < VFS_MAX_FDS, obtained from fd_check() at the call
-/// site (e.g. sys_fcntl F_SETFL, sys_open after alloc); runs in the
-/// fd-owning process's syscall context.
+/// Caller contract: idx < VFS_MAX_FDS from fd_check() (F_SETFL/sys_open);
+/// runs in the fd-owning process's syscall context.
 pub(crate) unsafe fn fd_set_flags(idx: usize, flags: u32) {
     // SAFETY: idx is pre-validated (< VFS_MAX_FDS) by the fd_check call at
     // the call site; the table written is this hart's current process's.
