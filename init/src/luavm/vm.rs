@@ -2,7 +2,7 @@
 
 use super::value::*;
 use alloc::collections::BTreeMap;
-use alloc::string::{String, ToString};
+use alloc::string::String;
 use alloc::vec::Vec;
 
 const MAX_STACK_DEPTH: usize = 1000;
@@ -40,11 +40,6 @@ impl VM {
     /// Pop value from stack
     pub fn pop(&mut self) -> Value {
         self.stack.pop().unwrap_or(Value::Nil)
-    }
-
-    /// Peek at top of stack
-    pub fn peek(&self) -> Value {
-        self.stack.last().cloned().unwrap_or(Value::Nil)
     }
 
     /// Set global variable
@@ -334,8 +329,6 @@ impl VM {
                     return Err("attempt to call a non-function".into());
                 }
             }
-
-            _ => return Err("unimplemented instruction".into()),
         }
 
         Ok(())
@@ -355,13 +348,7 @@ mod tests {
             Instruction::Add,
             Instruction::Return,
         ];
-        let result = vm
-            .run(Function {
-                code,
-                upvalues: vec![],
-                arity: 0,
-            })
-            .unwrap();
+        let result = vm.run(Function { code, arity: 0 }).unwrap();
         assert_eq!(result, Value::Number(5.0));
     }
 }

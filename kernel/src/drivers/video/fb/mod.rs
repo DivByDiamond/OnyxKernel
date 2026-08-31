@@ -195,24 +195,5 @@ pub mod scroll;
 pub use draw::*;
 pub use scroll::*;
 
-/// Get back buffer pointer (MVP: returns front buffer for single buffering)
-///
-/// # Safety
-///
-/// Returns raw pointer to framebuffer memory. Caller must ensure valid access.
-pub unsafe fn get_back_buffer() -> *mut u32 {
-    // TODO: Allocate real back buffer (~3.7MB)
-    // For MVP: return front buffer (single buffering)
-    // SAFETY: G_FB.base is the mapped framebuffer physical base set up by
-    // fb::init; reading a static mut here is confined to this unsafe fn,
-    // whose callers accept the raw-pointer aliasing contract above.
-    unsafe { G_FB.base as *mut u32 }
-}
-
-/// Swap buffers (MVP: no-op for single buffering)
-///
-/// In full implementation, would copy back buffer to front buffer.
-pub fn swap_buffers() {
-    // TODO: memcpy(BACK_BUFFER, FRONT_BUFFER, FB_SIZE)
-    // For MVP: no-op (already drawing to front buffer)
-}
+// get_back_buffer/swap_buffers (double buffering) live in draw.rs; the
+// previous stub versions here were removed in favour of the real ones.

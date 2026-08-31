@@ -1,6 +1,5 @@
 //! Lua value types and instruction set
 
-use alloc::boxed::Box;
 use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -36,18 +35,22 @@ pub enum ValueKey {
     Str(String),
 }
 
-/// Lua function (bytecode + upvalues)
+/// Lua function (bytecode; closures/upvalues are TODO(2026-09-01) — the
+/// field was never read by the VM and is restored when calls capture state).
 #[derive(Clone, Debug)]
 pub struct Function {
     pub code: Vec<Instruction>,
-    pub upvalues: Vec<Value>,
     pub arity: usize, // number of parameters
 }
 
 // TODO: Native function support
 // pub type NativeFn = fn(&[Value]) -> Result<Value, String>;
 
-/// Lua VM instructions
+/// Lua VM instructions.
+///
+/// TODO(2026-09-01): arithmetic/comparison/table opcodes beyond the ones
+/// the startup demo exercises are constructed by the input-driven REPL
+/// (v0.6 plan, see todo.md); the interpreter matches them all today.
 #[derive(Clone, Debug)]
 pub enum Instruction {
     // Stack operations
@@ -103,14 +106,6 @@ impl Value {
     pub fn as_number(&self) -> Option<f64> {
         match self {
             Value::Number(n) => Some(*n),
-            _ => None,
-        }
-    }
-
-    /// Try to convert to string
-    pub fn as_string(&self) -> Option<&str> {
-        match self {
-            Value::String(s) => Some(s),
             _ => None,
         }
     }

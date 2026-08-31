@@ -1,8 +1,11 @@
 //! Minimal TUI library for OnyxOS
 //!
-//! Provides basic widget system for terminal UI applications.
+//! Provides basic widget system for terminal UI applications: PSF font
+//! loading/text blitting (font), widget set (widget), event types (event)
+//! and a simple vertical layout (layout).
 
 pub mod event;
+pub mod font;
 pub mod layout;
 pub mod widget;
 

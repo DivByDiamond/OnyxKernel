@@ -224,6 +224,10 @@ pub unsafe fn handle() {
         if G_UPTICKS.load(Ordering::Relaxed).is_multiple_of(50) {
             crate::drivers::led::pulse_activity();
         }
+        // Kernel event loop (todo P3 #3): pump input devices and run due
+        // soft timers once per tick so TUI event loops stay live while
+        // user processes sleep in poll().
+        crate::srv::event::pump();
     }
 }
 pub fn uptime_us() -> u64 {

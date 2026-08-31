@@ -131,3 +131,22 @@ pub unsafe fn fcntl(fd: u64, cmd: u32, arg: u64) -> i64 {
     asm!("ecall", in("a7") SYS_FCNTL, in("a0") fd, in("a1") cmd, in("a2") arg, lateout("a0") ret);
     ret
 }
+
+/// poll(fds, nfds, timeout_ms) — non-blocking readiness multiplexer
+/// (OnyxKernel SYS_poll; fds points at an array of 16-byte pollfd records:
+/// {i64 fd, i32 events, i32 revents}). Returns the ready count.
+#[inline]
+pub unsafe fn poll(fds: *mut u8, nfds: u64, timeout: i64) -> i64 {
+    let ret;
+    asm!("ecall", in("a7") SYS_POLL, in("a0") fds as usize, in("a1") nfds, in("a2") timeout as usize, lateout("a0") ret);
+    ret
+}
+
+/// mouse_read(*event) — read the kernel cursor snapshot (SYS 86).
+/// event is an 8-byte {u16 x, u16 y, u8 buttons, u8 pad} record.
+#[inline]
+pub unsafe fn mouse_read(event: *mut u8) -> i64 {
+    let ret;
+    asm!("ecall", in("a7") SYS_MOUSE_READ, in("a0") event as usize, lateout("a0") ret);
+    ret
+}

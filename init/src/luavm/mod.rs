@@ -8,6 +8,3 @@ pub mod repl;
 pub mod syscall;
 pub mod value;
 pub mod vm;
-
-pub use value::Value;
-pub use vm::VM;
