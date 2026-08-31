@@ -51,3 +51,7 @@ path = "src/groups.rs"
 name = "onyx-su"
 path = "src/su.rs"
 
+[[bin]]
+name = "onyx-lua"
+path = "src/lua.rs"
+
