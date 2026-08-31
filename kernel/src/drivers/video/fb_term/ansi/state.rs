@@ -100,6 +100,23 @@ impl AnsiTerm {
         self.fg = self.save_fg;
         self.bg = self.save_bg;
     }
+
+    /// Private-mode set/reset: ?25 cursor visibility, ?1049 alt-screen
+    /// swap (surface save/clear on enter, restore on exit); unknown modes
+    /// (e.g. 2004 bracketed paste) are accepted and ignored.
+    pub(super) fn set_private_mode(&mut self, mode: u32, enable: bool) {
+        match mode {
+            25 => self.cursor_visible = enable,
+            1049 => {
+                if enable {
+                    self.enter_alt();
+                } else {
+                    self.exit_alt();
+                }
+            }
+            _ => {}
+        }
+    }
 }
 
 impl Default for AnsiTerm {

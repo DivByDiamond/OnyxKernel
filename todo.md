@@ -143,10 +143,23 @@
 ## 📅 ПОСЛЕ 15 СЕНТЯБРЯ (v0.6+):
 
 ### PTY + мультиплексоры (~460 строк)
-- [ ] PTY master/slave pair — `kernel/src/fs/pty.rs` (~300 строк)
-- [ ] `/dev/ptmx`, `/dev/pts/N` — device nodes
-- [ ] Alt-screen `\x1b[?1049h/l` — реальная подмена буфера (`ansi/parse.rs:149`)
-- [ ] `struct winsize` в libc (`libonyxc/include/io/termios.h`)
+**Статус: ✅ СДЕЛАНО 2026-09-01** — fs/pty (4 пары, 512B-кольца, master-close
+→ EPIPE у slave), /dev/ptmx clone-node + /dev/pts/N, ioctl TIOCGPTN /
+TIOCGWINSZ / TIOCSWINSZ, poll по реальной заполненности колец,
+O_NONBLOCK → EAGAIN; libc: struct winsize + pty_open()
+
+- [x] PTY master/slave pair — fs/pty/ (таблица пар, кольца, side I/O,
+      блокирующие stream-хуки через sched_yield, O_NONBLOCK)
+- [x] `/dev/ptmx`, `/dev/pts/N` — device nodes (devfs, clone-семантика open)
+- [x] Alt-screen `\x1b[?1049h/l` — реальная подмена буфера
+      (save/restore whole-surface через pmm-ран + курсор; при нехватке
+      памяти — no-op; ansi/render.rs + state.rs)
+- [x] `struct winsize` в libc (`libonyxc/include/io/termios.h`)
+      + pty_open() helper
+
+Дополнительно в этой же задаче:
+- core::ringbuf — общие ring-примитивы (kernel IPC-каналы переехали на них)
+- cleanup pre-existing core test lints (const assert, c-строки, unwrap)
 
 ### Java runtime (большая цель, ~1-2 месяца работы)
 - [ ] 1. Минимальный class loader (.class: constant pool, fields, methods)
