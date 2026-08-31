@@ -52,6 +52,7 @@ pub struct Function {
 /// the startup demo exercises are constructed by the input-driven REPL
 /// (v0.6 plan, see todo.md); the interpreter matches them all today.
 #[derive(Clone, Debug)]
+#[allow(dead_code)]
 pub enum Instruction {
     // Stack operations
     Push(Value),
