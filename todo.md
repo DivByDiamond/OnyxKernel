@@ -33,95 +33,101 @@
 - SAFETY-комментарии волна 1 (2026-08-29): drivers/arch/mm — 80 файлов, ~1400 строк,
   0 непокрытых unsafe-блоков в drivers/vmm/trap; smp.rs → smp/ + secondary.rs
 - GITHUB: комментарии кода — только английский (проверка scripts/check_no_cyrillic.sh)
+- P1 concurrency fixes (2026-08-31): fork race (ProcState::Creating + publish_ready),
+  waitpid race (B4 protocol), sched_setaffinity UAF (proc_list_lock), net sync (recursive
+  NET_LOCK), procfs per-hart buf, chown policy, libfdt bounds — см. docs/CONCURRENCY.md
+- Lua runtime (2026-08-31): VM foundation + stdlib (string/table/math) + REPL demo + syscall
+  bindings — userspace программа в ring2, /bin/lua (84KB)
+- TUI library stubs (2026-08-31): Widget trait + Button/Label/TextBox заглушки + tui_demo
+  (null fb pointer, text rendering TODO) — начальная структура, не рабочая
 
 ## ❌ КРИТИЧНО ДО 15 СЕНТЯБРЯ:
 
-### 🔥 Приоритет 1 — Критические гонки и баги (БЛОКЕР СТАБИЛЬНОСТИ!)
-**Владелец: GLM** — объёмная работа, требует глубокого понимания concurrency
-**Статус: ✅ ВЫПОЛНЕНО 2026-08-31** (см. docs/CONCURRENCY.md, git-история)
+### 🔥 Приоритет 1 — Non-blocking I/O (БЛОКЕР #1: без него нет htop/UI с таймерами)
+**Статус: ❌ НЕ НАЧАТО** — проверено 2026-08-31, poll/select/epoll отсутствуют
 
-- [x] **fork race**: create_user ставит ребёнка Ready+enqueue ДО копирования fds/signal_handlers/
-      cwd/mmap_brk/tf (fs_sys3/extra/exec/fork.rs) — work-stealing харт может забрать
-      ребёнка с нулевыми fd.
-      **Фикс (2026-08-31)**: новое ProcState::Creating; create_user больше не enqueue-ит;
-      sys_fork копирует всё состояние, затем атомарная публикация proc::publish_ready
-      (Creating→Ready+enqueue под PROC_LIST_LOCK, rq_lock внутри).
+Любая TUI-программа с автообновлением (htop, osysmon-стиль с `kbhit()`) блокируется
+навсегда на `read()` — это единственный принципиальный пробел ABI.
 
-- [x] **waitpid data race**: sys_waitpid пишет state=Waiting вне proc_list_lock (exec/mod.rs:115);
-      proc::dump_all тоже итерирует G_ALL_PROCS без лока.
-      **Фикс (2026-08-31)**: Waiting публикуется в той же крит-секции, что и has_child
-      (протокол B4); dump_all/count() обходят список под try_lock (panic-путь деградирует
-      в best-effort, а не дедлок).
+- [ ] **`poll()` syscall** (~200 строк):
+      - Новый `kernel/src/syscall/poll_sys.rs` + диспетчеризация в `dispatch.rs`
+      - Поддержка fd-массива с events/revents (POLLIN/POLLOUT/POLLERR)
+      - Интеграция с termios (stdin poll = keyboard input ready)
+      - Таймач через uptime_us() для POLLIN+timeout
 
-- [x] **sched_setaffinity UAF**: p.affinity пишется без лока, by_pid может вернуть Exited
-      proc — узкое окно UAF с конкурентным waitpid.
-      **Фикс (2026-08-31)**: lookup+проверка Exited+запись affinity целиком под
-      proc_list_lock (by_pid_unlocked); Exited → ESRCH; getaffinity — так же.
+- [ ] **`FIONREAD` — реальный подсчёт** (~30 строк):
+      - `kernel/src/syscall/fs_sys3/extra/ioctl.rs:187` — сейчас заглушка (всегда 0)
+      - Читать `recv_len` из UDP_SOCKS[fd] или termios input buffer
 
-- [x] **Сеть без синхронизации**: UDP_SOCKS/CONNS/ARP cache/IP_ID/NEXT_PORT/VX rings
-      мутируются из syscall-пути (net_sys.rs) без лока между хартами.
-      **Фикс (2026-08-31)**: рекурсивный NET_LOCK (net/lock.rs: owner+depth) вокруг всех
-      pub-функций udp/tcp/arp/ip, poll и RX-обработчиков; udp_recv/udp_close получили
-      bounds-check индексов (раньше паниковали).
+- [ ] **`O_NONBLOCK` — обработка в read/write** (~40 строк):
+      - `kernel/src/syscall/fs_sys/read_write.rs` — проверять флаг до блокировки
+      - Если nonblock и нет данных → вернуть EAGAIN вместо блокировки
 
-- [x] **procfs G_PROCBUF race**: shared static mut scratch-буфер без лока (procfs/content.rs).
-      **Фикс (2026-08-31)**: per-hart G_PROCBUF_HARTS[MAX_HARTS][PROCFS_MAX_SIZE],
-      индекс hart_id (маскирован) — нулевая контенция, SIE=0 покрывает same-hart.
+- [ ] **`F_GETFL`/`F_SETFL` — реальные флаги** (~20 строк):
+      - `kernel/src/syscall/fs_sys/open_close/mod.rs:80` — F_GETFL хардкодит O_RDONLY
+      - Хранить flags в fd-таблице, возвращать/обновлять через fcntl
 
-- [x] **chown без проверки владельца**: любой процесс может chown любой файл (vfs/meta/chown.rs).
-      **Фикс (2026-08-31)**: chown_allowed() (uid==owner || uid==0 || ring<=ROOT), EPERM
-      иначе; bypass is_kernel_boot как в chmod; применяется в chown и fchown (stat по ino).
+- [ ] **`VMIN`/`VTIME` — non-canonical read** (~50 строк):
+      - `kernel/src/syscall/fs_sys/read_write.rs:135` — сейчас блокируется навсегда
+      - VMIN: прочитать минимум N байт перед возвратом
+      - VTIME: таймач между байтами (inter-byte timeout)
 
-- [x] **libfdt bounds checking**: walk читает токены за границей; is_sedna/is_qemu сканируют
-      256KiB без totalsize-бонда; cstr_at может уйти за strings block.
-      **Фикс (2026-08-31)**: init_from валидирует offset/size против totalsize (cap 4MiB);
-      walk ограничивает токены/имена/prop-data концом блока; cstr_at ограничен
-      strings-блоком; is_sedna/is_qemu сканируют min(totalsize, 256KiB).
+### 🔥 Приоритет 2 — Сигналы (БЛОКЕР #2: без него нет job control)
+**Статус: ❌ НЕ НАЧАТО** — проверено 2026-08-31, SIGTSTP/SIGCHLD/SIGWINCH отсутствуют
 
-**Тесты (2026-08-31)**: хост 131/131 (`cargo test -p onyx_kernel`: proc fork-publish
-инварианты, net table exclusivity + NET_LOCK рекурсия, chown policy, fdt malformed-DTB);
-`cargo test -p onyx_core` зелёный; kbuild/kbuild32/smode собираются; clippy strict чистый;
-QEMU SMP 2 и 4: полный boot → login → fork-стресс фоновыми задачами → procfs → 0 паников
-(`scripts/test_concurrency.sh`).
+Без SIGCHLD родитель не знает о завершении детей; без SIGTSTP Ctrl+Z убивает процесс
+вместо остановки; без SIGWINCH resize не отслеживается.
 
-### 🎮 Приоритет 2 — Lua runtime для OC2R
-**Владелец: boba** — быстрая реализация, видимый результат
+- [ ] **`SIGWINCH` — уведомление при resize** (~40 строк):
+      - Генерировать при изменении framebuffer geometry
+      - Доставлять foreground-группе (как SIGINT через `signal_foreground`)
+      - Добавить в `TIOCGWINSZ` ioctl — уведомлять при первом чтении после resize
 
-- [ ] **Lua VM минимальный** (~500-1000 строк):
-      1. Stack machine (push/pop, базовые операции)
-      2. Tables (hash map для userdata)
-      3. Upvalues (closures)
-      4. Basic libs: string, table, math
-      5. syscall bindings (open/read/write/close)
+- [ ] **`SIGCHLD` — авто-доставка родителю** (~60 строк):
+      - В `proc/lifecycle/exit.rs`: при exit ребёнкаirim SIGCHLD родителю
+      - Реализовать `SA_NOCLDWAIT` (sigaction flags) — auto-reap без zombie
+      - Родитель может `waitpid(WNOHANG)` для неблокирующего reaping
 
-- [ ] **Lua REPL в /bin/lua**:
-      - Интерактивный режим
-      - Загрузка .lua файлов
-      - Error handling
+- [ ] **`SIGTSTP` (Ctrl+Z) — реальный stop** (~50 строк):
+      - В `signals/handler.rs`: 상태 Running → Stopped (новый ProcState)
+      - Не убивать процесс, а остановить (не ставить в runqueue)
+      - `SIGCONT` → Stopped → Ready (возобновление)
 
-- [ ] **Примеры для демо**:
-      - hello.lua
-      - fs_explorer.lua (листинг /proc)
-      - simple_calc.lua
+- [ ] **`SIGCONT` — возобновление** (~30 строк):
+      - Посылать при `tcsetattr(TCSANOW, ...)` с resumed状态
+      - Если обработчик установлен — вызвать его; иначе — просто de-freeze
 
-**Формат**: userspace программа в ring2, без изменений ядра.
-**Референс**: посмотри PUC-Rio Lua 5.1 (самая простая версия), ~15k строк C.
+- [ ] **`kill()` — открыть для ring 2** (~10 строк):
+      - `kernel/src/srv/handler/acl.rs:78` — убрать из ring ≤ PROC_RING_ROOT блока
+      - Оставить проверку: процесс может слать сигнал только в свою группу
 
-### 🖥️ Приоритет 3 — TUI базовый фундамент
-**Владелец: boba** — параллельно с Lua
+### 🖥️ Приоритет 3 — TUI библиотека (виджеты с реальным рендерингом)
+**Статус: ⚠️ ЗАГЛУШКИ** — Button/Label не рисуют текст, demo с null fb
 
-- [ ] **Mouse syscall**: SYS_mouse_read (event: x, y, buttons)
-- [ ] **Double buffering**: fb::swap_buffers() для устранения tearing
-- [ ] **Event loop**: kernel/src/srv/event.rs — poll клавиатуры/мыши
-- [ ] **Basic TUI lib** (userspace, /lib/tui.lua для Lua или /lib/libtui.a для C):
-      - Widget trait (draw, handle_event)
-      - Button, Label, TextBox
-      - Layout (horizontal/vertical stack)
+- [ ] **Mouse syscall** `SYS_mouse_read` (#86) (~80 строк):
+      - `kernel/src/syscall/input_sys.rs` — virtio-input → (x, y, buttons)
+      - Event struct: {x: i16, y: i16, buttons: u8}
 
-**Демо**: /bin/tui_demo — 3 кнопки + текстовое поле.
+- [ ] **Double buffering** `fb::swap_buffers()` (~60 строк):
+      - `kernel/src/drivers/video/fb/mod.rs` — back buffer (3.7MB) + atomic swap
+      - Устраняет tearing при полной перерисовке экрана
+
+- [ ] **Event loop** `kernel/src/srv/event.rs` (~100 строк):
+      - poll клавиатуры/мыши через virtio-input
+      - Таймеры через uptime_us() + callback
+      - Интеграция с poll() syscall (P1 #1)
+
+- [ ] **Widget text rendering** (~150 строк):
+      - `init/src/libtui/widget.rs` — Button/Label рисуют текст через PSF шрифт
+      - Использовать существующий `fb::put_char()` из fb_term
+      - TextBox: курсор, вставка, удаление
+
+- [ ] **tui_demo** — реальный framebuffer (~30 строк):
+      - `init/src/tui_demo.rs:24` — заменить `null_mut` на mmap /dev/fb0
+      - Добавить event loop (ESC = выход)
 
 ### 🔌 Приоритет 4 — OC2R интеграция
-**Владелец: оба** — последняя неделя
+
 
 - [ ] Проверка загрузки через OnyxOSFirmware блок
 - [ ] Сеть: DHCP вместо хардкода IP (используй существующий UDP стек)
@@ -129,6 +135,12 @@ QEMU SMP 2 и 4: полный boot → login → fork-стресс фоновы�
 - [ ] Snapshot на несъёмном диске OC2R
 
 ## 📅 ПОСЛЕ 15 СЕНТЯБРЯ (v0.6+):
+
+### PTY + мультиплексоры (~460 строк)
+- [ ] PTY master/slave pair — `kernel/src/fs/pty.rs` (~300 строк)
+- [ ] `/dev/ptmx`, `/dev/pts/N` — device nodes
+- [ ] Alt-screen `\x1b[?1049h/l` — реальная подмена буфера (`ansi/parse.rs:149`)
+- [ ] `struct winsize` в libc (`libonyxc/include/io/termios.h`)
 
 ### Java runtime (большая цель, ~1-2 месяца работы)
 - [ ] 1. Минимальный class loader (.class: constant pool, fields, methods)
