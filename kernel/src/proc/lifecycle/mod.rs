@@ -97,6 +97,8 @@ pub(super) unsafe fn alloc_proc() -> KResult<*mut Proc> {
         (*p).term_vtime = 0;
         // Console fd-0 status flags: no O_NONBLOCK on a fresh process.
         (*p).stdin_flags = 0;
+        // No SA_NOCLDWAIT on a fresh process (sigaction sets it).
+        (*p).no_cldwait = false;
         // Plant the kstack overflow canary (see KSTACK_CANARY in types.rs).
         ptr::write_volatile(
             (*p).kstack.as_mut_ptr() as *mut u64,

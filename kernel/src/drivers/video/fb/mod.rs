@@ -141,6 +141,10 @@ pub unsafe fn init_device(
             enabled: true,
         };
         clear();
+        // Geometry is now established/changed (todo P2 #1): flag the resize
+        // so the first TIOCGWINSZ after this delivers SIGWINCH. At boot
+        // there is no foreground process, so the direct signal is a no-op.
+        resize::note_resized();
         Ok(())
     }
 }
@@ -186,6 +190,7 @@ fn put_pixel(x: usize, y: usize, color: u32) {
 }
 
 pub mod draw;
+pub mod resize;
 pub mod scroll;
 pub use draw::*;
 pub use scroll::*;

@@ -44,6 +44,10 @@ pub enum ProcState {
     /// field is copied; the boot path (`enter_user`) may instead transition
     /// Creating → Running directly.
     Creating = 5,
+    /// Job-control stop (todo P2 #3): SIGSTOP/SIGTSTP parked the process.
+    /// Unlike Waiting (wake on any signal/event), a Stopped process is only
+    /// rescheduled by SIGCONT (or terminated by SIGKILL). Never enqueued.
+    Stopped = 6,
 }
 
 #[repr(C, align(16))]
@@ -110,6 +114,9 @@ pub struct Proc {
     /// and the termios fields). Only the O_NONBLOCK bit is honored; managed
     /// via fcntl(F_GETFL/F_SETFL) (todo P1 #3/#4).
     pub stdin_flags: u32,
+    /// sigaction(SA_NOCLDWAIT) result for SIGCHLD (todo P2 #2): exit of a
+    /// child auto-reaps it (no zombie) and skips the SIGCHLD delivery.
+    pub no_cldwait: bool,
 }
 
 impl Proc {
@@ -164,6 +171,7 @@ impl Proc {
             term_vmin: 1,
             term_vtime: 0,
             stdin_flags: 0,
+            no_cldwait: false,
             readdir_ino: 0,
             readdir_idx: 0,
             readdir_active: false,

@@ -5,8 +5,16 @@ use super::process::{G_NEED_RESCHED, Proc, ProcState, by_pid, current_for_hart, 
 use crate::proc::scheduler::{enqueue, rq_lock, rq_unlock};
 
 pub const SIGINT: u32 = 2;
+pub const SIGCHLD: u32 = 17;
+pub const SIGCONT: u32 = 18;
 pub const SIG_KILL: u32 = 9;
 pub const SIG_STOP: u32 = 19;
+pub const SIG_TSTP: u32 = 20;
+pub const SIGWINCH: u32 = 28;
+
+/// SA_NOCLDWAIT — the only sa_flag the kernel tracks (todo P2 #2): set on
+/// SIGCHLD, exiting children are auto-reaped and no SIGCHLD is delivered.
+pub const SA_NOCLDWAIT: u32 = 0x2;
 
 mod handler;
 
@@ -42,8 +50,22 @@ pub unsafe fn signal_send(pid: u32, signal: u32) -> KResult<()> {
             return Err(Errno::Inval);
         }
         let p = by_pid(pid).ok_or(Errno::NoEnt)?;
+        // POSIX signal exclusivity (todo P2 #3/#4): stop and continue
+        // signals cancel each other's pending bits.
+        if signal == SIGCONT {
+            p.pending_signals &= !((1u32 << SIG_STOP) | (1u32 << SIG_TSTP));
+        } else if signal == SIG_STOP || signal == SIG_TSTP {
+            p.pending_signals &= !(1u32 << SIGCONT);
+        }
         p.pending_signals |= 1u32 << signal;
-        if matches!(p.state, ProcState::Waiting) {
+        // Wake rules: Waiting processes wake on any signal; a Stopped
+        // process only resumes on SIGCONT (job control) or dies on SIGKILL.
+        let resume = match p.state {
+            ProcState::Waiting => true,
+            ProcState::Stopped => signal == SIGCONT || signal == SIG_KILL,
+            _ => false,
+        };
+        if resume {
             p.state = ProcState::Ready;
             let caller_hart = hart_id();
             rq_lock(caller_hart);
@@ -109,7 +131,9 @@ pub unsafe fn sigaction(signum: u32, act_ptr: u64, oldact_ptr: u64) -> KResult<(
                 let dst = old_pa as *mut u64;
                 *dst = p.signal_handlers[signum as usize];
                 *dst.add(1) = 0;
-                *dst.add(2) = 0;
+                // old sa_flags: report the live SA_NOCLDWAIT state so
+                // sigaction(SIGCHLD, NULL, &old) round-trips.
+                *dst.add(2) = if p.no_cldwait { SA_NOCLDWAIT as u64 } else { 0 };
                 *dst.add(3) = 0;
             }
         }
@@ -122,8 +146,15 @@ pub unsafe fn sigaction(signum: u32, act_ptr: u64, oldact_ptr: u64) -> KResult<(
             let src = new_pa as *const u64;
             let handler = *src;
             let extra_mask = *src.add(1) as u32;
+            let flags = *src.add(2) as u32;
             p.signal_handlers[signum as usize] = handler;
             p.signal_handler_masks[signum as usize] = extra_mask & !protected_mask();
+            // SA_NOCLDWAIT is only meaningful on SIGCHLD (todo P2 #2):
+            // exiting children are auto-reaped (no zombie) and no SIGCHLD
+            // is delivered; installing any other disposition clears it.
+            if signum == SIGCHLD {
+                p.no_cldwait = flags & SA_NOCLDWAIT != 0;
+            }
         }
         Ok(())
     }

@@ -69,6 +69,7 @@ fn syscall_allowed_uid(nr: u64, ring: u8, uid: Option<u32>) -> bool {
         | SYS_net_recv
         | SYS_net_close
         | SYS_poll
+        | SYS_kill
         | SYS_setuid
         | SYS_setgid => true,
         SYS_spawn
@@ -76,7 +77,6 @@ fn syscall_allowed_uid(nr: u64, ring: u8, uid: Option<u32>) -> bool {
         | SYS_snapshot_create
         | SYS_snapshot_rollback
         | SYS_snapshot_list
-        | SYS_kill
         | SYS_mkdir
         | SYS_chan_create
         | SYS_chan_create_named
@@ -90,6 +90,9 @@ fn syscall_allowed_uid(nr: u64, ring: u8, uid: Option<u32>) -> bool {
         | SYS_fchmod
         | SYS_chown
         | SYS_fchown => ring <= proc::PROC_RING_ROOT,
+        // kill() is open to ring 2 (todo P2 #5) — the syscall layer
+        // (sys_kill) enforces the own-process-group restriction for
+        // unprivileged callers; root/kernel may signal anything.
         // ACL rule (todo.md "umask/OnyxFS permissions"): create/rename are
         // allowed for ring <= 1 and for ring-2 processes with uid == 0. This
         // is root self-service: /bin/passwd runs in ring 2 and must recreate
@@ -140,11 +143,12 @@ mod tests {
 
     #[test]
     fn test_ring1_only_calls_denied_at_ring2() {
-        // Spawn/kill/fs-mutation calls are root-space (ring <= 1) only.
+        // Spawn/fs-mutation calls are root-space (ring <= 1) only. kill is
+        // deliberately NOT in this list anymore (todo P2 #5): ring 2 may
+        // signal its own group (enforced in sys_kill).
         let ring1_only = [
             SYS_spawn,
             SYS_wait,
-            SYS_kill,
             SYS_mkdir,
             SYS_chan_create,
             SYS_chan_create_named,
