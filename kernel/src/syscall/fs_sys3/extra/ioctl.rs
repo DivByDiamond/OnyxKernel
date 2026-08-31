@@ -1,6 +1,7 @@
 use core::ptr;
 use onyx_core::errno::Errno;
 
+use crate::drivers::uart;
 use crate::fs::devfs;
 use crate::fs::vfs;
 use crate::mm::vmm;
@@ -185,11 +186,27 @@ pub unsafe fn sys_ioctl(fd: u64, request: u64, arg: u64) -> i64 {
                 0
             }
             0x541B => {
+                // FIONREAD (todo P1 #2): real byte count immediately
+                // readable without blocking. Console (fd 0): the NS16550
+                // FIFO counter is not readable, LSR.DR is the hardware's
+                // only occupancy signal, so report 1 (>=1 byte pending) or
+                // 0. Regular fds: bytes left before EOF (size - pos).
                 if arg == 0 {
                     return 0;
                 }
-                let zero = 0u32;
-                put_user(arg, core::ptr::addr_of!(zero).cast::<u8>(), 4)
+                let count: u32 = if fd == 0 {
+                    if uart::rx_ready() { 1 } else { 0 }
+                } else if fd <= 2 {
+                    0
+                } else {
+                    let idx = match vfs::fd_check(fd) {
+                        Ok(i) => i,
+                        Err(e) => return e.as_i64(),
+                    };
+                    let f = vfs::fd_get(idx);
+                    f.size.saturating_sub(f.pos)
+                };
+                put_user(arg, core::ptr::addr_of!(count).cast::<u8>(), 4)
             }
             _ => Errno::NoSys.as_i64(),
         }

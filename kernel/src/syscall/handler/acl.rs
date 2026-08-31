@@ -68,6 +68,7 @@ fn syscall_allowed_uid(nr: u64, ring: u8, uid: Option<u32>) -> bool {
         | SYS_net_send
         | SYS_net_recv
         | SYS_net_close
+        | SYS_poll
         | SYS_setuid
         | SYS_setgid => true,
         SYS_spawn
@@ -184,8 +185,18 @@ mod tests {
     }
 
     #[test]
+    fn test_poll_available_to_user_space() {
+        // poll() is the non-blocking I/O entry point (todo P1 #1) — TUI
+        // programs in every ring need it with a timeout.
+        for ring in [PROC_RING_KERNEL, PROC_RING_ROOT, PROC_RING_USER] {
+            assert!(syscall_allowed_uid(SYS_poll, ring, None));
+            assert!(syscall_allowed_uid(SYS_poll, ring, Some(1000)));
+        }
+    }
+
+    #[test]
     fn test_unknown_syscall_numbers_denied() {
-        for &nr in &[0u64, 86, 200, u64::MAX] {
+        for &nr in &[0u64, 88, 200, u64::MAX] {
             for ring in [PROC_RING_KERNEL, PROC_RING_ROOT, PROC_RING_USER] {
                 assert!(!syscall_allowed_uid(nr, ring, Some(0)));
             }

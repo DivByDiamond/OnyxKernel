@@ -1,7 +1,9 @@
 //! Secondary-hart boot path: `secondary_continue` trampoline and
 //! `secondary_kmain` entry. Split from `super` so each file stays within
 //! the project's 250-line limit.
+#[cfg(not(test))]
 use super::{G_KERNEL_ROOT_PA, G_ONLINE_HARTS, G_SEC_STACKS, SEC_STACK_SIZE};
+#[cfg(not(test))]
 use core::sync::atomic::Ordering;
 
 /// Common continuation once a secondary hart is allowed to run: switch to
@@ -110,7 +112,10 @@ pub unsafe extern "Rust" fn secondary_continue() -> ! {
 ///
 /// Test stub: never runs; the crate is not booted under `cargo test`.
 pub unsafe extern "Rust" fn secondary_entry() -> ! {
-    loop {}
+    loop {
+        // Divergence point: spin (never returns) without a busy no-op loop.
+        core::hint::spin_loop();
+    }
 }
 
 // Test twin of the real `secondary_continue`: `release_secondary_harts`
@@ -122,7 +127,10 @@ pub unsafe extern "Rust" fn secondary_entry() -> ! {
 ///
 /// Test stub: never runs; exists so the mailbox symbol link resolves.
 pub unsafe extern "Rust" fn secondary_continue() -> ! {
-    loop {}
+    loop {
+        // Divergence point: spin (never returns) without a busy no-op loop.
+        core::hint::spin_loop();
+    }
 }
 
 #[cfg(not(test))]
@@ -149,5 +157,8 @@ pub unsafe extern "Rust" fn secondary_kmain() -> ! {
 ///
 /// Test stub: never runs; the crate is not booted under `cargo test`.
 pub unsafe extern "Rust" fn secondary_kmain() -> ! {
-    loop {}
+    loop {
+        // Divergence point: spin (never returns) without a busy no-op loop.
+        core::hint::spin_loop();
+    }
 }

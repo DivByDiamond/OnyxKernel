@@ -105,6 +105,11 @@ pub struct Proc {
     pub term_icanon: bool,
     pub term_vmin: u8,
     pub term_vtime: u8,
+    /// Status flags for the virtual console fd 0 (fds 0-2 are not in the fd
+    /// table, so O_NONBLOCK for stdin lives here — same home as raw_stdin
+    /// and the termios fields). Only the O_NONBLOCK bit is honored; managed
+    /// via fcntl(F_GETFL/F_SETFL) (todo P1 #3/#4).
+    pub stdin_flags: u32,
 }
 
 impl Proc {
@@ -145,6 +150,7 @@ impl Proc {
                 perms: 0,
                 epoch: 0,
                 cloexec: false,
+                flags: 0,
             }; PROC_MAX_FDS],
             root_refcount: ptr::null_mut(),
             all_next: ptr::null_mut(),
@@ -157,6 +163,7 @@ impl Proc {
             term_icanon: true,
             term_vmin: 1,
             term_vtime: 0,
+            stdin_flags: 0,
             readdir_ino: 0,
             readdir_idx: 0,
             readdir_active: false,

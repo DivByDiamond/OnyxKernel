@@ -66,7 +66,7 @@ pub(crate) unsafe fn init_from(dtb_pa: usize) -> bool {
         // SAFETY: header offsets 8..0x24 are inside the 40-byte FDT header;
         // the statics are written once during single-threaded early boot
         // (kmain, before secondary harts are started).
-        let totalsize = rd32(hdr.add(4 * 1)) as usize;
+        let totalsize = rd32(hdr.add(4)) as usize;
         let struct_off = rd32(hdr.add(4 * 2)) as usize;
         let strings_off = rd32(hdr.add(4 * 3)) as usize;
         // size_dt_struct is at offset 4*9 (0x24); 4*8 (0x20) is size_dt_strings.

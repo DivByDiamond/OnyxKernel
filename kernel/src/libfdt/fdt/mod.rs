@@ -19,6 +19,7 @@ pub(crate) use types::{
 pub use clint::find_clint;
 pub use framebuffer::find_simple_framebuffer;
 pub use init::init;
+#[cfg(test)]
 pub(crate) use init::init_from;
 pub use memory::memory;
 pub use model::{is_qemu, is_sedna, model};

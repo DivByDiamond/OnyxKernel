@@ -27,6 +27,10 @@ pub struct VfsFd {
     pub perms: u32,
     pub epoch: u32,
     pub cloexec: bool,
+    /// User open(2) status flags recorded at open time (O_ACCMODE plus
+    /// O_NONBLOCK/O_APPEND/...). F_GETFL returns this; F_SETFL updates the
+    /// settable subset (todo P1 #4). Zero for kernel-internal slots.
+    pub flags: u32,
 }
 
 impl Default for VfsFd {
@@ -40,6 +44,7 @@ impl Default for VfsFd {
             perms: 0,
             epoch: 0,
             cloexec: false,
+            flags: 0,
         }
     }
 }

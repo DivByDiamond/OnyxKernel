@@ -3,10 +3,10 @@ use crate::drivers::uart;
 use crate::fs::vfs;
 use crate::mm::vmm;
 use crate::proc;
-use crate::syscall::tty::filter_input;
 use onyx_core::errno::Errno;
 
 use super::super::handler::user_ptr_ok;
+use super::console_read::console_read;
 
 /// Validate a user buffer for syscall access: range-check plus per-page
 /// mapping/PTE_U verification so a bad pointer yields EFAULT instead of an
@@ -76,139 +76,16 @@ pub(in super::super) unsafe fn sys_write(tf: &mut TrapFrame, fd: u64, buf: u64, 
 /// checked; `buf`/`len` are validated inside before any access.
 pub(in super::super) unsafe fn sys_read(tf: &mut TrapFrame, _fd: u64, buf: u64, len: u64) -> i64 {
     // SAFETY: user_buf_ok verified every page of [buf, buf+len) is a mapped
-    // writable user page; all writes below stay within len bytes of `dst`
-    // (cooked mode writes at most len-1 chars plus a NUL), and `tf` is this
-    // hart's live trap frame.
+    // writable user page; the fd-0 console path (console_read) and the vfs
+    // backend below only write within len bytes of the validated buffer.
     unsafe {
         if !user_buf_ok(buf, len, true) {
             return Errno::Fault.as_i64();
         }
         if _fd == 0 {
-            if len == 0 {
-                return 0;
-            }
-            let dst = buf as *mut u8;
-
-            // ── Raw mode: return raw bytes, no echo, no editing ──────────
-            // Used by the shell for tab completion and arrow-key history.
-            // In raw mode we block until at least one byte is available, then
-            // return as many bytes as are available (up to len). This lets
-            // the shell read ESC sequences (3 bytes: ESC [ A) in one call.
-            let p = proc::current();
-            if p.raw_stdin {
-                // Block for the first byte.
-                let first = loop {
-                    match uart::getc().and_then(filter_input) {
-                        Some(b) => break b,
-                        None => proc::sched_yield(tf),
-                    }
-                };
-                *dst.add(0) = first;
-                let mut n = 1usize;
-                // Drain any additional bytes that are already in the UART
-                // FIFO without blocking. This is essential for ESC sequences
-                // (ESC [ A for Up arrow) — if we blocked after ESC, the
-                // shell would never see the rest of the sequence.
-                while n < len as usize {
-                    match uart::getc().and_then(filter_input) {
-                        Some(b) => {
-                            *dst.add(n) = b;
-                            n += 1;
-                        }
-                        None => break,
-                    }
-                }
-                return n as i64;
-            }
-
-            // ── Non-canonical termios: byte-stream semantics ─────────────
-            // A program that cleared ICANON via tcsetattr(TCSETS) — vim is
-            // the canonical case — reads one byte at a time with
-            // read(0, &c, 1) and must block until a key arrives. Without
-            // this branch it falls into the cooked loop below whose
-            // `len - 1` bound turns len==1 into an immediate "0 bytes read",
-            // which the caller interprets as EOF (vim then spins redrawing
-            // forever). Same contract as the raw_stdin path above: block
-            // until ≥1 byte, then return whatever else is already queued
-            // (up to len). No line editing, no NUL terminator. Ctrl+C is
-            // still translated to SIGINT by filter_input.
-            if !p.term_icanon {
-                let first = loop {
-                    match uart::getc().and_then(filter_input) {
-                        Some(b) => break b,
-                        None => proc::sched_yield(tf),
-                    }
-                };
-                *dst.add(0) = first;
-                let mut n = 1usize;
-                while n < len as usize {
-                    match uart::getc().and_then(filter_input) {
-                        Some(b) => {
-                            *dst.add(n) = b;
-                            n += 1;
-                        }
-                        None => break,
-                    }
-                }
-                return n as i64;
-            }
-
-            // ── Cooked mode: line editing (echo, backspace, Enter) ───────
-            // Echo reflects the CALLING process's termios (TCSETS), not the
-            // legacy globals.
-            let echo = p.term_echo;
-            let mut n: usize = 0;
-            let max = (len - 1).max(1) as usize;
-            while n < max {
-                match uart::getc().and_then(filter_input) {
-                    None => {
-                        proc::sched_yield(tf);
-                        continue;
-                    }
-                    Some(b) => {
-                        if b == b'\r' || b == b'\n' {
-                            *dst.add(n) = b'\n';
-                            if echo {
-                                uart::putc(b'\r');
-                                uart::putc(b'\n');
-                                if crate::drivers::fb::enabled() {
-                                    crate::drivers::fb_term::ansi::console_putc(b'\r');
-                                    crate::drivers::fb_term::ansi::console_putc(b'\n');
-                                }
-                            }
-                            n += 1;
-                            break;
-                        } else if b == 0x7F || b == 0x08 {
-                            if n > 0 {
-                                n -= 1;
-                                if echo {
-                                    uart::putc(0x08);
-                                    uart::putc(b' ');
-                                    uart::putc(0x08);
-                                    if crate::drivers::fb::enabled() {
-                                        crate::drivers::fb_term::ansi::console_putc(0x08);
-                                        crate::drivers::fb_term::ansi::console_putc(b' ');
-                                        crate::drivers::fb_term::ansi::console_putc(0x08);
-                                    }
-                                }
-                            }
-                        } else {
-                            *dst.add(n) = b;
-                            if echo {
-                                uart::putc(b);
-                                if crate::drivers::fb::enabled() {
-                                    crate::drivers::fb_term::ansi::console_putc(b);
-                                }
-                            }
-                            n += 1;
-                        }
-                    }
-                }
-            }
-            if n < len as usize {
-                *dst.add(n) = 0;
-            }
-            n as i64
+            // Console line discipline (raw / non-canonical VMIN-VTIME /
+            // cooked + O_NONBLOCK) lives in its own module (todo P1 #3/#5).
+            console_read(tf, buf, len)
         } else if _fd <= 2 {
             Errno::BadFd.as_i64()
         } else {

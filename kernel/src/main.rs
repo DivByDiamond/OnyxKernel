@@ -43,8 +43,6 @@ pub mod srv;
 pub mod sync;
 pub mod syscall;
 
-use core::panic::PanicInfo;
-
 #[unsafe(no_mangle)]
 pub unsafe extern "Rust" fn kmain(hartid: usize, fdt_addr: usize) -> ! {
     // Called from early boot once per hart; invariants are established by boot.S.
@@ -53,6 +51,6 @@ pub unsafe extern "Rust" fn kmain(hartid: usize, fdt_addr: usize) -> ! {
 
 #[cfg(not(test))]
 #[panic_handler]
-fn panic(info: &PanicInfo) -> ! {
+fn panic(info: &core::panic::PanicInfo) -> ! {
     crate::srv::klog::panic_handler(info)
 }

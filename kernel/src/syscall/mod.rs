@@ -5,6 +5,7 @@
 //! `fs_sys`  — filesystem syscalls (`sys_write`, `sys_open`, …).
 //! `fs_sys2` — filesystem syscalls part 2 (`sys_exec`, `sys_sbrk`, …).
 //! `ipc_sys` — IPC channel syscalls (`sys_chan_create`, `sys_chan_send`, …).
+//! `poll_sys`— poll(2) readiness multiplexer (non-blocking I/O).
 //! `proc_sys`— process syscalls (`sys_exit`, `sys_spawn`, `sys_wait`, …).
 //! `snap_sys`— snapshot syscalls (root-only).
 //! `ring_sys`— ring-transition syscalls (`sys_getring`, `sys_dropring`).
@@ -16,6 +17,7 @@ pub mod handler;
 pub mod input_sys;
 pub mod ipc_sys;
 pub mod net_sys;
+pub mod poll_sys;
 pub mod proc_sys;
 pub mod ring_sys;
 pub mod snap_sys;

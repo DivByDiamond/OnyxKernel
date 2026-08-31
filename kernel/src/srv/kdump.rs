@@ -1,6 +1,9 @@
+#[cfg(not(test))]
 use crate::arch::csr;
+#[cfg(not(test))]
 use onyx_core::fmt::{Arg, Write, vformat};
 
+#[cfg(not(test))]
 const MAX_BT_DEPTH: usize = 64;
 
 #[cfg(not(test))]
@@ -49,61 +52,62 @@ unsafe fn backtrace(w: &mut impl Write) {
 /// interrupts disabled, the kernel direct mapping live (CSR reads and
 /// process-table access), and must not allocate.
 pub unsafe fn kdump() {
+    #[cfg(not(test))]
+    // SAFETY: panic/halt path per the fn contract: the asm tp read and the
+    // CSR reads are hart-local privileged operations; kdump is only called
+    // with interrupts disabled on a live kernel mapping.
     unsafe {
-        #[cfg(not(test))]
-        {
-            let mut w = crate::srv::klog::PanicWriter;
-            w.write_str("\n--- KDUMP ---\n");
+        let mut w = crate::srv::klog::PanicWriter;
+        w.write_str("\n--- KDUMP ---\n");
 
-            let hartid: usize;
-            // SAFETY: reads `tp`, which holds this hart's id per the kernel
-            // ABI; a pure register move with no clobbers.
-            core::arch::asm!("mv {}, tp", out(reg) hartid);
-            let args: &[Arg] = &[Arg::from(hartid)];
-            vformat(&mut w, "hartid=%d\n", args);
+        let hartid: usize;
+        // SAFETY: reads `tp`, which holds this hart's id per the kernel
+        // ABI; a pure register move with no clobbers.
+        core::arch::asm!("mv {}, tp", out(reg) hartid);
+        let args: &[Arg] = &[Arg::from(hartid)];
+        vformat(&mut w, "hartid=%d\n", args);
 
-            let sepc = csr::read_sepc();
-            let sstatus = csr::read_sstatus();
-            let scause = csr::read_scause();
-            let stval = csr::read_stval();
-            let satp = csr::read_satp();
-            let sie = csr::read_sie();
-            let args: &[Arg] = &[
-                Arg::from(sepc),
-                Arg::from(sstatus),
-                Arg::from(scause),
-                Arg::from(stval),
-                Arg::from(satp),
-                Arg::from(sie),
-            ];
-            vformat(
-                &mut w,
-                "sepc=%p sstatus=%p scause=%p stval=%p satp=%p sie=%p\n",
-                args,
-            );
+        let sepc = csr::read_sepc();
+        let sstatus = csr::read_sstatus();
+        let scause = csr::read_scause();
+        let stval = csr::read_stval();
+        let satp = csr::read_satp();
+        let sie = csr::read_sie();
+        let args: &[Arg] = &[
+            Arg::from(sepc),
+            Arg::from(sstatus),
+            Arg::from(scause),
+            Arg::from(stval),
+            Arg::from(satp),
+            Arg::from(sie),
+        ];
+        vformat(
+            &mut w,
+            "sepc=%p sstatus=%p scause=%p stval=%p satp=%p sie=%p\n",
+            args,
+        );
 
-            let pid = crate::proc::current_pid();
-            if pid != 0 {
-                let args: &[Arg] = &[Arg::from(pid)];
-                vformat(&mut w, "pid=%d\n", args);
-            }
-            if let Some(p) = crate::proc::current_opt() {
-                let args: &[Arg] = &[Arg::from(p.ring), Arg::from(p.parent_pid)];
-                vformat(&mut w, "ring=%d parent=%d\n", args);
-            }
-
-            let cnt = crate::proc::count();
-            let args: &[Arg] = &[Arg::from(cnt)];
-            vformat(&mut w, "processes=%d\n", args);
-
-            let online = crate::arch::smp::online_harts();
-            let args: &[Arg] = &[Arg::from(online)];
-            vformat(&mut w, "online_harts=%d\n", args);
-
-            w.write_str("Backtrace:\n");
-            backtrace(&mut w);
-
-            w.write_str("--- END KDUMP ---\n");
+        let pid = crate::proc::current_pid();
+        if pid != 0 {
+            let args: &[Arg] = &[Arg::from(pid)];
+            vformat(&mut w, "pid=%d\n", args);
         }
+        if let Some(p) = crate::proc::current_opt() {
+            let args: &[Arg] = &[Arg::from(p.ring), Arg::from(p.parent_pid)];
+            vformat(&mut w, "ring=%d parent=%d\n", args);
+        }
+
+        let cnt = crate::proc::count();
+        let args: &[Arg] = &[Arg::from(cnt)];
+        vformat(&mut w, "processes=%d\n", args);
+
+        let online = crate::arch::smp::online_harts();
+        let args: &[Arg] = &[Arg::from(online)];
+        vformat(&mut w, "online_harts=%d\n", args);
+
+        w.write_str("Backtrace:\n");
+        backtrace(&mut w);
+
+        w.write_str("--- END KDUMP ---\n");
     }
 }

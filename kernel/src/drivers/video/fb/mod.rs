@@ -198,7 +198,10 @@ pub use scroll::*;
 pub unsafe fn get_back_buffer() -> *mut u32 {
     // TODO: Allocate real back buffer (~3.7MB)
     // For MVP: return front buffer (single buffering)
-    G_FB.base as *mut u32
+    // SAFETY: G_FB.base is the mapped framebuffer physical base set up by
+    // fb::init; reading a static mut here is confined to this unsafe fn,
+    // whose callers accept the raw-pointer aliasing contract above.
+    unsafe { G_FB.base as *mut u32 }
 }
 
 /// Swap buffers (MVP: no-op for single buffering)

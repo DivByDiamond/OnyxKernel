@@ -1,5 +1,5 @@
 use crate::fs::vfs::{
-    FdToken, Fs, PERM_READ, PERM_WRITE, alloc_fd, fd_check, fd_get, fd_set, fd_token,
+    FdToken, Fs, PERM_READ, PERM_WRITE, alloc_fd, fd_check, fd_get, fd_set, fd_set_flags, fd_token,
 };
 use onyx_core::errno::KResult;
 
@@ -15,6 +15,10 @@ pub unsafe fn dup(token: FdToken) -> KResult<FdToken> {
         let fd = fd_get(idx);
         let new_idx = alloc_fd(fd.perms)?;
         fd_set(new_idx, fd.ino, fd.size, fd.fs, fd.pos);
+        // Status flags (O_NONBLOCK/O_APPEND/...) belong to the open file
+        // description semantics-wise; our fd table has no shared-OFD concept,
+        // so dup copies them into the new slot (POSIX-adjacent behavior).
+        fd_set_flags(new_idx, fd.flags);
         let new_fd = fd_get(new_idx);
         Ok(fd_token(new_idx, new_fd.epoch))
     }

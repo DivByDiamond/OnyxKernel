@@ -98,8 +98,59 @@ impl Uart {
             }
         }
     }
+    /// Non-consuming readiness peek: true when at least one RX byte sits in
+    /// the hardware FIFO (LSR.DR set). Unlike getc() this does not pop the
+    /// byte, so poll()/FIONREAD can probe stdin without stealing input from
+    /// a concurrent reader.
+    pub fn rx_ready(self) -> bool {
+        // SAFETY: self.base is the configured UART MMIO base; LSR read uses the NS16550A register offset via MmioBlock.
+        unsafe {
+            let r = self.regs();
+            r.reg_u8(R_LSR).read() & LSR_DR != 0
+        }
+    }
     pub fn base(self) -> usize {
         self.base
+    }
+}
+
+pub fn init(base: usize, shift: u32) {
+    crate::srv::klog::debug_mark(b'u');
+    // SAFETY: boot-time single-threaded console bring-up; G_UART is accessed only from kernel context, which never runs with SIE set (see crate::sync).
+    unsafe {
+        G_UART.init(base, shift);
+    }
+}
+pub fn init_default() {
+    init(0x1000_0000, 0);
+}
+pub fn putc(c: u8) {
+    // SAFETY: G_UART defaults to the QEMU virt base (0x1000_0000) and is reconfigured by uart::init during single-threaded boot; NS16550A register accesses from kernel context, which never runs with SIE set (see crate::sync).
+    unsafe {
+        let p = &raw const G_UART;
+        (*p).putc(c);
+    }
+}
+pub fn puts(s: &str) {
+    // SAFETY: G_UART defaults to the QEMU virt base (0x1000_0000) and is reconfigured by uart::init during single-threaded boot; NS16550A register accesses from kernel context, which never runs with SIE set (see crate::sync).
+    unsafe {
+        let p = &raw const G_UART;
+        (*p).puts(s);
+    }
+}
+pub fn getc() -> Option<u8> {
+    // SAFETY: G_UART defaults to the QEMU virt base (0x1000_0000) and is reconfigured by uart::init during single-threaded boot; NS16550A register accesses from kernel context, which never runs with SIE set (see crate::sync).
+    unsafe {
+        let p = &raw const G_UART;
+        (*p).getc()
+    }
+}
+/// Non-consuming stdin readiness peek (see Uart::rx_ready).
+pub fn rx_ready() -> bool {
+    // SAFETY: G_UART defaults to the QEMU virt base (0x1000_0000) and is reconfigured by uart::init during single-threaded boot; NS16550A register accesses from kernel context, which never runs with SIE set (see crate::sync).
+    unsafe {
+        let p = &raw const G_UART;
+        (*p).rx_ready()
     }
 }
 
@@ -151,37 +202,5 @@ mod tests {
     #[test]
     fn test_uart_size() {
         assert_eq!(core::mem::size_of::<Uart>(), 16);
-    }
-}
-
-pub fn init(base: usize, shift: u32) {
-    crate::srv::klog::debug_mark(b'u');
-    // SAFETY: boot-time single-threaded console bring-up; G_UART is accessed only from kernel context, which never runs with SIE set (see crate::sync).
-    unsafe {
-        G_UART.init(base, shift);
-    }
-}
-pub fn init_default() {
-    init(0x1000_0000, 0);
-}
-pub fn putc(c: u8) {
-    // SAFETY: G_UART defaults to the QEMU virt base (0x1000_0000) and is reconfigured by uart::init during single-threaded boot; NS16550A register accesses from kernel context, which never runs with SIE set (see crate::sync).
-    unsafe {
-        let p = &raw const G_UART;
-        (*p).putc(c);
-    }
-}
-pub fn puts(s: &str) {
-    // SAFETY: G_UART defaults to the QEMU virt base (0x1000_0000) and is reconfigured by uart::init during single-threaded boot; NS16550A register accesses from kernel context, which never runs with SIE set (see crate::sync).
-    unsafe {
-        let p = &raw const G_UART;
-        (*p).puts(s);
-    }
-}
-pub fn getc() -> Option<u8> {
-    // SAFETY: G_UART defaults to the QEMU virt base (0x1000_0000) and is reconfigured by uart::init during single-threaded boot; NS16550A register accesses from kernel context, which never runs with SIE set (see crate::sync).
-    unsafe {
-        let p = &raw const G_UART;
-        (*p).getc()
     }
 }

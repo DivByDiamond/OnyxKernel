@@ -1,3 +1,4 @@
+pub mod console_read;
 pub mod open_close;
 pub mod read_write;
 

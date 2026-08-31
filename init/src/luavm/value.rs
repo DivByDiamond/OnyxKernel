@@ -1,9 +1,9 @@
 //! Lua value types and instruction set
 
+use alloc::boxed::Box;
+use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;
-use alloc::collections::BTreeMap;
-use alloc::boxed::Box;
 
 /// Lua value types
 #[derive(Clone, Debug)]
@@ -84,7 +84,7 @@ pub enum Instruction {
     SetTable,
 
     // Functions
-    Call(usize),    // num args
+    Call(usize), // num args
     Return,
 
     // Control flow

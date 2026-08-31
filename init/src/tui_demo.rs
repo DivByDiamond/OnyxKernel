@@ -9,7 +9,7 @@
 mod libtui;
 mod syscalls;
 
-use libtui::{Widget, Button, Label, TextBox, Layout, Event};
+use libtui::{Button, Event, Label, Layout, TextBox, Widget};
 
 const WIDTH: usize = 1280;
 const HEIGHT: usize = 720;

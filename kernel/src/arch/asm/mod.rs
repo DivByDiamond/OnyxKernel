@@ -49,11 +49,17 @@ pub unsafe fn trap_return() {}
 /// # Safety
 /// Test stub: never returns; `_new_sp` unused.
 pub unsafe fn sched_switch(_new_sp: usize) -> ! {
-    loop {}
+    loop {
+        // Divergence point: spin (never returns) without a busy no-op loop.
+        core::hint::spin_loop();
+    }
 }
 #[cfg(test)]
 /// # Safety
 /// Test stub: never returns; arguments unused.
 pub unsafe fn drop_to_user(_entry: usize, _ustack: usize, _user_root_pa: usize) -> ! {
-    loop {}
+    loop {
+        // Divergence point: spin (never returns) without a busy no-op loop.
+        core::hint::spin_loop();
+    }
 }

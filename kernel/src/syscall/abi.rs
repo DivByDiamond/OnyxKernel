@@ -92,6 +92,7 @@ pub const SYS_net_close: u64 = 83; // net_close(conn_id) -> 0
 pub const SYS_chown: u64 = 84; // chown(path, uid, gid)
 pub const SYS_fchown: u64 = 85; // fchown(fd, uid, gid)
 pub const SYS_mouse_read: u64 = 86; // mouse_read(*event) -> 0 or -errno
+pub const SYS_poll: u64 = 87; // poll(*pollfd, nfds, timeout) -> ready count
 
 // ── Flags / constants used by syscalls ─────────────────────────────────
 
@@ -126,6 +127,37 @@ pub const TCSETS: u64 = 0x5402;
 // waitpid() options.
 pub const WNOHANG: u32 = 1;
 pub const WUNTRACED: u32 = 2;
+
+// poll() events/revents bits (Linux values).
+pub const POLLIN: i32 = 0x001;
+pub const POLLOUT: i32 = 0x004;
+pub const POLLERR: i32 = 0x008;
+pub const POLLNVAL: i32 = 0x020;
+
+/// Onyx `struct pollfd`. Onyx fds are 64-bit (idx, epoch) tokens — unlike
+/// Linux's 32-bit ints — so `fd` is widened to i64; `events`/`revents` are
+/// widened to i32 so the struct is 16 bytes with no padding. The userspace
+/// mirror lives in libonyxc include/io/poll.h.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct PollFd {
+    pub fd: i64,
+    pub events: i32,
+    pub revents: i32,
+}
+
+/// poll() argument cap: bounds the kernel-side PollFd staging buffer.
+pub const POLL_MAX_FDS: u64 = 32;
+
+impl PollFd {
+    pub const fn zeroed() -> Self {
+        Self {
+            fd: 0,
+            events: 0,
+            revents: 0,
+        }
+    }
+}
 
 // sigaction / sigprocmask `how`.
 pub const SIG_BLOCK: u32 = 0;

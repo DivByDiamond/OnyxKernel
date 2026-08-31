@@ -8,9 +8,9 @@
 
 extern crate alloc;
 
+mod kalloc_lua;
 mod luavm;
-mod syscalls;
-mod kalloc_lua; // global allocator
+mod syscalls; // global allocator
 
 use luavm::repl;
 
