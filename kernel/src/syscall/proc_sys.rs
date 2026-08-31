@@ -101,15 +101,12 @@ pub(super) unsafe fn sys_wait(tf: &mut TrapFrame, status_out: u64) -> i64 {
         }
     }
 }
+// ── Signal syscalls ─────────────────────────────────────────────────────
 
-// ── Signal syscalls ───────────────────────────────────────────────────────
-
-/// SYS_kill(pid, signal): deliver `signal` to process `pid`.
-/// ACL allows every ring (todo P2 #5); this is where the privilege policy
-/// lives: ring <= ROOT may signal anything, ring 2 (user) may only signal
-/// its own process group. Groups today are pgid == pid (see sys_getpgid),
-/// so "own group" means the caller's own pid — this keeps raise()/abort()
-/// working for user programs while preventing cross-process signaling.
+/// SYS_kill(pid, signal): deliver `signal` to process `pid`. ACL allows
+/// every ring (todo P2 #5); the policy lives here: ring <= ROOT signals
+/// anything, ring 2 only its own group (pgid == pid) — so raise()/abort()
+/// work while cross-pid signaling stays blocked.
 /// # Safety
 ///
 /// Call only from the syscall path in kernel context; must not already hold
