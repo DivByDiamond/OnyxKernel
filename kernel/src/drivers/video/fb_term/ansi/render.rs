@@ -3,9 +3,15 @@
 //!
 //! State (cursor position, colors, scroll region) lives in
 //! [`AnsiTerm`](super::AnsiTerm); this module only paints the framebuffer.
+//! The alt-screen surface swap (CSI ?1049) also lives here because it is a
+//! whole-surface copy/fill operation.
 
 use super::state::{AnsiTerm, FONT_H, FONT_W};
 use crate::drivers::fb;
+use core::sync::atomic::{AtomicUsize, Ordering};
+
+/// VA of the saved normal-screen surface (0 = not allocated / no fb).
+static G_SAVE_PA: AtomicUsize = AtomicUsize::new(0);
 
 impl AnsiTerm {
     /// Scroll the region up by one line (content moves up).
@@ -139,10 +145,96 @@ impl AnsiTerm {
         };
         fb::draw_char(self.cur_col * FONT_W, self.cur_row * FONT_H, b' ', bg, fg);
     }
+
+    // ── Alt-screen swap (CSI ?1049 h/l, todo v0.6 #3) ────────────────────
+    //
+    // One saved-normal surface is enough: alt mode is a flag, not a stack
+    // (nested 1049h just re-saves the current — empty — alt surface). The
+    // surface is a lazily allocated contiguous pmm run (same pattern as the
+    // fb back buffer); when the allocation fails the switch is a no-op and
+    // programs keep drawing on the normal screen. Cursor save/restore reuses
+    // the ESC 7/8 slot (programs that mix both sequences will see the last
+    // save win — documented compromise).
+
+    /// CSI ?1049h: save the visible screen, clear it, home the cursor.
+    pub(super) fn enter_alt(&mut self) {
+        let (base, bytes) = match surface() {
+            Some(v) => v,
+            None => return,
+        };
+        let pa = ensure_saved(bytes);
+        if pa == 0 {
+            return;
+        }
+        // SAFETY: save surface is a pmm-owned contiguous run of `bytes`
+        // length; the front buffer is fb::info()-validated of the same size;
+        // non-overlapping by construction.
+        unsafe {
+            core::ptr::copy_nonoverlapping(base as *const u8, pa as *mut u8, bytes);
+        }
+        self.save_cursor();
+        clear_surface(base, bytes, self.bg);
+        self.cur_row = 0;
+        self.cur_col = 0;
+    }
+
+    /// CSI ?1049l: restore the saved normal screen and the cursor.
+    pub(super) fn exit_alt(&mut self) {
+        let (base, bytes) = match surface() {
+            Some(v) => v,
+            None => return,
+        };
+        let pa = G_SAVE_PA.load(Ordering::Acquire);
+        if pa == 0 {
+            return;
+        }
+        // SAFETY: same surface contract as enter_alt.
+        unsafe {
+            core::ptr::copy_nonoverlapping(pa as *const u8, base as *mut u8, bytes);
+        }
+        self.restore_cursor();
+    }
 }
 
 fn fb_info() -> (usize, usize, usize, usize, usize) {
     fb::info()
+}
+
+/// (front buffer VA, size in bytes) — None when fb is not 32bpp or absent.
+fn surface() -> Option<(usize, usize)> {
+    let (w, pitch, bpp, _, base) = fb_info();
+    if bpp != 32 || base == 0 || w == 0 {
+        return None;
+    }
+    Some((base, pitch * (fb::height() / FONT_H) * FONT_H))
+}
+
+/// Allocate (once) and publish the saved-normal surface. Returns its VA or
+/// 0 when the contiguous allocation failed.
+fn ensure_saved(bytes: usize) -> usize {
+    let pages = bytes.div_ceil(crate::mm::pmm::PAGE_SIZE);
+    // SAFETY: pmm::init has completed by the time a framebuffer exists;
+    // alloc_n self-locks and zeroes the returned run.
+    match unsafe { crate::mm::pmm::alloc_n(pages) } {
+        Ok(pa) => {
+            match G_SAVE_PA.compare_exchange(0, pa as usize, Ordering::AcqRel, Ordering::Acquire) {
+                Ok(_) => pa as usize,
+                Err(existing) => {
+                    // Another hart won the race; return our orphaned run.
+                    // SAFETY: `pa` is a page-aligned allocation we own and
+                    // never published; free revalidates the range.
+                    unsafe { crate::mm::pmm::free(pa) };
+                    existing
+                }
+            }
+        }
+        Err(_) => 0,
+    }
+}
+
+/// Fill the whole surface with a 32bpp color.
+fn clear_surface(base: usize, bytes: usize, color: u32) {
+    clear_row_bytes(base, bytes, color);
 }
 
 pub(super) fn clear_row_bytes(dst: usize, len: usize, color: u32) {

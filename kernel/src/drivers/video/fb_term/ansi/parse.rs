@@ -143,10 +143,9 @@ impl AnsiTerm {
             b's' => self.save_cursor(),
             b'u' => self.restore_cursor(),
             b'h' | b'l' => {
-                if self.private && self.nparams >= 1 && self.params[0] == 25 {
-                    self.cursor_visible = cmd == b'h';
+                if self.private && self.nparams >= 1 {
+                    self.set_private_mode(self.params[0], cmd == b'h');
                 }
-                // 1049 (alt screen), 2004 (bracketed paste): accepted, no-op.
             }
             b'm' => self.sgr(),
             b'r' => {
