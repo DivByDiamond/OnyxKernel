@@ -66,15 +66,25 @@ pub unsafe fn exit(pid: u32, code: i32) {
             proc_list_lock();
             p.state = ProcState::Exited;
             let parent = p.parent_pid;
+            // Auto-reap flag: a parent with SA_NOCLDWAIT never sees zombies
+            // or SIGCHLD (todo P2 #2). The node is unlinked + freed after
+            // the lock is dropped (kfree takes proc_list_lock itself).
+            let mut auto_reap = false;
             if parent != 0
                 && let Some(pp) = by_pid_unlocked(parent)
-                && matches!(pp.state, ProcState::Waiting)
             {
-                pp.state = ProcState::Ready;
-                let caller_hart = hart_id();
-                rq_lock(caller_hart);
-                crate::proc::scheduler::enqueue(caller_hart, pp as *mut _);
-                rq_unlock(caller_hart);
+                if !pp.no_cldwait {
+                    pp.pending_signals |= 1u32 << crate::proc::SIGCHLD;
+                } else {
+                    auto_reap = true;
+                }
+                if matches!(pp.state, ProcState::Waiting) {
+                    pp.state = ProcState::Ready;
+                    let caller_hart = hart_id();
+                    rq_lock(caller_hart);
+                    crate::proc::scheduler::enqueue(caller_hart, pp as *mut _);
+                    rq_unlock(caller_hart);
+                }
             }
             let mut cur = G_ALL_PROCS;
             while !cur.is_null() {
@@ -85,7 +95,29 @@ pub unsafe fn exit(pid: u32, code: i32) {
                 }
                 cur = (*cur).all_next;
             }
+            // Auto-reap unlink (SA_NOCLDWAIT): drop the node from the all-
+            // procs list inside the same critical section that published
+            // Exited, so no other hart can traverse to it afterwards.
+            if auto_reap {
+                if G_ALL_PROCS == p_ptr {
+                    G_ALL_PROCS = (*p_ptr).all_next;
+                } else {
+                    let mut walk = G_ALL_PROCS;
+                    while !walk.is_null() && (*walk).all_next != p_ptr {
+                        walk = (*walk).all_next;
+                    }
+                    if !walk.is_null() {
+                        (*walk).all_next = (*p_ptr).all_next;
+                    }
+                }
+            }
             proc_list_unlock();
+            if auto_reap {
+                // SAFETY: the node was unlinked from G_ALL_PROCS under
+                // proc_list_lock above; its runqueue links were removed and
+                // root_pa torn down earlier in this fn; no hart can reach it.
+                heap::kfree(p_ptr as *mut u8);
+            }
         }
     }
 }

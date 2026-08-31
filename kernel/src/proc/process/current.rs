@@ -143,6 +143,7 @@ pub fn dump_all<W: onyx_core::fmt::Write>(w: &mut W) {
                     ProcState::Exited => "Exited",
                     ProcState::Waiting => "Waiting",
                     ProcState::Creating => "Creating",
+                    ProcState::Stopped => "Stopped",
                     ProcState::Free => "Free",
                 };
                 let args: &[onyx_core::fmt::Arg] = &[

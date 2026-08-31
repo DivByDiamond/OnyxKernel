@@ -183,6 +183,13 @@ pub unsafe fn sys_ioctl(fd: u64, request: u64, arg: u64) -> i64 {
                 ptr::write(ws.add(1), cols);
                 ptr::write(ws.add(2), 0);
                 ptr::write(ws.add(3), 0);
+                // SIGWINCH on the first size read after a resize (todo P2
+                // #1): TUI programs that query winsize at startup still
+                // observe geometry changes made before their handler was
+                // installed.
+                if crate::drivers::fb::resize::take_resized() {
+                    let _ = proc::signal_foreground(proc::SIGWINCH);
+                }
                 0
             }
             0x541B => {

@@ -44,6 +44,20 @@ fn test_proc_state_values() {
     assert_eq!(ProcState::Running as u32, 2);
     assert_eq!(ProcState::Exited as u32, 3);
     assert_eq!(ProcState::Waiting as u32, 4);
+    assert_eq!(ProcState::Creating as u32, 5);
+    assert_eq!(ProcState::Stopped as u32, 6);
+}
+
+#[test]
+fn test_signal_constants() {
+    // POSIX signal numbers used by the job-control work (todo P2).
+    assert_eq!(signals::SIGCHLD, 17);
+    assert_eq!(signals::SIGCONT, 18);
+    assert_eq!(signals::SIG_STOP, 19);
+    assert_eq!(signals::SIG_TSTP, 20);
+    assert_eq!(signals::SIGWINCH, 28);
+    // SA_NOCLDWAIT mirrors the Linux value (libc signal.h).
+    assert_eq!(signals::SA_NOCLDWAIT, 0x2);
 }
 
 #[test]

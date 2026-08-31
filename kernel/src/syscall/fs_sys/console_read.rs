@@ -1,9 +1,10 @@
 //! Console (fd 0) line discipline for sys_read.
 //!
 //! Extracted from read_write.rs (todo P1 #3/#5). Owns the three read modes:
-//! raw (TIOCSRAW), non-canonical termios with VMIN/VTIME, and cooked line
-//! editing — plus O_NONBLOCK handling for the virtual stdin fd. fds 0-2 are
-//! not in the fd table, so O_NONBLOCK lives in Proc::stdin_flags.
+//! raw (TIOCSRAW), non-canonical termios with VMIN/VTIME (the MIN/TIME
+//! matrix lives in noncanon_read.rs), and cooked line editing — plus
+//! O_NONBLOCK handling for the virtual stdin fd. fds 0-2 are not in the fd
+//! table, so O_NONBLOCK lives in Proc::stdin_flags.
 
 use crate::arch::trap_frame::TrapFrame;
 use crate::drivers::{fb, fb_term, uart};
@@ -11,6 +12,8 @@ use crate::proc;
 use crate::syscall::abi::O_NONBLOCK;
 use crate::syscall::tty::filter_input;
 use onyx_core::errno::Errno;
+
+use super::noncanon_read::noncanon_read;
 
 /// Next line-disciplined byte from the UART, or None when the input FIFO is
 /// empty. Ctrl+C is consumed here and turned into SIGINT (filter_input).
@@ -104,80 +107,6 @@ fn raw_read(tf: &mut TrapFrame, dst: *mut u8, len: u64) -> i64 {
         }
         n as i64
     }
-}
-
-/// VTIME in deciseconds -> microseconds (POSIX: TIME * 0.1s).
-#[inline]
-fn vtime_us(vtime: u8) -> u64 {
-    vtime as u64 * 100_000
-}
-
-/// Non-canonical termios read implementing the four POSIX MIN/TIME cases
-/// (todo P1 #5). `vmin`/`vtime` are the calling process's termios values:
-/// - MIN=0, TIME=0: never block; return queued bytes now (0 if none).
-/// - MIN=0, TIME>0: total timeout from read() entry; return on first byte
-///   or deadline.
-/// - MIN>0, TIME=0: block until MIN bytes (or the buffer) are full.
-/// - MIN>0, TIME>0: block for the first byte, then return when MIN bytes
-///   are in or TIME elapsed since the last byte (inter-byte timeout).
-///
-/// O_NONBLOCK overrides MIN: EAGAIN when no byte is queued, otherwise
-/// return what is already available.
-fn noncanon_read(tf: &mut TrapFrame, dst: *mut u8, len: u64, vmin: u8, vtime: u8) -> i64 {
-    let maxlen = len as usize;
-    let want = (vmin as usize).min(maxlen);
-    let now = crate::srv::timer::uptime_us();
-    // MIN=0 & TIME>0: one total deadline for the whole read.
-    let mut deadline = if vmin == 0 && vtime > 0 {
-        now.saturating_add(vtime_us(vtime))
-    } else {
-        0
-    };
-    let mut n = 0usize;
-    loop {
-        match next_byte() {
-            Some(b) => {
-                // SAFETY: the n < maxlen guard below plus the console_read
-                // contract (len writable user bytes at dst) bound this write.
-                unsafe {
-                    *dst.add(n) = b;
-                }
-                n += 1;
-                if vmin > 0 && vtime > 0 {
-                    // Inter-byte window: re-armed by every received byte.
-                    deadline = crate::srv::timer::uptime_us().saturating_add(vtime_us(vtime));
-                }
-                if n >= want.max(1) || n >= maxlen {
-                    break;
-                }
-            }
-            None => {
-                if vmin == 0 && vtime == 0 {
-                    // Pure poll: deliver what is queued (possibly 0).
-                    break;
-                }
-                let expired = deadline != 0
-                    && crate::srv::timer::uptime_us() >= deadline
-                    && (vmin > 0 || n == 0);
-                if expired {
-                    break;
-                }
-                if stdin_nonblock() {
-                    if n == 0 {
-                        return Errno::Again.as_i64();
-                    }
-                    break;
-                }
-                // SAFETY: syscall-path yield; tf is this hart's live trap
-                // frame per the console_read caller contract.
-                unsafe { proc::sched_yield(tf) };
-            }
-        }
-        if n >= maxlen {
-            break;
-        }
-    }
-    n as i64
 }
 
 /// Cooked mode: canonical line editing (echo, backspace, Enter -> \n).

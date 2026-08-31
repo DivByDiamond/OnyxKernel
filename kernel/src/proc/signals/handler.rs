@@ -1,10 +1,8 @@
 use crate::arch::trap_frame::{TrapFrame, reg_truncate, reg_widen};
 use core::sync::atomic::Ordering;
 
-use super::SIG_KILL;
-use super::SIG_STOP;
-use super::protected_mask;
 use super::{G_NEED_RESCHED, ProcState, current_for_hart, hart_id};
+use super::{SIG_KILL, SIG_STOP, SIG_TSTP, SIGCHLD, SIGCONT, SIGWINCH, protected_mask};
 use crate::proc::lifecycle::exit;
 
 /// # Safety
@@ -52,7 +50,11 @@ pub unsafe fn signal_check(tf: &mut TrapFrame) {
 
         if (*cur).pending_signals & (1u32 << SIG_STOP) != 0 {
             (*cur).pending_signals &= !(1u32 << SIG_STOP);
-            (*cur).state = ProcState::Waiting;
+            // Job-control stop (todo P2 #3): park in Stopped — a distinct
+            // state from Waiting so only SIGCONT/SIGKILL can resume. The
+            // running process is not on any runqueue; publishing Stopped
+            // plus forcing a resched removes it from the CPU.
+            (*cur).state = ProcState::Stopped;
             G_NEED_RESCHED[hartid].store(true, Ordering::Release);
             return;
         }
@@ -80,11 +82,24 @@ pub unsafe fn signal_check(tf: &mut TrapFrame) {
 
         let handler = (*cur).signal_handlers[signum as usize];
         if handler == 0 {
-            exit(pid, 128 + signum as i32);
-            G_NEED_RESCHED[hartid].store(true, Ordering::Release);
+            // Default actions (todo P2 #3/#4): stop signals park the
+            // process; SIGCONT/SIGCHLD/SIGWINCH are ignored by default;
+            // everything else terminates with 128+signum.
+            match signum {
+                SIG_TSTP => {
+                    (*cur).state = ProcState::Stopped;
+                    G_NEED_RESCHED[hartid].store(true, Ordering::Release);
+                }
+                SIGCONT | SIGCHLD | SIGWINCH => {}
+                _ => {
+                    exit(pid, 128 + signum as i32);
+                    G_NEED_RESCHED[hartid].store(true, Ordering::Release);
+                }
+            }
             return;
         }
         if handler == 1 {
+            // SIG_IGN: consume the signal.
             return;
         }
 
