@@ -10,21 +10,7 @@ pub const IP_PROTO_UDP: u8 = 17;
 
 static mut IP_ID: u16 = 0;
 
-pub fn checksum(data: &[u8]) -> u16 {
-    let mut sum = 0u32;
-    let mut i = 0;
-    while i + 1 < data.len() {
-        sum = sum.wrapping_add(u16::from_be_bytes([data[i], data[i + 1]]) as u32);
-        i += 2;
-    }
-    if i < data.len() {
-        sum = sum.wrapping_add((data[i] as u32) << 8);
-    }
-    while sum >> 16 != 0 {
-        sum = (sum & 0xFFFF) + (sum >> 16);
-    }
-    !(sum as u16)
-}
+pub use super::checksum::checksum;
 
 /// # Safety
 ///

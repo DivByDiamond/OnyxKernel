@@ -1,3 +1,4 @@
+pub mod checksum;
 pub mod dhcp;
 pub mod dns;
 pub mod eth;
