@@ -186,6 +186,7 @@ pub unsafe fn sys_fork(tf: &mut TrapFrame) -> i64 {
                 child.cwd = parent.cwd;
                 child.cwd_len = parent.cwd_len;
                 child.mmap_brk = parent.mmap_brk;
+                child.umask = parent.umask;
                 child.tf = child_tf;
                 // Atomic publication: Creating → Ready + enqueue. From this
                 // point the child is fully initialized and may be stolen.

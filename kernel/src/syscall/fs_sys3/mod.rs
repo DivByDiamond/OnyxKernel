@@ -20,7 +20,7 @@ pub(super) use file_ops::{
 };
 pub(super) use info::{
     sys_getgid, sys_getpgid, sys_getppid, sys_getuid, sys_setgid, sys_setpgid, sys_setsid,
-    sys_setuid, sys_uname,
+    sys_setuid, sys_umask, sys_uname,
 };
 pub(super) use mem::{sys_brk, sys_mmap, sys_mprotect, sys_munmap};
 pub(super) use time::{

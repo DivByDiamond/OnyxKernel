@@ -19,7 +19,7 @@ pub use call::proc::{
 };
 pub use call::timer::{
     brk, clock_getres, clock_gettime, getentropy, getgid, gettimeofday, getuid, ioctl, isatty,
-    mmap, mprotect, munmap, nanosleep, sbrk, setgid, setuid, uname,
+    mmap, mprotect, munmap, nanosleep, sbrk, setgid, setuid, umask, uname,
 };
 pub use call::{
     access, chdir, close, create, dup, fcntl, fstat, getcwd, getdents, getdents64, lseek, mkdir,

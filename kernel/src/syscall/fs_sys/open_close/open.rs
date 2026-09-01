@@ -124,7 +124,10 @@ pub unsafe fn sys_open(path: u64, flags: u64, mode: u64) -> i64 {
                 let dtype = if mode == 0 {
                     onyx_core::formats::ONYFS_DT_REG
                 } else {
-                    mode as u32
+                    // umask(2) semantics: clear the caller's masked bits from
+                    // the requested permission bits, leaving any file-type
+                    // bits above the low 9 (e.g. ONYFS_DT_* tag) untouched.
+                    (mode as u32) & !(proc::current().umask & 0o777)
                 };
                 match vfs::create(path_bytes, dtype) {
                     Ok(t) => t,

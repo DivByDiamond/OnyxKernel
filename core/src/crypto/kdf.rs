@@ -107,6 +107,15 @@ pub struct ShadowField {
 /// layout used by both the current iterated scheme and the legacy
 /// single-round scheme (they are distinguished by re-computation, not by
 /// format). Returns `None` for malformed/non-`$5$` fields.
+///
+/// Policy: an empty field, `*`, `!`, or any other non-`$5$` value is a
+/// **locked account**, not "no password required". Unlike classic Unix
+/// crypt(3) (empty hash historically meant login with any/no password),
+/// Onyx never treats a missing/unparsable hash as an open door — callers
+/// (`verify_shadow_outcome`) must see this as `None` so they fail closed.
+/// An account that should log in with an empty password must have an
+/// explicit iterated hash of the empty string (see `empty_password_verifies`
+/// in kdf_tests.rs), not an empty shadow field.
 pub fn parse_shadow_field(data: &[u8]) -> Option<ShadowField> {
     if data.len() < 3 + 17 + 64 || data[0] != b'$' || data[1] != b'5' || data[2] != b'$' {
         return None;

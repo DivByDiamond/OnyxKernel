@@ -91,10 +91,11 @@ fn test_syscall_numbers_unique_and_complete() {
         SYS_fchown,
         SYS_mouse_read,
         SYS_poll,
+        SYS_umask,
     ];
-    let mut seen = [false; 88];
+    let mut seen = [false; 89];
     for &nr in &all {
-        assert!((1..=87).contains(&nr), "syscall {} out of range", nr);
+        assert!((1..=88).contains(&nr), "syscall {} out of range", nr);
         let idx = nr as usize;
         assert!(!seen[idx], "syscall {} duplicated", nr);
         seen[idx] = true;

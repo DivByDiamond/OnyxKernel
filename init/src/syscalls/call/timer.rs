@@ -26,6 +26,12 @@ pub unsafe fn setgid(gid: u64) -> i64 {
     ret
 }
 #[inline]
+pub unsafe fn umask(new_mask: u64) -> i64 {
+    let ret;
+    asm!("ecall", in("a7") SYS_UMASK, in("a0") new_mask, lateout("a0") ret);
+    ret
+}
+#[inline]
 pub unsafe fn uname(buf: *mut u8) -> i64 {
     let ret;
     asm!("ecall", in("a7") SYS_UNAME, in("a0") buf as usize, lateout("a0") ret);

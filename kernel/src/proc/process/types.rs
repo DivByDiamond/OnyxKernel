@@ -66,6 +66,10 @@ pub struct Proc {
     pub cwd_len: u16,
     pub uid: u32,
     pub gid: u32,
+    /// File-mode creation mask (umask(2)): bits set here are cleared from
+    /// the requested mode on `open(..., O_CREAT, mode)`. Inherited by
+    /// children, defaults to `0o022` (see `alloc_proc`).
+    pub umask: u32,
     pub tf: TrapFrame,
     pub kstack: [u8; KSTACK_SIZE],
     pub pending_signals: u32,
@@ -139,6 +143,7 @@ impl Proc {
             cwd_len: 0,
             uid: 0,
             gid: 0,
+            umask: 0o022,
             tf: TrapFrame::zero(),
             kstack: [0; KSTACK_SIZE],
             pending_signals: 0,

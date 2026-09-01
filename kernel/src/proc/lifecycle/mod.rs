@@ -65,6 +65,7 @@ pub(super) unsafe fn alloc_proc() -> KResult<*mut Proc> {
         (*p).mmap_brk = 0x3000_0000;
         (*p).uid = 0;
         (*p).gid = 0;
+        (*p).umask = 0o022;
         (*p).cwd[0] = b'/';
         (*p).cwd[1] = 0;
         (*p).cwd_len = 1;
