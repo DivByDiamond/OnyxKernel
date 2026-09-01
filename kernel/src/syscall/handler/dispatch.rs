@@ -65,10 +65,18 @@ pub unsafe fn handle(tf: &mut TrapFrame) -> i64 {
         let cur_ring = proc::current_ring();
 
         if !acl::syscall_allowed(nr, cur_ring) {
-            return Errno::Perm.as_i64();
+            return Errno::translate_syscall_result(Errno::Perm.as_i64());
         }
 
-        match nr {
+        // Every arm below returns either a non-negative success value or a
+        // negative `Errno::X.as_i64()` (the internal -1..-20 ordinal, NOT a
+        // POSIX errno). `translate_syscall_result` is the single point that
+        // converts that ordinal to the POSIX-numbered value userspace's
+        // errno.h documents and expects (see onyx_core::errno::Errno::to_posix
+        // for why this boundary exists — historically syscalls returned the
+        // raw ordinal straight to userspace, which desynced from
+        // libonyxc/include/io/errno.h's Linux/glibc numbering).
+        let raw = match nr {
             SYS_write => crate::syscall::fs_sys::sys_write(tf, a0, a1, a2),
             SYS_read => crate::syscall::fs_sys::sys_read(tf, a0, a1, a2),
             SYS_exit => crate::syscall::proc_sys::sys_exit(a0),
@@ -171,6 +179,7 @@ pub unsafe fn handle(tf: &mut TrapFrame) -> i64 {
             ),
             SYS_poll => crate::syscall::poll_sys::sys_poll(tf, a0, a1, a2 as i64),
             _ => Errno::NoSys.as_i64(),
-        }
+        };
+        Errno::translate_syscall_result(raw)
     }
 }

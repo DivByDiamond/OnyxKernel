@@ -56,8 +56,18 @@ unsafe fn handle_tcp_inner(frame: &[u8], ip_start: usize, ihl: usize, total_len:
         if dip != G_IP {
             return;
         }
-        let sport = u16::from_be_bytes([frame[tcp_off + 2], frame[tcp_off + 3]]);
-        let dport = u16::from_be_bytes([frame[tcp_off], frame[tcp_off + 1]]);
+        // TCP header (RFC 793): bytes 0-1 = source port, bytes 2-3 =
+        // destination port — this used to be read backwards (same class of
+        // bug as the UDP RX handler, see OnyxKernel/todo.md), which broke
+        // the 4-tuple connection match below (`c.src_port != dport ||
+        // c.dst_port != sport`) for every legitimate inbound segment: a
+        // real SYN-ACK's source port (the remote's port) was compared
+        // against `c.dst_port` mislabeled as `sport`, but assigned the raw
+        // *destination*-port bytes instead. No connection ever matched, so
+        // `tcp_connect`'s SYN-ACK wait always timed out even when the peer
+        // replied correctly (confirmed on the wire via pcap).
+        let sport = u16::from_be_bytes([frame[tcp_off], frame[tcp_off + 1]]);
+        let dport = u16::from_be_bytes([frame[tcp_off + 2], frame[tcp_off + 3]]);
         let seq = u32::from_be_bytes([
             frame[tcp_off + 4],
             frame[tcp_off + 5],

@@ -10,21 +10,21 @@ use onyx_core::errno::{Errno, KResult};
 pub fn recv_into(out: &mut [u8]) -> KResult<usize> {
     // SAFETY: valid only after init() completed (guarded here); slot/buf_idx masked % RX_DESCS keep used-ring and rx_bufs accesses in bounds; the device only writes HDR_LEN+NET_MTU-byte RX buffers and the copy length is clamped to out.len().
     unsafe {
-        if G_NET.base == 0 || G_NET.avail.is_null() || G_NET.used.is_null() {
+        if G_NET.base == 0 || G_NET.rx_avail.is_null() || G_NET.rx_used.is_null() {
             return Err(Errno::Io);
         }
-        let used_idx = ptr::read_volatile(ptr::addr_of!((*G_NET.used).idx));
-        if used_idx == G_NET.last_used {
+        let used_idx = ptr::read_volatile(ptr::addr_of!((*G_NET.rx_used).idx));
+        if used_idx == G_NET.rx_last_used {
             return Err(Errno::NoEnt);
         }
-        let slot = (G_NET.last_used as usize) % RX_DESCS;
-        G_NET.last_used = used_idx;
-        let elem = ptr::read_volatile(ptr::addr_of!((*G_NET.used).ring[slot]));
+        let slot = (G_NET.rx_last_used as usize) % RX_DESCS;
+        G_NET.rx_last_used = used_idx;
+        let elem = ptr::read_volatile(ptr::addr_of!((*G_NET.rx_used).ring[slot]));
         let buf_idx = (elem.idx as usize) % RX_DESCS;
         let frame_len = (elem.len as usize).saturating_sub(HDR_LEN).min(out.len());
         let src = G_NET.rx_bufs[buf_idx].add(HDR_LEN);
         ptr::copy_nonoverlapping(src, out.as_mut_ptr(), frame_len);
-        push_avail(buf_idx);
+        push_avail(buf_idx, true);
         Ok(frame_len)
     }
 }
@@ -39,7 +39,10 @@ pub fn send(frame: &[u8]) -> KResult<()> {
         // Never dereference a half-initialized device: init() exposes the
         // global only after the queues are up, but keep the guard as defense
         // in depth so a stray caller can't fault the kernel on a NULL pointer.
-        if G_NET.base == 0 || G_NET.desc.is_null() || G_NET.avail.is_null() || G_NET.used.is_null()
+        if G_NET.base == 0
+            || G_NET.tx_desc.is_null()
+            || G_NET.tx_avail.is_null()
+            || G_NET.tx_used.is_null()
         {
             return Err(Errno::Io);
         }
@@ -47,22 +50,26 @@ pub fn send(frame: &[u8]) -> KResult<()> {
         let frame_pa = pmm::alloc_zero()? as *mut u8;
         ptr::copy_nonoverlapping(frame.as_ptr(), frame_pa, frame.len());
         // Two descriptors chained: header (read-only) + frame (read-only).
-        (*G_NET.desc.add(0)) = crate::drivers::virtio::VqDesc {
+        (*G_NET.tx_desc.add(0)) = crate::drivers::virtio::VqDesc {
             addr: hdr_pa as u64,
             len: HDR_LEN as u32,
             flags: VQ_DESC_F_NEXT,
             next: 1,
         };
-        (*G_NET.desc.add(1)) = crate::drivers::virtio::VqDesc {
+        (*G_NET.tx_desc.add(1)) = crate::drivers::virtio::VqDesc {
             addr: frame_pa as u64,
             len: frame.len() as u32,
             flags: 0,
             next: 0,
         };
-        push_avail(0);
+        push_avail(0, false);
         let base = G_NET.base;
-        crate::drivers::virtio::reg_w(base, R_QUEUE_NOTIFY, 0);
-        let last = ptr::read_volatile(ptr::addr_of!((*G_NET.used).idx));
+        // Queue index 1 = transmitq. Notifying 0 here (the original bug)
+        // tells the device "the RX queue has new buffers", which is not a
+        // send — and it targets the RX rings anyway, since there was no
+        // separate TX queue before this fix.
+        crate::drivers::virtio::reg_w(base, R_QUEUE_NOTIFY, 1);
+        let last = ptr::read_volatile(ptr::addr_of!((*G_NET.tx_used).idx));
         // Wait for one new used entry. sedna's VirtIONetworkDevice only marks
         // the TX descriptor used when the OC2R network stack pulls the frame
         // on its own tick (async w.r.t. the guest), so a fixed small spin
@@ -71,7 +78,7 @@ pub fn send(frame: &[u8]) -> KResult<()> {
         let deadline = crate::srv::timer::uptime_us().wrapping_add(250_000);
         let mut spins = 0u64;
         loop {
-            let cur = ptr::read_volatile(ptr::addr_of!((*G_NET.used).idx));
+            let cur = ptr::read_volatile(ptr::addr_of!((*G_NET.tx_used).idx));
             if cur != last {
                 break;
             }
