@@ -29,8 +29,18 @@ unsafe fn handle_udp_inner(frame: &[u8], ip_start: usize) {
         if udp_start + UDP_HLEN > frame.len() {
             return;
         }
-        let dst_port = u16::from_be_bytes([frame[udp_start], frame[udp_start + 1]]);
-        let src_port = u16::from_be_bytes([frame[udp_start + 2], frame[udp_start + 3]]);
+        // UDP header (RFC 768): bytes 0-1 = source port, bytes 2-3 =
+        // destination port — this used to be read backwards (dst_port from
+        // the source-port field and vice versa), so `sock.local_port ==
+        // dst_port` below compared against the *sender's* port and never
+        // matched a bound socket. Confirmed live: a DHCP OFFER reply
+        // (src=67 server, dst=68 client) logged as dst_port=67/src_port=68
+        // before this fix — exactly the swapped fields — so the client's
+        // port-68 socket never received it and dhcp_discover() always fell
+        // back to hardcoded defaults despite the reply reaching the RX ring
+        // intact (see OnyxKernel/todo.md).
+        let src_port = u16::from_be_bytes([frame[udp_start], frame[udp_start + 1]]);
+        let dst_port = u16::from_be_bytes([frame[udp_start + 2], frame[udp_start + 3]]);
         let udp_len = u16::from_be_bytes([frame[udp_start + 4], frame[udp_start + 5]]) as usize;
         let payload_start = udp_start + UDP_HLEN;
         let payload_len = udp_len

@@ -43,6 +43,88 @@
 
 ## ❌ КРИТИЧНО ДО 15 СЕНТЯБРЯ:
 
+### 🔥 Найдено и починено при живом тесте ohttp в QEMU (2026-09-01)
+Тестировал `OnyxApps/apps/ohttp` в QEMU (`-netdev user` + `guestfwd`); по ходу
+нашлись и почищены два системных бага, плюс остался один открытый:
+
+- [x] **Errno не транслировался в POSIX** — `core/src/errno.rs::Errno::as_i64()`
+      отдавал «сырой» внутренний ordinal (`Ok=0, NoMem=-1, Inval=-2, NoEnt=-3,
+      Io=-4, Perm=-5, ...`), и именно это число (после отрицания) попадало в
+      userspace `errno`, хотя `libonyxc/include/io/errno.h` документирует и
+      определяет POSIX/glibc-значения (`ENOENT=2, EIO=5, EACCES=13, ...`) и
+      прямо утверждает, что трансляция уже происходит. Добавлены
+      `Errno::to_posix()` / `Errno::from_i64()` / `Errno::translate_syscall_result()`
+      (`core/src/errno.rs`, покрыты host-тестами) и единая точка перевода в
+      `kernel/src/syscall/handler/dispatch.rs::handle()` (оборачивает и ACL-early-return,
+      и результат матча по `nr`). Подтверждено живьём: `ohttp` до фикса получал
+      `errno=4` (сырой `Io`), после фикса — `errno=5` (POSIX `EIO`).
+- [x] **virtio-net не настраивал отдельную TX-очередь (queue 1)** —
+      `send()` писал в те же кольца, что `setup_rx_queue` завела для очереди 0
+      (RX), и уведомлял `R_QUEUE_NOTIFY` со значением `0` — то есть говорил
+      устройству «в RX есть новые буферы» вместо «вот кадр на отправку», и
+      затирал RX-дескрипторы 0/1. Заведена отдельная TX-очередь (`queue 1`,
+      как у `virtio_console` — см. `kernel/src/drivers/virtio_console/mod.rs`
+      для образца), `send()` теперь пишет в `G_NET.tx_*` и уведомляет
+      `R_QUEUE_NOTIFY=1` (`kernel/src/drivers/virtio_net/mod.rs`,
+      `kernel/src/drivers/virtio_net/xfer.rs`).
+- [x] **virtio-mmio регистрировал очереди только по modern-протоколу (v2)** —
+      реальный `qemu-system-riscv64 -device virtio-net-device` под `-M virt`
+      по умолчанию отдаёт **legacy** транспорт (`R_VERSION=1`), у которого нет
+      регистров `R_QUEUE_{DESC,AVAIL,USED}_*`/`R_QUEUE_READY` — вместо них
+      нужен один `R_QUEUE_PFN` на физически смежный регион
+      desc|avail|used, плюс `R_GUEST_PAGE_SIZE`/`R_QUEUE_ALIGN`. Драйвер писал
+      только modern-регистры, так что на legacy-транспорте очередь физически
+      никогда не «вооружалась» — отсюда 0 пакетов на pcap. Добавлен общий
+      `setup_queue_rings(base, modern)` с legacy-веткой (по образцу
+      `kernel/src/drivers/virtio/queue.rs::setup_queue`, который у virtio-blk
+      уже делал это правильно). **Подтверждено pcap'ом**: до фикса — 0 пакетов
+      за весь бут; после — полный DHCP DISCOVER/REPLY, ARP REQUEST/REPLY,
+      TCP SYN → SYN-ACK от пира.
+- [x] **DHCP OFFER доходил до RX-буфера корректно, но не засчитывался; TCP
+      SYN-ACK матчился с той же ошибкой** — оба `handle_udp_inner`
+      (`kernel/src/net/udp/rx.rs`) и `handle_tcp_inner`
+      (`kernel/src/net/tcp/handle.rs`) читали src/dst port **в обратном
+      порядке**: UDP/TCP-заголовок (RFC 768/793) кладёт source port в байты
+      0-1, destination port — в байты 2-3, а оба обработчика были написаны
+      наоборот. Для UDP это ломало `sock.local_port == dst_port` (сравнение
+      шло с полем source вместо destination — наш сокет на 68 порту никогда
+      не матчился с ответом сервера). Для TCP аналогично ломало 4-tuple
+      матчинг `c.src_port != dport || c.dst_port != sport` — реальный
+      SYN-ACK/ACK никогда не находил живое соединение. **Подтверждено живьём
+      end-to-end**: до фикса — DHCP всегда фоллбэк на захардкоженный IP,
+      `tcp_connect` — таймаут; после фикса — `[INF] net: DHCP lease
+      acquired`, полный TCP handshake+data+FIN с реальным сервером через
+      `ohttp` (см. `OnyxApps/todo.md`).
+- [ ] **`usleep()`/`nanosleep()` зависает навсегда** — обнаружено при
+      живом тесте `ohttp`: цикл вида `net_recv(); if (no data) usleep(100);`
+      детерминированно вешает процесс на первом же `usleep()` (подтверждено:
+      с `usleep(100)` — тишина после первой попытки даже спустя 100+с; с
+      busy-spin вместо `usleep` — тот же код успешно завершается за миллисекунды).
+      Не докопался до причины (сам `nanosleep` syscall, таймер, или что-то в
+      либц-обёртке `usleep()`/`sleep()` в `libonyxc/src/io/time.c`) — нужен
+      отдельный проход с логами внутри `kernel/src/syscall/fs_sys3` (или где
+      там `nanosleep` реализован) и `libonyxc`. Затрагивает любую программу,
+      которая честно спит вместо busy-loop — сейчас `ohttp` работает в обход
+      через busy-spin (`apps/ohttp/http/response.c`), это не решение.
+- [ ] **Указатели рядом с `USER_TOP` (0x40000000) проваливают
+      `user_ptr_ok`, включая `argv`-строки** — начальный user stack pointer
+      (`ustack`) стартует всего в паре КБ ниже `USER_TOP`
+      (видел `ustack=0x000000003ffffff0` в логах загрузки), так что: (1)
+      любой стековый буфер в несколько КБ близко к вершине стека даёт
+      `buf + len > USER_TOP` и синтаксически валидный `net_recv`/`read`
+      получает `EINVAL`, хотя память реально замаплена (обошёл в `ohttp`,
+      переведя буфер в `static`, см. `OnyxApps/todo.md`); (2) серьёзнее —
+      `argv[N]`, которые лоадер тоже кладёт на верхушку стека, спотыкаются
+      о ту же проверку в `parse_user_path` (`kernel/src/syscall/handler/
+      dispatch.rs`) — видел живьём: `ohttp` не смог открыть свой ЖЕ
+      `argv[2]` (`/tmp/out.html`) с `[ERR] sys_open: parse_user_path failed
+      for path=3fffffc4`. Это системная проблема лоадера/расположения
+      стека (`proc::onx::load` или где там выставляется `ustack`), а не
+      баг конкретного приложения — нужно либо опустить стартовый `ustack`
+      подальше от `USER_TOP`, либо увеличить `USER_TOP`, либо резервировать
+      guard-зону. Не чинил — отдельная задача, затрагивает потенциально
+      любую программу с argv или большими стековыми буферами.
+
 ### 🔥 Приоритет 1 — Non-blocking I/O (БЛОКЕР #1: без него нет htop/UI с таймерами)
 **Статус: ✅ СДЕЛАНО 2026-09-01** — poll (#87), FIONREAD, O_NONBLOCK, F_GETFL/F_SETFL, VMIN/VTIME
 
@@ -141,6 +223,22 @@
 - [ ] Snapshot на несъёмном диске OC2R (нужен OC2R-стенд)
 
 ## 📅 ПОСЛЕ 15 СЕНТЯБРЯ (v0.6+):
+
+### Сеть / userland (нужно для obrowse, см. OnyxApps/todo.md)
+- [ ] **DNS-резолвер как syscall** — `net_connect` сейчас берёт голый
+      IPv4 (`kernel/src/syscall/net_sys.rs`); `ohttp` (OnyxApps)
+      обходит это, принимая IP от вызывающего, но `obrowse` без
+      резолвинга хостнеймов не имеет смысла. DHCP-lease уже кладёт
+      `G_DNS` (см. приоритет 4 выше) — не хватает только userspace-пути:
+      либо новый syscall `net_resolve(name_ptr, ip_out)` поверх
+      существующего UDP-стека (простой A-запрос, без кэша/AAAA), либо
+      резолвинг на этапе сборки через hosts-файл как временная затычка.
+- [ ] Бо́льшие recv-буферы / recv semantics — `tcp_recv` сейчас никогда
+      не возвращает `0` (только `Ok(n>0)` или `Err(NoEnt)` пока нет
+      данных, `Err(Inval)` после TIMEWAIT); нет чистого сигнала "peer
+      закрыл соединение". `ohttp` обходит это через `Content-Length`
+      (см. `OnyxApps/apps/ohttp/README.md`), но `obrowse` для страниц
+      без `Content-Length` (chunked/legacy) захочет настоящий EOF.
 
 ### PTY + мультиплексоры (~460 строк)
 **Статус: ✅ СДЕЛАНО 2026-09-01** — fs/pty (4 пары, 512B-кольца, master-close
