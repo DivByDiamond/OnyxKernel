@@ -1,7 +1,7 @@
 use super::conn::{
     BUF_SIZE, CONNS, TIMEWAIT_US, TcpConn, alloc_conn, alloc_local_port, sweep_timewait,
 };
-use super::handle::{SEG_ACK, SEG_FIN_ACK, drain_acked, tcp_transition};
+use super::state::{SEG_ACK, SEG_FIN_ACK, drain_acked, tcp_transition};
 
 fn test_conn() -> TcpConn {
     // State 1 = SYN_SENT, as left by tcp_connect().
