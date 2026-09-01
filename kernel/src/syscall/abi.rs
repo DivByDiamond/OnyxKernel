@@ -93,6 +93,7 @@ pub const SYS_chown: u64 = 84; // chown(path, uid, gid)
 pub const SYS_fchown: u64 = 85; // fchown(fd, uid, gid)
 pub const SYS_mouse_read: u64 = 86; // mouse_read(*event) -> 0 or -errno
 pub const SYS_poll: u64 = 87; // poll(*pollfd, nfds, timeout) -> ready count
+pub const SYS_umask: u64 = 88; // umask(new_mask) -> old_mask
 
 // ── Flags / constants used by syscalls ─────────────────────────────────
 

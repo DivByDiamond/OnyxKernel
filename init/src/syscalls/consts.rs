@@ -86,3 +86,4 @@ pub const SYS_CHOWN: u64 = 84;
 pub const SYS_FCHOWN: u64 = 85;
 pub const SYS_MOUSE_READ: u64 = 86;
 pub const SYS_POLL: u64 = 87;
+pub const SYS_UMASK: u64 = 88;

@@ -115,6 +115,7 @@ pub unsafe fn handle(tf: &mut TrapFrame) -> i64 {
             SYS_fcntl => crate::syscall::fs_sys::sys_fcntl(a0, a1 as u32, a2),
             SYS_getuid => crate::syscall::fs_sys3::sys_getuid(),
             SYS_getgid => crate::syscall::fs_sys3::sys_getgid(),
+            SYS_umask => crate::syscall::fs_sys3::sys_umask(a0),
             SYS_utimens => crate::syscall::fs_sys3::sys_utimens(a0, a1),
             SYS_uname => crate::syscall::fs_sys3::sys_uname(a0),
             SYS_nanosleep => crate::syscall::fs_sys3::sys_nanosleep(a0, a1),

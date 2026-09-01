@@ -79,6 +79,17 @@ fn empty_password_verifies() {
     assert_eq!(classify_password(b"", &lf), HashScheme::Legacy);
 }
 
+/// Locked-account policy: an empty or sentinel (`*`, `!`) shadow field must
+/// never be treated as "no password" — it must fail to parse, so callers
+/// fail closed. See the policy note on `parse_shadow_field`.
+#[test]
+fn locked_account_fields_fail_closed() {
+    assert!(parse_shadow_field(b"").is_none());
+    assert!(parse_shadow_field(b"*").is_none());
+    assert!(parse_shadow_field(b"!").is_none());
+    assert!(parse_shadow_field(b"!!").is_none());
+}
+
 #[test]
 fn const_time_eq_basics() {
     assert!(const_time_eq(b"", b""));

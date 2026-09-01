@@ -85,7 +85,10 @@ fn stored_slice(stored: &[u8; 128]) -> &[u8] {
 
 /// Verify `username`/`password`, transparently accepting both the current
 /// iterated `$5$` scheme and the legacy single-round scheme. Fail-closed:
-/// any read error or malformed entry is `Fail`.
+/// any read error or malformed entry is `Fail`. This includes a locked
+/// account (empty/`*`/`!` shadow field): unlike historical crypt(3), Onyx
+/// never treats a missing hash as "any password accepted" — see the policy
+/// note on `onyx_core::crypto::kdf::parse_shadow_field`.
 ///
 /// Migration design: both schemes share the `$5$salt$hash` layout, so the
 /// scheme is determined by re-computation (`classify_password`) rather

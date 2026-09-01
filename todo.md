@@ -179,9 +179,24 @@ O_NONBLOCK → EAGAIN; libc: struct winsize + pty_open()
 - [ ] Widget toolkit (advanced: ScrollView, Menu, Dialog)
 
 ### Безопасность / userland:
-- [ ] umask/права OnyxFS — не-root не может open /etc/shadow
-- [ ] $5$-хэш совместимость с crypt(3)
-- [ ] `passwd` с пустым текущим паролем
+- [x] **umask/права OnyxFS** (2026-09-01): добавлено поле `Proc::umask` (дефолт
+      0o022, наследуется через fork), syscall `umask()` (#88,
+      `kernel/src/syscall/fs_sys3/info.rs`), применяется к `mode` при
+      `O_CREAT` в `sys_open` (`kernel/src/syscall/fs_sys/open_close/open.rs`).
+      Аудит показал, что `/etc/shadow` уже был защищён общей проверкой
+      permission bits (резолвится и для symlink через `lookup()`), хардкод
+      пути — просто defense-in-depth, реального обхода не было; hardlink как
+      примитив в OnyxFS не реализован.
+- [ ] $5$-хэш совместимость с crypt(3) — текущая схема (`core/src/crypto/kdf.rs`)
+      сознательно НЕ совместима с glibc sha256crypt (hex вместо crypt-base64,
+      фиксированные 10k раундов вместо digest A/B/DP/DS алгоритма Дреппера);
+      полная реализация — отдельная многочасовая задача с изменением формата
+      хранения и миграцией.
+- [x] **`passwd` с пустым текущим паролем** (2026-09-01): политика явно
+      задокументирована и покрыта тестом — пустое/`*`/`!` поле shadow это
+      **locked account**, не "любой пароль подходит" (в отличие от
+      классического crypt(3)); см. `parse_shadow_field` в
+      `core/src/crypto/kdf.rs` и тест `locked_account_fields_fail_closed`.
 
 ### Платформа / время:
 - [ ] RTC под sedna (gettimeofday от реального времени)

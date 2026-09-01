@@ -101,6 +101,24 @@ pub unsafe fn sys_setgid(gid: u64) -> i64 {
     }
 }
 
+/// umask(new_mask) — set the process's file-mode creation mask, returning
+/// the previous mask. Only the low 9 permission bits are meaningful;
+/// callers may pass a wider value, it is masked here.
+/// # Safety
+///
+/// Call only from the syscall path with this hart's current process set;
+/// only the caller's own umask field is read/written.
+pub unsafe fn sys_umask(new_mask: u64) -> i64 {
+    // SAFETY: proc::current() reads this hart's G_HART_CURRENT slot, which
+    // the trap path set to the running process.
+    unsafe {
+        let p = proc::current();
+        let old = p.umask;
+        p.umask = (new_mask as u32) & 0o777;
+        old as i64
+    }
+}
+
 /// getppid() — return parent PID of the caller. PID 1's parent is 0 (kernel).
 /// # Safety
 ///
