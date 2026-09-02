@@ -34,9 +34,16 @@ fn dns_skip_name(msg: &[u8], mut off: usize) -> Option<usize> {
 
 /// # Safety
 ///
-/// Blocking resolver: binds a temp UDP socket and spins on poll(); must
+/// Blocking resolver: binds a temp UDP socket and waits on poll(); must
 /// run under the net single-poller contract and only where blocking is
-/// acceptable (boot / kernel threads), never in interrupt context.
+/// acceptable (boot / kernel threads / a syscall handler with no locks
+/// held), never in interrupt context. Uses the same SIE/wfi wait pattern
+/// as `sys_nanosleep`, safe here too (even though this is several calls
+/// deep under `sys_net_resolve`, not at the top of the syscall dispatch)
+/// now that `srv::trap::handle` only reschedules off a trap that
+/// interrupted user mode or an idle hart — see the guard comment there
+/// (todo.md, wfi-deep-in-syscall page fault, 2026-09-03) for why a nested
+/// kernel-mode wfi could not safely trigger a reschedule before that fix.
 pub unsafe fn dns_resolve(hostname: &[u8], dns_server: [u8; 4]) -> KResult<[u8; 4]> {
     // SAFETY: only calls the udp_*/poll wrappers; reply buffer is a fixed 512-byte stack array, all reads bounds-checked.
     unsafe {
@@ -55,10 +62,31 @@ pub unsafe fn dns_resolve(hostname: &[u8], dns_server: [u8; 4]) -> KResult<[u8; 
         let qoff = 12 + encoded.len();
         query[qoff..qoff + 2].copy_from_slice(&1u16.to_be_bytes());
         query[qoff + 2..qoff + 4].copy_from_slice(&1u16.to_be_bytes());
-        let sock = udp::udp_bind(0)?;
-        udp::udp_sendto(dns_server, DNS_PORT, &query)?;
-        for _ in 0..30000 {
+        // udp_bind_connect (not plain udp_bind + udp_sendto): the reply is
+        // addressed back to the port the query was sent from, so sending
+        // and receiving must go through the same bound socket.
+        let sock = udp::udp_bind_connect(dns_server, DNS_PORT)?;
+        udp::udp_send_bound(sock, &query)?;
+        // Wall-clock deadline read straight off the `time` CSR (10 MHz on
+        // QEMU virt, see CLINT_FREQ_QEMU): an iteration count is not a
+        // reliable proxy here — on a fast host a busy-poll loop can burn
+        // through tens of thousands of empty MMIO polls in well under a
+        // millisecond, far faster than a real UDP round trip (ARP
+        // resolution + the actual DNS query) ever completes.
+        const TIME_HZ: u64 = crate::arch::regs::CLINT_FREQ_QEMU;
+        let deadline = crate::arch::csr::read_time() + TIME_HZ * 5;
+        while crate::arch::csr::read_time() < deadline {
             poll();
+            // Re-arm this hart's timer and wait for the next interrupt
+            // (matches sys_nanosleep's SIE/wfi pattern) instead of
+            // busy-spinning poll() — see the safety doc above for why this
+            // is safe from here now.
+            #[cfg(not(test))]
+            {
+                crate::srv::timer::init_hart(crate::proc::process::hart_id());
+                crate::arch::csr::set_sstatus(crate::arch::regs::SSTATUS_SIE);
+                crate::arch::csr::wfi();
+            }
             let mut buf = [0u8; 512];
             if let Ok(n) = udp::udp_recv(sock, &mut buf) {
                 if n < 12 {

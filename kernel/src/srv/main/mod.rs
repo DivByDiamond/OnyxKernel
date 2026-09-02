@@ -88,7 +88,7 @@ pub unsafe fn kmain(hartid: usize, fdt_addr: usize) -> ! {
         crate::net::G_DNS = dns;
         crate::kinf!(
             "net",
-            "IP=%d.%d.%d.%d gw=%d.%d.%d.%d mask=%d.%d.%d.%d MAC=%x:%x:%x:%x:%x:%x",
+            "IP=%d.%d.%d.%d gw=%d.%d.%d.%d mask=%d.%d.%d.%d dns=%d.%d.%d.%d MAC=%x:%x:%x:%x:%x:%x",
             Arg::from(ip[0] as u32),
             Arg::from(ip[1] as u32),
             Arg::from(ip[2] as u32),
@@ -101,6 +101,10 @@ pub unsafe fn kmain(hartid: usize, fdt_addr: usize) -> ! {
             Arg::from(mask[1] as u32),
             Arg::from(mask[2] as u32),
             Arg::from(mask[3] as u32),
+            Arg::from(dns[0] as u32),
+            Arg::from(dns[1] as u32),
+            Arg::from(dns[2] as u32),
+            Arg::from(dns[3] as u32),
             Arg::from(crate::drivers::virtio_net::mac()[0] as u32),
             Arg::from(crate::drivers::virtio_net::mac()[1] as u32),
             Arg::from(crate::drivers::virtio_net::mac()[2] as u32),
