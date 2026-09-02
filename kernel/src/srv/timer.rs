@@ -5,23 +5,25 @@
 //! 64-bit AMOs). At 100 Hz a u32 jiffies counter wraps after ~497 days;
 //! all readers use wrapping arithmetic (`uptime_us`, `sys_nanosleep`),
 //! so wraparound degrades gracefully instead of panicking.
+//!
+//! Low-level comparator plumbing (`read_mtime`/`arm_timer`, and why the
+//! rv64 non-`smode` build routes arming through `arch::asm::mtrap` rather
+//! than the CLINT MMIO register directly) lives in `timer_arm` — split out
+//! to keep this file under the project's 250-line limit.
+use super::timer_arm;
+
 #[cfg(target_pointer_width = "32")]
 use core::sync::atomic::AtomicU32 as AtomicTick;
 #[cfg(target_pointer_width = "64")]
 use core::sync::atomic::AtomicU64 as AtomicTick;
 use core::sync::atomic::Ordering;
 
-#[cfg(not(feature = "smode"))]
-use crate::arch::mmio::Mmio;
-use crate::{
-    arch::{csr, regs::*},
-    proc,
-};
-#[cfg(not(feature = "smode"))]
-static mut G_MTIME: usize = 0;
-#[cfg(not(feature = "smode"))]
-static mut G_MTIMECMP: usize = 0;
-static mut G_FREQ: u64 = CLINT_FREQ_QEMU;
+use crate::{arch::csr, proc};
+#[cfg(all(not(feature = "smode"), any(test, target_pointer_width = "32")))]
+use timer_arm::arm_timer_for_hart;
+use timer_arm::{arm_timer, read_mtime};
+
+static mut G_FREQ: u64 = crate::arch::regs::CLINT_FREQ_QEMU;
 static mut G_TICK_INTERVAL: u64 = 0;
 // Audit fix: G_UPTICKS/G_JIFFIES were `static mut u64` with non-atomic RMW
 // from every ticking hart — concurrent increments could be lost. Both are now
@@ -66,15 +68,10 @@ pub fn jiffies() -> u64 {
 /// their own comparators (init_hart); sets the CLINT statics and arms
 /// hart 0's comparator.
 pub unsafe fn init() {
-    // SAFETY: single boot-hart call; G_MTIME/G_MTIMECMP are written here before any read_mtime/write_mtimecmp use them.
+    // SAFETY: single boot-hart call; MMIO bases (if any) are written before any reader runs.
     unsafe {
-        let clint = CLINT_BASE;
-        #[cfg(not(feature = "smode"))]
-        {
-            G_MTIME = (clint + 0xBFF8) as usize;
-            G_MTIMECMP = (clint + 0x4000) as usize;
-        }
-        G_FREQ = CLINT_FREQ_QEMU;
+        timer_arm::init_mmio_bases();
+        G_FREQ = crate::arch::regs::CLINT_FREQ_QEMU;
         G_TICK_INTERVAL = G_FREQ / 100;
         let now = read_mtime();
         arm_timer(now + G_TICK_INTERVAL);
@@ -82,83 +79,9 @@ pub unsafe fn init() {
         crate::kinf!(
             "timer",
             "CLINT @%p, tick=%d ns",
-            onyx_core::fmt::Arg::from(clint),
+            onyx_core::fmt::Arg::from(crate::arch::regs::CLINT_BASE),
             onyx_core::fmt::Arg::from(1_000_000_000u64 / G_FREQ)
         );
-    }
-}
-
-#[cfg(feature = "smode")]
-/// # Safety
-///
-/// S-mode only: reads the `time` CSR, valid whenever S-mode timer access
-/// is permitted (mcounteren/firmware).
-unsafe fn read_mtime() -> u64 {
-    // SAFETY: pure read of the read-only `time` CSR; no memory access or side effects.
-    unsafe {
-        // sedna uses an ACLINT timer (mtime at 0x02004FF8, not the legacy CLINT
-        // 0x0200BFF8), so the MMIO offset is wrong there. The `time` CSR (0xC01)
-        // always reflects the current timer value and is readable from S-mode.
-        crate::arch::csr::read_time()
-    }
-}
-
-#[cfg(not(feature = "smode"))]
-/// # Safety
-///
-/// M-mode-boot kernels only: `G_MTIME` must have been set by init() to
-/// the CLINT mtime address; the hi/lo re-read loop tolerates a torn
-/// 64-bit read across the two 32-bit MMIO halves.
-unsafe fn read_mtime() -> u64 {
-    // SAFETY: MMIO reads at the init-established CLINT mtime base; the hi==hi2 retry restores read consistency.
-    unsafe {
-        loop {
-            let hi = Mmio::<u32>::at(G_MTIME + 4).read();
-            let lo = Mmio::<u32>::at(G_MTIME).read();
-            let hi2 = Mmio::<u32>::at(G_MTIME + 4).read();
-            if hi == hi2 {
-                return ((hi as u64) << 32) | (lo as u64);
-            }
-        }
-    }
-}
-
-#[cfg(feature = "smode")]
-/// # Safety
-///
-/// S-mode only: issues the SBI SetTimer ecall, which arms THIS hart's
-/// timer delegate; `next` is an absolute mtime value.
-unsafe fn arm_timer(next: u64) {
-    // SAFETY: SBI ecall issued from S-mode; the SBI arms the calling hart's timer by spec.
-    unsafe {
-        crate::arch::sbi::set_timer(next);
-    }
-}
-
-#[cfg(not(feature = "smode"))]
-/// # Safety
-///
-/// M-mode-boot kernels only: writes hart 0's mtimecmp via
-/// write_mtimecmp; called from init() before secondary harts exist.
-unsafe fn arm_timer(next: u64) {
-    // SAFETY: MMIO write to hart 0's comparator, boot-time-only per the contract above.
-    unsafe {
-        write_mtimecmp(next);
-    }
-}
-
-#[cfg(not(feature = "smode"))]
-/// # Safety
-///
-/// Targets G_MTIMECMP (hart 0's slot, set by init()); the 0xFFFFFFFF
-/// guard-write prevents a spurious interrupt between the two half-writes
-/// of the 64-bit comparator.
-unsafe fn write_mtimecmp(v: u64) {
-    // SAFETY: ordered volatile MMIO writes at the init-established address; the guard value avoids spurious ticks mid-update.
-    unsafe {
-        Mmio::<u32>::at(G_MTIMECMP + 4).write(0xFFFF_FFFF);
-        Mmio::<u32>::at(G_MTIMECMP).write(v as u32);
-        Mmio::<u32>::at(G_MTIMECMP + 4).write((v >> 32) as u32);
     }
 }
 
@@ -172,18 +95,16 @@ pub unsafe fn init_hart(hartid: usize) {
     unsafe {
         let now = read_mtime();
         let next = now + G_TICK_INTERVAL;
-        #[cfg(feature = "smode")]
+        #[cfg(any(feature = "smode", all(not(test), target_pointer_width = "64")))]
         {
+            // arm_timer's SBI ecall is inherently per-hart (each hart's
+            // ecall is serviced independently), so no address computation
+            // from hartid is needed here — unlike the rv32 CLINT-MMIO path.
             let _ = hartid;
             arm_timer(next);
         }
-        #[cfg(not(feature = "smode"))]
-        {
-            let cmp_addr = clint_mtimecmp_hart(hartid) as usize;
-            Mmio::<u32>::at(cmp_addr + 4).write(0xFFFF_FFFF);
-            Mmio::<u32>::at(cmp_addr).write(next as u32);
-            Mmio::<u32>::at(cmp_addr + 4).write((next >> 32) as u32);
-        }
+        #[cfg(all(not(feature = "smode"), any(test, target_pointer_width = "32")))]
+        arm_timer_for_hart(hartid, next);
         csr::set_sie(1 << 5);
     }
 }
@@ -202,20 +123,15 @@ pub unsafe fn handle() {
         jiffies_atomic().fetch_add(1, Ordering::Relaxed);
         let now = read_mtime();
         let next = now + G_TICK_INTERVAL;
-        // Re-arm the tick for THIS hart. In M-mode we write the per-hart
-        // mtimecmp directly (never hart 0's — that bug caused a timer storm
-        // on harts 1..N). In S-mode (OC2R) we arm via the SBI timer, which
-        // OpenSBI forwards to us as an STIP.
-        #[cfg(feature = "smode")]
+        // Re-arm the tick for THIS hart via arm_timer's SBI ecall (OpenSBI
+        // on `smode`, this kernel's own `mtrap_entry` on rv64 non-`smode`).
+        // rv32 non-`smode` still writes the per-hart CLINT mtimecmp MMIO
+        // directly (never hart 0's — that bug caused a timer storm on
+        // harts 1..N) — see timer_arm::arm_timer's doc comments.
+        #[cfg(any(feature = "smode", all(not(test), target_pointer_width = "64")))]
         arm_timer(next);
-        #[cfg(not(feature = "smode"))]
-        {
-            let hartid = crate::arch::smp::current_hart();
-            let cmp_addr = clint_mtimecmp_hart(hartid) as usize;
-            Mmio::<u32>::at(cmp_addr + 4).write(0xFFFF_FFFF);
-            Mmio::<u32>::at(cmp_addr).write(next as u32);
-            Mmio::<u32>::at(cmp_addr + 4).write((next >> 32) as u32);
-        }
+        #[cfg(all(not(feature = "smode"), any(test, target_pointer_width = "32")))]
+        arm_timer_for_hart(crate::arch::smp::current_hart(), next);
         proc::sched_tick();
         // Heartbeat: ping the watchdog every tick (100 Hz) so the system
         // resets if a scheduler stall prevents us from reaching this point.

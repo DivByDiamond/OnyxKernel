@@ -1,5 +1,6 @@
 //! boot.S — kernel entry point. Sets up PMP, medeleg/mideleg, switches to
 //! supervisor mode, and `mret`s into `kmain`. Parks non-boot harts in `wfi`.
+use crate::arch::asm::mtrap::G_MTRAP_SCRATCH;
 use crate::arch::{__bss_end, __bss_start, __stack_top, SAVED_FDT, SAVED_HARTID};
 use core::arch::global_asm;
 
@@ -36,7 +37,6 @@ _start:
     //   bit 5  — load access fault
     //   bit 7  — store access fault
     //   bit 8  — environment call from U-mode
-    //   bit 9  — environment call from S-mode
     //   bit 11 — instruction page fault
     //   bit 12 — load page fault
     //   bit 13 — store page fault
@@ -52,7 +52,13 @@ _start:
     // Without bits 1 and 11 a jump into unmapped or unmapped-execute
     // memory traps into M-mode and hangs/crashes the machine instead of
     // being delivered to the kernel as an S-mode page fault.
-    li t0, (1<<0)|(1<<1)|(1<<2)|(1<<3)|(1<<5)|(1<<7)|(1<<8)|(1<<9)|(1<<11)|(1<<12)|(1<<13)|(1<<15)
+    //
+    // Bit 9 (environment call from S-mode) is deliberately NOT delegated:
+    // `mtrap_entry` (arch/asm/mtrap.rs) catches it as the legacy
+    // SBI_SET_TIMER call `arch::sbi::set_timer` issues, which is how this
+    // hart arms its own next tick (see srv::timer::arm_timer's doc comment
+    // for why the raw CLINT MTIP path alone can never wake an S-mode wfi).
+    li t0, (1<<0)|(1<<1)|(1<<2)|(1<<3)|(1<<5)|(1<<7)|(1<<8)|(1<<11)|(1<<12)|(1<<13)|(1<<15)
     csrw medeleg, t0
     li t0, (1<<1)|(1<<5)|(1<<9)
     csrw mideleg, t0
@@ -61,6 +67,14 @@ _start:
     // illegal-instruction trap (mcounteren defaults to 0).
     li t0, (1<<0)|(1<<1)|(1<<2)
     csrw mcounteren, t0
+    // mscratch -> this hart's row of G_MTRAP_SCRATCH (hart 0, tp=0, so the
+    // row is at the array's base address — no offset needed); mtvec ->
+    // mtrap_entry. Both must be live before mie/MTIE is ever enabled (the
+    // first arch::sbi::set_timer call, from srv::timer::init()).
+    la t0, {mtrap_scratch}
+    csrw mscratch, t0
+    la t0, mtrap_entry
+    csrw mtvec, t0
     csrw mie, zero
     li t0, (1<<11)
     csrs mstatus, t0
@@ -83,4 +97,5 @@ park:
     bss_start = sym __bss_start,
     bss_end = sym __bss_end,
     stack_top = sym __stack_top,
+    mtrap_scratch = sym G_MTRAP_SCRATCH,
 );

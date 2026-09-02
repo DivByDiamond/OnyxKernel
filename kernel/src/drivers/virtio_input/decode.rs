@@ -27,10 +27,20 @@ pub enum EventType {
 }
 
 /// Poll the virtio-input device for the next event. Returns `None` when
-/// no event is available. Each call may recycle the consumed descriptor.
+/// no event is available (including when no virtio-input device was ever
+/// probed — `G_IN.base == 0` — since `G_IN.used` is a dangling pointer
+/// until `init`/`setup_queue` run; without this guard the timer tick's
+/// unconditional `input::event::poll_all()` call dereferences that
+/// dangling pointer on every machine without a virtio-input device, which
+/// only started actually happening once genuine timer interrupts began
+/// firing — see `srv::timer::arm_timer`'s doc comment).
+/// Each call may recycle the consumed descriptor.
 pub fn poll() -> Option<EventType> {
     // SAFETY: valid only after init completed: used/ev_buf point at PMM rings/buffer; slot and buf_idx masked % N_EVENTS keep accesses in bounds; reads are volatile of device-written memory.
     unsafe {
+        if G_IN.base == 0 {
+            return None;
+        }
         let used_idx = ptr::read_volatile(ptr::addr_of!((*G_IN.used).idx));
         if used_idx == G_IN.last_used {
             return None;

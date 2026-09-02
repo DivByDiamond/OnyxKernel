@@ -5,7 +5,7 @@ pub mod bits;
 pub mod csr;
 pub mod mmio;
 pub mod regs;
-#[cfg(feature = "smode")]
+#[cfg(any(feature = "smode", all(not(test), target_pointer_width = "64")))]
 pub mod sbi;
 pub mod smp;
 pub mod trap_frame;
