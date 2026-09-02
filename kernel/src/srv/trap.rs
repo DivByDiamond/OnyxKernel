@@ -74,6 +74,11 @@ pub unsafe fn handle(tf: &mut TrapFrame) {
     // trapped hart; `tf` exclusivity is guaranteed per the contract above.
     unsafe {
         let scause = crate::arch::csr::read_scause();
+        // Captured once, up front: whether THIS trap interrupted user mode
+        // (SPP=0) or kernel mode (SPP=1). Used at the bottom to decide
+        // whether the opportunistic reschedule below is safe to act on —
+        // see the comment there.
+        let interrupted_user = crate::arch::csr::read_sstatus() & SSTATUS_SPP == 0;
         let is_int = scause & SCAUSE_INT != 0;
         let code = scause & !SCAUSE_INT;
         if is_int {
@@ -233,8 +238,26 @@ pub unsafe fn handle(tf: &mut TrapFrame) {
         // SBI set_timer call, which is inherently per-hart. All of this runs
         // with SIE cleared (hardware on trap entry, restored cleared by
         // trap_return), so every spinlock taken here is interrupt-safe.
-        if proc::process::G_NEED_RESCHED[proc::process::hart_id()]
-            .load(core::sync::atomic::Ordering::Acquire)
+        //
+        // Guard (todo.md, wfi-deep-in-syscall page fault, 2026-09-03):
+        // sched_yield only knows how to save/resume a TOP-LEVEL trap frame
+        // — either the idle hart's own wfi loop (current is null) or the
+        // frame at the very top of a process's kernel stack, the one
+        // `trap_entry` builds when a process traps in from user mode
+        // (interrupted_user, SPP=0). A syscall that re-enables SIE and
+        // calls `wfi()` several calls deep (e.g. a blocking netstack wait)
+        // interrupts KERNEL-mode code instead (SPP=1, current non-null):
+        // `tf` there is an inner, nested frame, not that top-level one.
+        // Rescheduling off of it here corrupts the process's saved state
+        // and crashes on its next syscall. Since the interrupt itself is
+        // always serviced above regardless (ticks/watchdog/event pump all
+        // ran), skipping the reschedule here just defers it to the next
+        // safe point — the next top-level trap on this hart — instead of
+        // dropping it: G_NEED_RESCHED stays set and is picked up then.
+        let safe_to_reschedule = interrupted_user || proc::current_opt().is_none();
+        if safe_to_reschedule
+            && proc::process::G_NEED_RESCHED[proc::process::hart_id()]
+                .load(core::sync::atomic::Ordering::Acquire)
         {
             proc::sched_yield(tf);
         }

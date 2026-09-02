@@ -136,6 +136,71 @@ unsafe fn udp_sendto_inner(dst_ip: [u8; 4], dst_port: u16, data: &[u8]) -> KResu
 
 /// # Safety
 ///
+/// Allocates a slot in the lock-free UDP_SOCKS table; same
+/// serialization contract as `udp_bind` (net_lock excludes concurrent
+/// bind/close races).
+///
+/// Unlike `udp_bind` + `udp_sendto`, this binds an ephemeral local port
+/// AND connects it to `(dst_ip, dst_port)` in one socket, so a later
+/// `udp_send_bound` on the returned index sends *from* the same port
+/// `udp_recv` listens on. `udp_sendto` sends from a throwaway temp
+/// socket with its own ephemeral port that is closed immediately after
+/// the send — a caller that also wants the reply (e.g. a request/response
+/// protocol like DNS) would bind a second, unrelated port and never see
+/// it, since replies are addressed to the port the request was sent from.
+pub unsafe fn udp_bind_connect(dst_ip: [u8; 4], dst_port: u16) -> KResult<usize> {
+    // SAFETY: idx comes from alloc_udp_sock (a free slot), fully
+    // initialized before publication; net_lock() excludes concurrent
+    // bind/close races (net sync fix, todo P1 #4).
+    unsafe {
+        net_lock();
+        let idx = match alloc_udp_sock() {
+            Some(i) => i,
+            None => {
+                net_unlock();
+                return Err(Errno::Busy);
+            }
+        };
+        let port = next_udp_port();
+        UDP_SOCKS[idx] = Some(UdpSocket {
+            local_port: port,
+            remote_ip: dst_ip,
+            remote_port: dst_port,
+            bound: true,
+            connected: true,
+            recv_buf: [0; UDP_BUF_SIZE],
+            recv_len: 0,
+            recv_head: 0,
+        });
+        net_unlock();
+        Ok(idx)
+    }
+}
+
+/// # Safety
+///
+/// Sends on a socket previously opened by `udp_bind_connect`; the caller
+/// must own that slot exclusively (same single-sender contract as the
+/// other socket ops).
+pub unsafe fn udp_send_bound(sock_idx: usize, data: &[u8]) -> KResult<()> {
+    // SAFETY: sock_idx bounds-checked below; socket access is through the
+    // exclusive &mut from the table under net_lock() (recursive, same hart).
+    unsafe {
+        if sock_idx >= MAX_UDP_SOCKS {
+            return Err(Errno::Inval);
+        }
+        net_lock();
+        let result = match UDP_SOCKS[sock_idx].as_mut() {
+            Some(s) => send_packet_inner(s, data),
+            None => Err(Errno::Inval),
+        };
+        net_unlock();
+        result
+    }
+}
+
+/// # Safety
+///
 /// Reads/advances the receive ring of slot `sock_idx`; the caller must
 /// own that slot exclusively -- a concurrent udp_recv or handle_udp on
 /// the same slot from another hart would race the ring indices.

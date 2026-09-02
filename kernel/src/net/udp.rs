@@ -2,7 +2,9 @@ pub mod rx;
 pub mod sock;
 
 pub use rx::handle_udp;
-pub use sock::{udp_bind, udp_close, udp_recv, udp_send, udp_sendto};
+pub use sock::{
+    udp_bind, udp_bind_connect, udp_close, udp_recv, udp_send, udp_send_bound, udp_sendto,
+};
 
 pub const UDP_HLEN: usize = 8;
 pub const MAX_UDP_SOCKS: usize = 8;

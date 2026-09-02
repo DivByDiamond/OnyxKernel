@@ -21,19 +21,32 @@ pub fn user_ptr_ok(p: u64, len: u64) -> bool {
 /// value that is validated internally (range check plus per-page mapping)
 /// before any byte is read.
 pub unsafe fn parse_user_path(path: u64, out: &mut [u8; 256]) -> Option<usize> {
-    // SAFETY: `path` passed user_ptr_ok and the per-page check_user_range
-    // above, so the NUL scan and copy_nonoverlapping only read mapped user
-    // pages; `out` validity is the caller's contract documented above.
+    // SAFETY: the scan/copy below only touches [path, path+max_len), and
+    // that whole range was just validated by check_user_range; `out`
+    // validity is the caller's contract documented above.
     unsafe {
-        if !user_ptr_ok(path, 256)
-            || crate::mm::vmm::check_user_range(crate::proc::current().root_pa, path, 256, false)
-                .is_err()
+        if !(USER_BASE..USER_TOP).contains(&path) {
+            return None;
+        }
+        // Cap the validated window at how much room this pointer actually
+        // has before USER_TOP, not a flat 256: a short string can legally
+        // sit within 256 bytes of the top of the user stack (e.g. an argv
+        // entry), and demanding a full 256-byte window there rejected it
+        // even though every byte of the string itself was in range.
+        let max_len = core::cmp::min(256u64, USER_TOP - path) as usize;
+        if crate::mm::vmm::check_user_range(
+            crate::proc::current().root_pa,
+            path,
+            max_len as u64,
+            false,
+        )
+        .is_err()
         {
             return None;
         }
         let mut len = 0usize;
         let p = path as *const u8;
-        while len < 256 && *p.add(len) != 0 {
+        while len < max_len && *p.add(len) != 0 {
             len += 1;
         }
         core::ptr::copy_nonoverlapping(p, out.as_mut_ptr(), len);
@@ -172,6 +185,7 @@ pub unsafe fn handle(tf: &mut TrapFrame) -> i64 {
             SYS_net_send => crate::syscall::net_sys::sys_net_send(a0, a1, a2),
             SYS_net_recv => crate::syscall::net_sys::sys_net_recv(a0, a1, a2),
             SYS_net_close => crate::syscall::net_sys::sys_net_close(a0),
+            SYS_net_resolve => crate::syscall::net_sys::sys_net_resolve(a0, a1),
             SYS_chown => crate::syscall::fs_sys3::sys_chown(a0, a1 as u32, a2 as u32),
             SYS_fchown => crate::syscall::fs_sys3::sys_fchown(a0, a1 as u32, a2 as u32),
             SYS_mouse_read => crate::syscall::input_sys::sys_mouse_read(

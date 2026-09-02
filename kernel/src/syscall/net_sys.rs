@@ -5,7 +5,7 @@
 //! level wrapping is needed here (and must NOT be added — it would only
 //! duplicate the critical section and hold the lock across user-pointer
 //! validation). The net layer is the single locking boundary.
-use super::handler::user_ptr_ok;
+use super::handler::{parse_user_path, user_ptr_ok};
 use crate::mm::vmm;
 use crate::net;
 use crate::proc;
@@ -81,6 +81,38 @@ pub(super) unsafe fn sys_net_recv(conn_id: u64, buf: u64, len: u64) -> i64 {
         net::poll();
         match net::tcp_recv(conn_id as usize, data) {
             Ok(n) => n as i64,
+            Err(e) => e.as_i64(),
+        }
+    }
+}
+
+/// # Safety
+///
+/// Call only from the syscall path with a current process set; `name_ptr`
+/// and `ip_out` are validated inside before use.
+pub(super) unsafe fn sys_net_resolve(name_ptr: u64, ip_out: u64) -> i64 {
+    // SAFETY: parse_user_path copies the hostname into a kernel stack
+    // buffer; ip_out passed user_ptr_ok and the per-page writable
+    // check_user_range below, so copy_to_user writes only mapped user
+    // memory. dns_resolve only touches its own UDP socket and stack buffers.
+    unsafe {
+        let mut name_buf = [0u8; 256];
+        let name_len = match parse_user_path(name_ptr, &mut name_buf) {
+            Some(l) if l > 0 => l,
+            _ => return Errno::Inval.as_i64(),
+        };
+        if !user_ptr_ok(ip_out, 4) {
+            return Errno::Inval.as_i64();
+        }
+        if vmm::check_user_range(proc::current().root_pa, ip_out, 4, true).is_err() {
+            return Errno::Fault.as_i64();
+        }
+        let dns_server = net::G_DNS;
+        match net::dns_resolve(&name_buf[..name_len], dns_server) {
+            Ok(ip) => match vmm::copy_to_user(proc::current().root_pa, ip_out, ip.as_ptr(), 4) {
+                Ok(()) => 0,
+                Err(_) => Errno::Fault.as_i64(),
+            },
             Err(e) => e.as_i64(),
         }
     }

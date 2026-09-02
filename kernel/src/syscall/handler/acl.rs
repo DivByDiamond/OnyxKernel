@@ -68,6 +68,7 @@ fn syscall_allowed_uid(nr: u64, ring: u8, uid: Option<u32>) -> bool {
         | SYS_net_send
         | SYS_net_recv
         | SYS_net_close
+        | SYS_net_resolve
         | SYS_poll
         | SYS_kill
         | SYS_mouse_read
@@ -202,7 +203,7 @@ mod tests {
 
     #[test]
     fn test_unknown_syscall_numbers_denied() {
-        for &nr in &[0u64, 89, 200, u64::MAX] {
+        for &nr in &[0u64, 90, 200, u64::MAX] {
             for ring in [PROC_RING_KERNEL, PROC_RING_ROOT, PROC_RING_USER] {
                 assert!(!syscall_allowed_uid(nr, ring, Some(0)));
             }
