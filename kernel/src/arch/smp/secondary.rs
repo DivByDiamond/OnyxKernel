@@ -42,7 +42,11 @@ pub unsafe extern "Rust" fn secondary_continue() -> ! {
         } else {
             0
         };
-        #[cfg(not(feature = "smode"))]
+        // mtrap.rs (the M-mode timer-forwarding trap vector) only exists
+        // for the rv64 not-smode target — see arch/asm/mod.rs — so rv32
+        // keeps the pre-existing (no mscratch/mtvec, bit-9 still delegated)
+        // setup below it, unchanged.
+        #[cfg(all(not(feature = "smode"), target_pointer_width = "64"))]
         core::arch::asm!(
             // This hart entered through the bootloader SMP mailbox (or the
             // `park` spin in boot.rs), so it NEVER ran the kernel's `_start`
@@ -61,6 +65,52 @@ pub unsafe extern "Rust" fn secondary_continue() -> ! {
             //   * mcounteren: allow lower modes to read cycle/time/instret
             //     (`rdtime` in the timer code raises illegal-instruction
             //     otherwise).
+            "li t0, 0x3FFFFFFF",
+            "csrw pmpaddr0, t0",
+            "li t0, 0x9F",
+            "csrw pmpcfg0, t0",
+            // Bit 9 (S-mode ecall) is deliberately NOT delegated — see
+            // boot.rs's medeleg comment: mtrap_entry catches it as the
+            // legacy SBI_SET_TIMER call this hart's srv::timer code issues
+            // to arm its own next tick.
+            "li t0, (1<<0)|(1<<1)|(1<<2)|(1<<3)|(1<<5)|(1<<7)|(1<<8)|(1<<11)|(1<<12)|(1<<13)|(1<<15)",
+            "csrw medeleg, t0",
+            "li t0, (1<<1)|(1<<5)|(1<<9)",
+            "csrw mideleg, t0",
+            "li t0, (1<<0)|(1<<1)|(1<<2)",
+            "csrw mcounteren, t0",
+            // mscratch -> this hart's row of G_MTRAP_SCRATCH (tp still
+            // holds hartid, set by the bootloader mailbox entry); mtvec ->
+            // mtrap_entry. Mirrors boot.rs's hart-0 setup — every hart
+            // needs its own M-mode trap plumbing before mie/MTIE is ever
+            // enabled (arch::sbi::set_timer, first called from
+            // srv::timer::init_hart on this hart).
+            "la t1, {3}",
+            "li t2, 24",
+            "mul t2, tp, t2",
+            "add t1, t1, t2",
+            "csrw mscratch, t1",
+            "la t1, mtrap_entry",
+            "csrw mtvec, t1",
+            "mv sp, {0}",
+            "csrw mepc, {1}",
+            "li t0, 1 << 11",
+            "csrs mstatus, t0",
+            "li t0, 1 << 12",
+            "csrc mstatus, t0",
+            "li t0, 1 << 7",
+            "csrc mstatus, t0",
+            "csrw satp, {2}",
+            "sfence.vma zero, zero",
+            "mret",
+            in(reg) sp,
+            in(reg) entry,
+            in(reg) satp,
+            sym crate::arch::asm::mtrap::G_MTRAP_SCRATCH,
+            options(noreturn),
+        );
+        #[cfg(all(not(feature = "smode"), target_pointer_width = "32"))]
+        core::arch::asm!(
             "li t0, 0x3FFFFFFF",
             "csrw pmpaddr0, t0",
             "li t0, 0x9F",

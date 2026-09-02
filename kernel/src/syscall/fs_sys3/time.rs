@@ -89,10 +89,34 @@ pub unsafe fn sys_utimens(path: u64, times: u64) -> i64 {
     }
 }
 
-/// nanosleep — block (yielding the CPU) until at least `req.tv_sec*1e9 +
-/// req.tv_nsec` nanoseconds have elapsed. The old implementation busy-looped
-/// with `set_need_resched`, which burnt CPU; this version yields properly
-/// while still polling the timer tick counter (`timer::jiffies`).
+/// nanosleep — block until at least `req.tv_sec*1e9 + req.tv_nsec`
+/// nanoseconds have elapsed, polling the timer tick counter
+/// (`timer::jiffies`) between `wfi` waits.
+///
+/// The original implementation `wfi`-looped without ever setting
+/// `sstatus.SIE`, so the timer tick that advances `jiffies` could never be
+/// delivered — this was the root cause of `usleep()`/`nanosleep()` hanging
+/// forever (see OnyxKernel/todo.md's 2026-09-02 entry for the full
+/// multi-attempt investigation). Live QEMU debugging (`info registers` over
+/// the monitor while hung) traced it one level deeper: even with SIE set
+/// and the comparator freshly re-armed, `wfi` still never woke, because the
+/// CLINT `mtimecmp` MMIO register this hart's timer used to be armed
+/// through only ever asserts `mip.MTIP` — an M-mode-only interrupt RISC-V's
+/// `mideleg` cannot delegate to S-mode, and this kernel's M→S boot
+/// transition never returns to M-mode to forward it. The actual fix lives
+/// in `srv::timer`/`arch::asm::mtrap`: a minimal M-mode trap vector now
+/// forwards the machine timer interrupt to S-mode as `STIP` (see
+/// `srv::timer::arm_timer`'s doc comment). With that fixed, this loop's
+/// technique — mirroring `proc::scheduler::idle::sched_enter_idle`: re-arm
+/// via `timer::init_hart`, set `sstatus.SIE`, `wfi` — actually wakes. No
+/// lock is held across the wait (the only prior work was copying `req`
+/// into a kernel stack array), matching the idle loop's audited "no lock
+/// held" invariant for toggling SIE outside of `trap_return`'s two blessed
+/// points (return-to-user, idle loop). When the timer interrupt fires,
+/// hardware traps into `trap_entry` (nested inside this syscall's own
+/// trap), `timer::handle()` runs and increments `jiffies`/re-arms the
+/// comparator, and `trap_return` resumes execution right after `wfi` with
+/// SIE cleared again.
 /// # Safety
 ///
 /// Call only from the syscall path with a current process set; `req` is
@@ -100,8 +124,10 @@ pub unsafe fn sys_utimens(path: u64, times: u64) -> i64 {
 pub unsafe fn sys_nanosleep(req: u64, _rem: u64) -> i64 {
     // SAFETY: the 16-byte req range passed user_ptr_ok above and
     // copy_from_user re-validates each page before reading into the kernel
-    // stack array; the `wfi` asm only idles the hart until the next
-    // interrupt and touches no memory.
+    // stack array; no lock is held across the wait loop, matching the idle
+    // loop's audited SIE/wfi invariant (timer::init_hart + set_sstatus
+    // immediately before wfi, with the interrupt trap clearing SIE again on
+    // entry and trap_return restoring it cleared on the way back here).
     unsafe {
         if !user_ptr_ok(req, 16) {
             return Errno::Fault.as_i64();
@@ -119,15 +145,13 @@ pub unsafe fn sys_nanosleep(req: u64, _rem: u64) -> i64 {
         let total_ns = secs.saturating_mul(1_000_000_000).saturating_add(nsecs);
         let ticks = total_ns / 10_000_000; // 10 ms per tick
         let target = crate::srv::timer::jiffies().wrapping_add(ticks.max(1));
-        loop {
-            let now = crate::srv::timer::jiffies();
-            if now >= target {
-                break;
-            }
-            // Wait for interrupt — the timer tick will wake us.  Between ticks
-            // the CPU stays in a low-power state instead of busy-looping.
+        while crate::srv::timer::jiffies() < target {
             #[cfg(not(test))]
-            core::arch::asm!("wfi", options(nostack, preserves_flags));
+            {
+                crate::srv::timer::init_hart(crate::proc::process::hart_id());
+                crate::arch::csr::set_sstatus(crate::arch::regs::SSTATUS_SIE);
+                crate::arch::csr::wfi();
+            }
             #[cfg(test)]
             core::hint::spin_loop();
         }

@@ -59,3 +59,7 @@ path = "src/lua.rs"
 name = "onyx-tui-demo"
 path = "src/tui_demo.rs"
 
+[[bin]]
+name = "onyx-sleep-test"
+path = "src/sleep_test.rs"
+
