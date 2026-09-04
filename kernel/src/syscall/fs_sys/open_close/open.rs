@@ -76,7 +76,7 @@ pub unsafe fn sys_open(path: u64, flags: u64, mode: u64) -> i64 {
                 } else if group_ok {
                     (mode >> 3) & 0o700
                 } else {
-                    mode & 0o007
+                    (mode >> 6) & 0o700
                 };
 
                 if want_read && (perm_bits & 0o400) == 0 {

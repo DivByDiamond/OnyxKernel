@@ -80,24 +80,17 @@ pub unsafe extern "C" fn _start() -> ! {
         shell: [0; 32],
     }; auth::MAX_USERS];
 
-    let nusers = auth::read_passwd(&mut users).unwrap_or(0);
+    let mut nusers = auth::read_passwd(&mut users).unwrap_or(0);
 
     if nusers == 0 {
         syscalls::write(
             1,
-            b"[login] no users found - auto-login as root\n".as_ptr(),
-            43,
+            b"[login] no users found - creating root account\n".as_ptr(),
+            47,
         );
         seed::seed_root_account();
-        let shell = b"/bin/osh\0";
-        syscalls::write(
-            1,
-            b"[login] launching /bin/osh (root, ring 1)\n".as_ptr(),
-            41,
-        );
-        exec_shell(b"root", shell);
-        syscalls::write(1, b"login: exec failed\n".as_ptr(), 19);
-        syscalls::exit(1);
+        // Re-read passwd after seeding so root appears in the user list
+        nusers = auth::read_passwd(&mut users).unwrap_or(0);
     }
 
     let mut fails: u32 = 0;
