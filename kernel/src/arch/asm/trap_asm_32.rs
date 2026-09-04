@@ -57,7 +57,13 @@ trap_entry:
 trap_return:
     lw ra, 0(sp)
     lw gp, 16(sp)
-    lw tp, 24(sp)
+    // Root-cause fix (SMP crash, OnyxKernel todo.md "Отдельный SMP-краш
+    // под -smp 2"): never restore tp from the trapframe — see the
+    // matching, fully-explained fix in trap_asm.rs (rv64). tp is this
+    // kernel's hart-id register; the live value already held by the
+    // physical hart executing this code is always correct, unlike
+    // whatever a trapframe (possibly from a migrated or freshly-created
+    // process) happened to capture.
     lw t0, 32(sp)
     lw t1, 40(sp)
     lw t2, 48(sp)
@@ -152,7 +158,11 @@ drop_to_user:
     li s10, 0
     li s11, 0
     li gp, 0
-    li tp, 0
+    // Root-cause fix (SMP crash, OnyxKernel todo.md "Отдельный SMP-краш
+    // под -smp 2"): keep `tp` (this kernel's hart-id register — see the
+    // matching comment in trap_asm.rs) instead of zeroing it here. No
+    // userspace code reads tp for anything, so this leaks nothing
+    // meaningful; `gp` stays zeroed as before.
     sret
 "#,
 );

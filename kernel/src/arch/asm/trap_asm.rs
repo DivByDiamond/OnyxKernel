@@ -63,7 +63,22 @@ trap_entry:
 trap_return:
     ld ra, 0(sp)
     ld gp, 16(sp)
-    ld tp, 24(sp)
+    // Root-cause fix (SMP crash, todo.md "Отдельный SMP-краш под
+    // -smp 2"): tp is this kernel's hart-id register (hart_id() is a raw
+    // `mv <reg>, tp` read everywhere), not an ordinary per-context register
+    // — it must always equal the PHYSICAL hart currently executing, never
+    // whatever a trapframe happened to capture. Restoring it from the
+    // trapframe here was wrong for two reasons: (1) a freshly created
+    // process's trapframe (proc::spawn::create_user) never sets tf.tp, so
+    // it defaults to 0 (TrapFrame::zero()) — its first-ever resume would
+    // zero tp on whichever hart happened to run it; (2) a process
+    // migrated between harts (work-stealing) carries the tp value from
+    // whichever hart it last ran on, not the one resuming it now. Simply
+    // never touching tp here is correct: at this point we are still
+    // running as kernel code on the ACTUAL physical hart, so tp already
+    // holds the right value — leave it alone instead of overwriting it
+    // with a stale or defaulted one. (See the matching drop_to_user fix
+    // in this file for the other half of this bug.)
     ld t0, 32(sp)
     ld t1, 40(sp)
     ld t2, 48(sp)
@@ -180,7 +195,26 @@ drop_to_user:
     li s10, 0
     li s11, 0
     li gp, 0
-    li tp, 0
+    // Root-cause fix (SMP crash, todo.md "Отдельный SMP-краш под
+    // -smp 2"): `tp` is NOT an ordinary callee-saved register in this
+    // kernel — every hart's `hart_id()` is a raw `mv <reg>, tp` read, and
+    // the entire scheduler (G_HART_CURRENT, runqueues, idle contexts,
+    // UART_LOCK ownership, ...) trusts it identifies which physical hart
+    // is executing. Zeroing it here (as part of the syscall MINOR #5
+    // register-hygiene fix above) meant every process ran in user mode
+    // with tp=0, and the NEXT trap on THAT hart — any syscall, timer
+    // tick, page fault — entered the kernel with tp still 0, regardless
+    // of which physical hart actually took the trap. Confirmed live: hart
+    // 1 running user code and trapping back in would be treated as hart 0
+    // by every hart-indexed lookup, corrupting shared per-"hart 0" state
+    // (G_HART_CURRENT[0], its runqueue, G_HART_IDLE_TF[0], ...) — the
+    // deepest layer of the SMP crash chased across this investigation.
+    // No userspace code in this project's toolchain (libonyxc/onyxcc)
+    // reads tp for anything (checked: no TLS or other use), so leaving
+    // the hart id in it while in user mode leaks nothing meaningful — a
+    // small integer, unlike the kernel stack pointers/addresses the other
+    // zeroed registers above protect against. `gp` has no such
+    // significance to the kernel and stays zeroed.
     sret
 "#,
 );
