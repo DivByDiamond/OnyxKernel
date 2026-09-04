@@ -33,8 +33,39 @@ const ERASE_SEQ: [u8; 3] = [0x08, b' ', 0x08];
 /// consumed but dropped so the buffer can never overflow. All other control
 /// bytes are ignored. Returns the line without any terminator. The echo
 /// always ends with '\n' so the next prompt starts on its own line.
+///
+/// # Bug fixed (2026-09-04)
+///
+/// After restoring cooked mode (`TIOCRRAW`) and writing `\n`, the cooked
+/// line discipline echoes that `\n` back into the input buffer. The next
+/// call to `read_secret_line` would immediately read this echo as Enter,
+/// silently aborting the "Retype new password:" prompt and writing
+/// an incorrect hash to `/etc/shadow`. Fixed by draining leftover
+/// input bytes after switching to raw mode at the start of each call.
 pub unsafe fn read_secret_line(buf: &mut [u8]) -> &[u8] {
     let _ = syscalls::ioctl(0, TIOCSRAW, 0);
+
+    // Drain leftover bytes from the previous call's cooked-mode echo.
+    // After the previous call did `TIOCRRAW` + `write(1, "\n")`, the cooked
+    // line discipline echoed that '\n' back into the input buffer. These
+    // stale bytes would otherwise be consumed by the first read() below and
+    // mistaken for the Enter key, silently aborting the "Retype new password:"
+    // prompt and producing an incorrect hash in /etc/shadow.
+    let mut drain = [0u8; 64];
+    loop {
+        let r = syscalls::read(0, drain.as_mut_ptr(), drain.len() as u64);
+        if r <= 0 {
+            break;
+        }
+        if drain[..r as usize]
+            .iter()
+            .any(|&b| b == b'\n' || b == b'\r')
+        {
+            break; // Found the leftover Enter from the echo
+        }
+        // Non-enter stale bytes - discard too
+    }
+
     let mut n = 0usize;
     let mut chunk = [0u8; 32];
     loop {

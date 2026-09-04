@@ -628,7 +628,15 @@
       данных, `Err(Inval)` после TIMEWAIT); нет чистого сигнала "peer
       закрыл соединение". `ohttp` обходит это через `Content-Length`
       (см. `OnyxApps/apps/ohttp/README.md`), но `obrowse` для страниц
-      без `Content-Length` (chunked/legacy) захочет настоящий EOF.
+       без `Content-Length` (chunked/legacy) захочет настоящий EOF.
+
+### obrowse — стадии C + D (2026-09-04)
+
+- **Стадия C (окно приёма)** — `tcp_recv` возвращает `Ok(0)` при чистом EOF (peer FIN). `obrowse/net/fetch.c` `recv_wait()` теперь обрабатывает `r==0` как 'done' и сохраняет `EINVAL` как backward-compatible fallback.
+- **Стадия D (UI ошибок)** — `obrowse/net/fetch.c` парсит HTTP status code из первой строки ответа, передаёт через 4-й параметр `int *http_status` на `obrowse_fetch`. `obrowse/ui/error.c` (новый модуль, ~64 строки) рисует красно-белый overlay: 'fetch: HTTP NNN' для 4xx/5xx (с label типа 'Page not found' для 404), или 'fetch failed (errno N)' для сетевых ошибок.
+- **OnyxShell** — fallback на `/bin/<cmd>` как внешний `.onx`, если имя не builtin. `obrowse <url>` работает напрямую.
+- **OnyxOS** — `scripts/mk-onyxfs-disk.sh` включает `obrowse.onx` в boot rootfs.
+- **TODO**: live QEMU-тест всей цепочки (obrowse URL → DNS resolve → TCP connect → HTTP GET → HTML parse → render → link nav → back). Не запускается в сандбоксе: qemu-system-riscv64, parted, mkfs.fat, mcross и RISC-V кросс-компилятор отсутствуют. CI на GitHub подхватит при push.
 
 ### PTY + мультиплексоры (~460 строк)
 **Статус: ✅ СДЕЛАНО 2026-09-01** — fs/pty (4 пары, 512B-кольца, master-close
