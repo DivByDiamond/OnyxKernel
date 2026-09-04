@@ -7,8 +7,8 @@ pub use current::{
     set_cwd,
 };
 pub use globals::{
-    G_ALL_PROCS, G_HART_IDLE_TF, G_NEED_RESCHED, G_PROC_LIST_LOCK, MAX_HARTS, alloc_pid,
-    current_for_hart, hart_id, init, proc_list_lock, proc_list_unlock, set_cpu_online,
+    G_ALL_PROCS, G_HART_IDLE_TF, G_HART_IDLE_TF_VALID, G_NEED_RESCHED, G_PROC_LIST_LOCK, MAX_HARTS,
+    alloc_pid, current_for_hart, hart_id, init, proc_list_lock, proc_list_unlock, set_cpu_online,
     set_current_for_hart,
 };
 pub use types::{

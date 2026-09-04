@@ -1,8 +1,46 @@
 //! klog — formatted logging via UART.
 use crate::drivers::uart;
+use crate::sync::SpinLock;
 use core::panic::PanicInfo;
-use core::sync::atomic::{AtomicU8, Ordering};
+use core::sync::atomic::{AtomicI32, AtomicU8, AtomicU32, Ordering};
 use onyx_core::fmt::{Arg, Write, vformat};
+
+/// Serializes UART output across harts. Without this, concurrent kinf!/
+/// kerr! calls from different harts interleave byte-by-byte on the shared
+/// UART MMIO register, producing garbled log lines that are unreadable
+/// exactly when they matter most (a crash on one hart while another is
+/// still printing). Diagnostic instrumentation for the SMP crash
+/// investigation (todo.md, "Отдельный SMP-краш под -smp 2"), kept as a
+/// permanent fix since the underlying data race is real regardless.
+///
+/// Reentrant by hart: a fault that occurs while THIS hart is already mid-
+/// print (e.g. a nested trap firing while formatting a log line) must still
+/// be able to report itself instead of deadlocking the hart against its own
+/// held lock — the plain `SpinLock` is not reentrant, so ownership is
+/// tracked separately here and re-entry from the same hart is a no-op.
+static UART_LOCK_OWNER: AtomicI32 = AtomicI32::new(-1);
+static UART_LOCK_DEPTH: AtomicU32 = AtomicU32::new(0);
+pub(crate) struct UartLock;
+pub(crate) static UART_LOCK: UartLock = UartLock;
+impl UartLock {
+    pub(crate) fn lock(&self) {
+        let hart = crate::proc::process::hart_id() as i32;
+        if UART_LOCK_OWNER.load(Ordering::Acquire) == hart {
+            UART_LOCK_DEPTH.fetch_add(1, Ordering::Relaxed);
+            return;
+        }
+        RAW_UART_LOCK.lock();
+        UART_LOCK_OWNER.store(hart, Ordering::Release);
+        UART_LOCK_DEPTH.store(1, Ordering::Relaxed);
+    }
+    pub(crate) fn unlock(&self) {
+        if UART_LOCK_DEPTH.fetch_sub(1, Ordering::Relaxed) == 1 {
+            UART_LOCK_OWNER.store(-1, Ordering::Release);
+            RAW_UART_LOCK.unlock();
+        }
+    }
+}
+static RAW_UART_LOCK: SpinLock = SpinLock::new();
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Level {
@@ -89,6 +127,7 @@ pub fn emit(level: Level, tag: &str, fmt: &str, args: &[Arg]) {
     if !enabled(level) {
         return;
     }
+    UART_LOCK.lock();
     let mut w = UartWriter;
     w.write_char(b'[');
     w.write_str(level.as_str());
@@ -98,6 +137,7 @@ pub fn emit(level: Level, tag: &str, fmt: &str, args: &[Arg]) {
     w.write_str(": ");
     vformat(&mut w, fmt, args);
     w.write_char(b'\n');
+    UART_LOCK.unlock();
 }
 
 // The enabled() guard sits in the macro (not inside emit) so a filtered-out

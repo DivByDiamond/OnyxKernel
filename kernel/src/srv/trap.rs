@@ -166,22 +166,47 @@ pub unsafe fn handle(tf: &mut TrapFrame) {
                     let pid = proc::current_pid();
                     crate::kerr!(
                         "trap",
-                        "illegal instruction pid=%d sepc=%p",
+                        "illegal instruction hart=%d pid=%d sepc=%p sp=%p ra=%p",
+                        onyx_core::fmt::Arg::from(crate::proc::process::hart_id() as u64),
                         onyx_core::fmt::Arg::from(pid),
-                        onyx_core::fmt::Arg::from(tf.sepc)
+                        onyx_core::fmt::Arg::from(tf.sepc),
+                        onyx_core::fmt::Arg::from(tf.sp),
+                        onyx_core::fmt::Arg::from(tf.ra)
                     );
+                    // Defensive fix: pid==0 means this trap has no process
+                    // context (idle hart, or kernel-mode code with no
+                    // `current`) — `proc::exit(0, ..)` is a no-op (by_pid(0)
+                    // never matches), so without this the trap falls through
+                    // unchanged and, whenever G_NEED_RESCHED happens to be
+                    // clear, `trap_return` resumes the SAME faulting sepc —
+                    // an infinite illegal-instruction loop that also spams
+                    // the log forever (observed while investigating the SMP
+                    // idle-hart crash, todo.md). There is nothing to tear
+                    // down for pid 0, so halt this hart cleanly instead of
+                    // silently re-faulting; other harts are unaffected.
+                    if pid == 0 {
+                        crate::srv::klog::halt();
+                    }
                     proc::exit(pid, 132);
                 }
                 CAUSE_BRK => {
                     let pid = proc::current_pid();
+                    if pid == 0 {
+                        crate::srv::klog::halt();
+                    }
                     proc::exit(pid, 133);
                 }
                 _ => {
                     crate::kpanic!(
                         "trap",
-                        "unhandled exception: scause=%p sepc=%p",
+                        "unhandled exception: hart=%d pid=%d scause=%p sepc=%p sp=%p ra=%p satp=%p",
+                        onyx_core::fmt::Arg::from(crate::proc::process::hart_id() as u64),
+                        onyx_core::fmt::Arg::from(proc::current_pid()),
                         onyx_core::fmt::Arg::from(scause),
-                        onyx_core::fmt::Arg::from(tf.sepc)
+                        onyx_core::fmt::Arg::from(tf.sepc),
+                        onyx_core::fmt::Arg::from(tf.sp),
+                        onyx_core::fmt::Arg::from(tf.ra),
+                        onyx_core::fmt::Arg::from(crate::arch::csr::read_satp())
                     );
                 }
             }

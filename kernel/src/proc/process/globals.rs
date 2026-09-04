@@ -17,6 +17,23 @@ pub static mut G_HART_CURRENT: [*mut Proc; MAX_HARTS] = [ptr::null_mut(); MAX_HA
 
 pub static mut G_HART_IDLE_TF: [TrapFrame; MAX_HARTS] = [TrapFrame::zero(); MAX_HARTS];
 
+/// Root-cause fix (SMP crash, todo.md "Отдельный SMP-краш под -smp 2"):
+/// tracks, per hart, whether `G_HART_IDLE_TF[hart]` holds a real captured
+/// idle context yet. Secondary harts always populate theirs before any
+/// process can run on them (`sched_enter_idle` is their boot entry, so their
+/// very first trap out of `wfi` seeds it). The BOOT hart (0) never calls
+/// `sched_enter_idle` — `srv::main::init::launch` drops straight into
+/// `enter_user(1)` — so it can go its entire life never voluntarily idling,
+/// right up until the moment every runnable process has migrated to another
+/// hart (work-stealing) and its own last process exits. At that point
+/// `sched_yield`'s "current Exited, nothing to run" path tried to *resume*
+/// `G_HART_IDLE_TF[0]`, which was still `TrapFrame::zero()` — sepc=0, sp=0
+/// — an immediate crash on switch-back. `sched_yield` checks this flag and,
+/// when unset, jumps into `sched_enter_idle()` fresh instead of resuming a
+/// frame that was never captured.
+pub static G_HART_IDLE_TF_VALID: [AtomicBool; MAX_HARTS] =
+    [const { AtomicBool::new(false) }; MAX_HARTS];
+
 pub static G_NEED_RESCHED: [AtomicBool; MAX_HARTS] = [const { AtomicBool::new(false) }; MAX_HARTS];
 
 pub static mut G_CURRENT: *mut Proc = ptr::null_mut();
