@@ -130,9 +130,30 @@ pub fn dump_all<W: onyx_core::fmt::Write>(w: &mut W) {
     // (srv::klog), which may fire while the lock is already held — then we
     // degrade to a best-effort unlocked read instead of deadlocking the
     // panic handler.
+    //
+    // Root-cause fix (SMP crash, todo.md "Отдельный SMP-краш под
+    // -smp 2"): the "best-effort unlocked read" used to walk
+    // `G_ALL_PROCS`/`(*cur).all_next` anyway when the lock wasn't held —
+    // but another hart concurrently unlinking/relinking a node (exit()'s
+    // auto-reap unlink, publish_ready's list insert, ...) can leave `cur`
+    // pointing at memory that's mid-mutation or already freed, and walking
+    // stale/dangling links wanders into unrelated memory. Live testing
+    // confirmed this: panic-time process dumps occasionally printed
+    // nonsensical mixed text — fragments of a completely unrelated, much
+    // earlier boot message ("stvec=%p") interleaved with garbage where a
+    // `pid=%d state=%s ...` line should have been, meaning `vformat` was
+    // fed corrupted args or even a corrupted format-string pointer read
+    // from wherever the dangling walk had wandered. Diagnostics reading
+    // garbage and got risk crashing again themselves; skip the walk
+    // entirely when the lock isn't held instead of guessing at how far a
+    // "best-effort" unlocked read can safely go.
     let locked = super::globals::G_PROC_LIST_LOCK.try_lock();
-    // SAFETY: with the lock held the list cannot be mutated under us; in the
-    // degraded panic path we accept a best-effort racy read (diagnostics).
+    if !locked {
+        w.write_str("  (process list locked elsewhere, dump skipped)\n");
+        return;
+    }
+    // SAFETY: proc_list_lock is held (checked above), so the list cannot be
+    // mutated by another hart while we walk it.
     unsafe {
         let mut cur = G_ALL_PROCS;
         while !cur.is_null() {
@@ -157,7 +178,5 @@ pub fn dump_all<W: onyx_core::fmt::Write>(w: &mut W) {
             cur = (*cur).all_next;
         }
     }
-    if locked {
-        super::globals::proc_list_unlock();
-    }
+    super::globals::proc_list_unlock();
 }

@@ -31,7 +31,15 @@ fn stdin_nonblock() -> bool {
 
 #[inline]
 fn echo_char(b: u8) {
+    // Serialize against kinf!/kerr! and other harts' console writes
+    // (crate::srv::klog::UART_LOCK) — same fix as sys_write
+    // (fs_sys/read_write.rs): the UART MMIO register is shared hardware,
+    // and this keystroke-echo path wrote to it completely unlocked,
+    // another real cross-hart UART race found while chasing the SMP crash
+    // (todo.md, "Отдельный SMP-краш под -smp 2").
+    crate::srv::klog::UART_LOCK.lock();
     uart::putc(b);
+    crate::srv::klog::UART_LOCK.unlock();
     if fb::enabled() {
         fb_term::ansi::console_putc(b);
     }
