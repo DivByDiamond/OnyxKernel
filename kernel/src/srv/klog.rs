@@ -123,12 +123,27 @@ pub fn putc(c: u8) {
     uart::putc(c);
 }
 
+/// Diagnostic-only monotonic print sequence number, prefixed to every
+/// emitted line while chasing the residual SMP fault (todo.md). Lets a
+/// still-garbled capture be checked for whether bytes from two DIFFERENT
+/// sequence numbers are truly interleaved mid-line (a real cross-hart UART
+/// race despite UART_LOCK) versus the host terminal/QEMU chardev merely
+/// reordering otherwise-intact, correctly-serialized lines.
+static EMIT_SEQ: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
+
 pub fn emit(level: Level, tag: &str, fmt: &str, args: &[Arg]) {
     if !enabled(level) {
         return;
     }
     UART_LOCK.lock();
+    let seq = EMIT_SEQ.fetch_add(1, Ordering::Relaxed);
+    let hart = crate::proc::process::hart_id();
     let mut w = UartWriter;
+    vformat(
+        &mut w,
+        "#%d/h%d ",
+        &[Arg::from(seq), Arg::from(hart as u32)],
+    );
     w.write_char(b'[');
     w.write_str(level.as_str());
     w.write_char(b']');
