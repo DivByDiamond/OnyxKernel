@@ -42,6 +42,11 @@ pub(in super::super) unsafe fn sys_write(tf: &mut TrapFrame, fd: u64, buf: u64, 
             let src = buf as *const u8;
             let mut written: i64 = 0;
             let mut i: u64 = 0;
+            // Serialize against kinf!/kerr! and other harts' console writes
+            // (crate::srv::klog::UART_LOCK) — the UART MMIO register is
+            // shared hardware; unlocked concurrent writers interleave
+            // byte-by-byte into garbled lines (observed under -smp 2).
+            crate::srv::klog::UART_LOCK.lock();
             while i < len {
                 let b = *src.add(i as usize);
                 if b == b'\n' {
@@ -56,6 +61,7 @@ pub(in super::super) unsafe fn sys_write(tf: &mut TrapFrame, fd: u64, buf: u64, 
                 written += 1;
                 i += 1;
             }
+            crate::srv::klog::UART_LOCK.unlock();
             if crate::drivers::fb::enabled() {
                 crate::drivers::fb_term::ansi::console_cursor();
             }

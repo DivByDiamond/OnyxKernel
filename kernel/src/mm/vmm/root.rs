@@ -149,12 +149,23 @@ unsafe fn free_subtree(table: *mut u64, level: u32) {
             let is_leaf = pte & PTE_LEAF != 0;
             let child_pa = (pte & PTE_PPN_MASK) >> PTE_PPN_SHIFT << 12;
             if is_leaf {
-                if pmm::is_managed(child_pa) {
-                    // Only PTE_U leaves are user pages accounted by
-                    // proc::limits; kernel-identity placeholders are not.
-                    if pte & PTE_U != 0 {
-                        crate::proc::limits::user_pages_release(1);
-                    }
+                // Root-cause fix (SMP crash, todo.md "Отдельный SMP-краш под
+                // -smp 2"): every process root carries 3 top-level 1 GiB
+                // identity leaf PTEs installed by onx::load (kernel::load_into)
+                // to keep kernel code/data reachable after `csrw satp` — see
+                // the comment in onx/segments.rs. Those leaves are
+                // deliberately non-PTE_U placeholders, NOT per-process pages;
+                // freeing them here returned live kernel physical memory
+                // (including the page at DRAM base, 0x80000000) to the pmm
+                // allocator on every single process exit, so the next
+                // unrelated allocation (trivially reachable on a second hart
+                // under real SMP concurrency) reused and clobbered it,
+                // producing the "random" illegal-instruction/page-fault
+                // crashes reported after process exit under -smp 2. Only
+                // PTE_U leaves are genuinely owned, per-process pages; the
+                // kernel identity placeholders must never be freed here.
+                if pte & PTE_U != 0 && pmm::is_managed(child_pa) {
+                    crate::proc::limits::user_pages_release(1);
                     pmm::free(child_pa);
                 }
             } else if level > 0 {

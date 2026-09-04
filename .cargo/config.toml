@@ -5,12 +5,29 @@ rustflags = [
     "-C", "link-arg=--gc-sections",
     "-C", "force-frame-pointers=no",
     "-C", "code-model=medium",
+    # Root-cause fix (SMP crash, todo.md "Отдельный SMP-краш под -smp 2"):
+    # the kernel uses `tp` (x4) as a manual, hand-rolled per-hart identity
+    # register — every `hart_id()` call is a raw `mv {0}, tp` read, and the
+    # whole scheduler (G_HART_CURRENT, runqueues, idle contexts) trusts it
+    # never changes for the life of a hart. Without this flag LLVM's
+    # register allocator does not know `tp` is special and is free to use
+    # it as an ordinary scratch GPR in any compiled function — silently
+    # clobbering the hart identity mid-execution. This surfaced as
+    # out-of-bounds panics in `current_pid()` (`G_HART_CURRENT[hart_id()]`)
+    # with garbage hart indices, and as raw CPU faults, both only under
+    # real SMP concurrency (single-hart builds never reveal it because
+    # `hart_id()` is always 0 and out-of-bounds never triggers).
+    # `+reserve-x4` tells LLVM to never allocate x4/tp for anything else —
+    # the same mechanism the Linux RISC-V port uses to protect its
+    # per-CPU-pointer `tp`.
+    "-C", "target-feature=+reserve-x4",
 ]
 
 [target.riscv32imac-unknown-none-elf]
 rustflags = [
     "-C", "link-arg=--gc-sections",
     "-C", "force-frame-pointers=no",
+    "-C", "target-feature=+reserve-x4",
 ]
 
 [alias]

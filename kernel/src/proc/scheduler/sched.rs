@@ -4,8 +4,8 @@ use super::runqueue::{G_RQ, dequeue, enqueue, rq_lock, rq_unlock};
 use crate::{
     arch::trap_frame::TrapFrame,
     proc::process::{
-        G_HART_IDLE_TF, G_NEED_RESCHED, KSTACK_SIZE, MAX_HARTS, Proc, ProcState, current_for_hart,
-        hart_id, set_current_for_hart,
+        G_HART_IDLE_TF, G_HART_IDLE_TF_VALID, G_NEED_RESCHED, KSTACK_SIZE, MAX_HARTS, Proc,
+        ProcState, current_for_hart, hart_id, set_current_for_hart,
     },
 };
 
@@ -95,6 +95,7 @@ pub unsafe fn sched_yield(tf: &mut TrapFrame) {
 
         if current.is_null() {
             G_HART_IDLE_TF[hartid] = *tf;
+            G_HART_IDLE_TF_VALID[hartid].store(true, Ordering::Release);
         } else {
             (*current).tf = *tf;
             if matches!((*current).state, ProcState::Running) {
@@ -177,6 +178,48 @@ pub unsafe fn sched_yield(tf: &mut TrapFrame) {
                 G_NEED_RESCHED[hartid].store(false, Ordering::Release);
                 let stack_top = crate::arch::smp::G_SEC_STACKS.as_ptr() as usize
                     + (hartid + 1) * crate::arch::smp::SEC_STACK_SIZE;
+                if !G_HART_IDLE_TF_VALID[hartid].load(Ordering::Acquire) {
+                    // Root-cause fix (SMP crash, todo.md "Отдельный
+                    // SMP-краш под -smp 2"): this hart has never trapped out
+                    // of `sched_enter_idle`'s wfi (only true for the BOOT
+                    // hart, which drops straight into `enter_user` at boot
+                    // and may run continuously until every process either
+                    // migrates away via work-stealing or exits). Resuming
+                    // `G_HART_IDLE_TF[hartid]` here would jump to
+                    // `TrapFrame::zero()`'s sepc=0 — an instant crash. Start
+                    // the idle loop fresh on this hart's own idle stack
+                    // instead of pretending a context was ever saved; its
+                    // first real trap-out-of-wfi will populate
+                    // G_HART_IDLE_TF[hartid] normally from then on.
+                    let entry = super::sched_enter_idle as *const () as usize;
+                    // `in(reg)` lets the register allocator pick ANY GPR for
+                    // these operands, including `tp` — which every hart's
+                    // `hart_id()` relies on as a permanent, never-clobbered
+                    // thread pointer (plain `mv {0}, tp` reads, everywhere in
+                    // the scheduler/process code). If the allocator happened
+                    // to pick `tp` for `stack_top` or `entry` here, this
+                    // asm block silently destroyed it, and every subsequent
+                    // `hart_id()` call on this hart returned a garbage
+                    // address instead of a hart index — surfaced as an
+                    // out-of-bounds panic in `current_pid()`
+                    // (`G_HART_CURRENT[hart_id()]`) shortly after. Pin both
+                    // operands to explicit temporaries (t0/t1, ordinary
+                    // scratch registers never treated specially) so `tp` is
+                    // never a candidate.
+                    #[cfg(not(test))]
+                    core::arch::asm!(
+                        "mv sp, t0",
+                        "jr t1",
+                        in("t0") stack_top,
+                        in("t1") entry,
+                        options(noreturn)
+                    );
+                    #[cfg(test)]
+                    {
+                        let _ = entry;
+                        unreachable!("idle re-entry asm is riscv-only");
+                    }
+                }
                 let dst = (stack_top - core::mem::size_of::<TrapFrame>()) as *mut TrapFrame;
                 ptr::write_volatile(dst, G_HART_IDLE_TF[hartid]);
                 crate::arch::asm::sched_switch(dst as usize);
