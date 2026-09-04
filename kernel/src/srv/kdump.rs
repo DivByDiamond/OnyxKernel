@@ -3,48 +3,8 @@ use crate::arch::csr;
 #[cfg(not(test))]
 use onyx_core::fmt::{Arg, Write, vformat};
 
-#[cfg(not(test))]
-const MAX_BT_DEPTH: usize = 64;
-
-#[cfg(not(test))]
-/// Walk the RISC-V frame-pointer chain and print `ra` per frame.
-///
-/// # Safety
-///
-/// Must run on a kernel thread whose frames follow the standard fp-chain
-/// layout (`[fp-16] = saved s0/fp`, `[fp-8] = ra`); corrupted chains are
-/// tolerated (null/misaligned fp or ra terminate the walk) but the initial
-/// `s0` must at least be a readable stack address.
-unsafe fn backtrace(w: &mut impl Write) {
-    // SAFETY: walks the fp chain guarded by the null/alignment checks; the
-    // two word reads per frame target stack slots per the `# Safety`
-    // contract, and the asm only reads s0.
-    unsafe {
-        let mut fp: usize;
-        // SAFETY: reads the current frame pointer register s0 via a pure move;
-        // no memory access, no clobbers beyond the declared `out(reg)` output.
-        core::arch::asm!("mv {}, s0", out(reg) fp);
-        // Saved-ra / saved-fp slots sit just below the frame pointer at
-        // native word size (8 bytes on rv64, 4 on rv32).
-        const WORD: usize = core::mem::size_of::<usize>();
-        for i in 0..MAX_BT_DEPTH {
-            if fp == 0 || fp & 0xf != 0 {
-                break;
-            }
-            let ra = *((fp - WORD) as *const usize);
-            let old_fp = *((fp - 2 * WORD) as *const usize);
-            let args: &[Arg] = &[Arg::from(i), Arg::from(ra)];
-            vformat(w, "  [%d] ra=%p\n", args);
-            if ra == 0 {
-                break;
-            }
-            fp = old_fp;
-        }
-    }
-}
-
-/// Print a panic-time diagnostic dump: hart id, trap CSRs, current process
-/// state and a frame-pointer backtrace, via the panic writer.
+/// Print a panic-time diagnostic dump: hart id, trap CSRs and current
+/// process state, via the panic writer.
 ///
 /// # Safety
 ///
@@ -105,9 +65,19 @@ pub unsafe fn kdump() {
         let args: &[Arg] = &[Arg::from(online)];
         vformat(&mut w, "online_harts=%d\n", args);
 
-        w.write_str("Backtrace:\n");
-        backtrace(&mut w);
-
+        // Root-cause fix (SMP crash, todo.md "Отдельный SMP-краш под
+        // -smp 2"): a frame-pointer backtrace used to run here, walking
+        // `s0` as an fp-chain (`[fp-8]=ra`, `[fp-16]=old fp`). This project
+        // builds with `-C force-frame-pointers=no` (.cargo/config.toml), so
+        // `s0` is an ordinary scratch register with no guaranteed fp-chain
+        // contents — dereferencing it as one is undefined behavior in
+        // general and, live, reliably produced a SECOND, unrelated page
+        // fault (garbage `s0` treated as a stack pointer) while reporting
+        // the FIRST fault, turning one clean diagnostic into a confusing
+        // cascade that looked like the SMP crash itself. Removed rather
+        // than guarded more defensively: no amount of bounds-checking makes
+        // a nonexistent fp-chain correct, only build with
+        // force-frame-pointers=yes would.
         w.write_str("--- END KDUMP ---\n");
     }
 }

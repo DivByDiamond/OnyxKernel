@@ -176,6 +176,14 @@ fn delay_loops(n: u64) {
 }
 
 pub fn panic_handler(info: &PanicInfo) -> ! {
+    // Panics bypassed UART_LOCK entirely (PanicWriter writes uart::putc
+    // directly), so a panic on one hart while another hart was mid-emit()
+    // interleaved byte-by-byte with it — the exact garbling that made these
+    // SMP crash logs unreadable. Never returns, so no matching unlock is
+    // needed; a panic while THIS hart already holds the lock (inside its
+    // own emit() call) would self-deadlock, but no kerr!/kinf! call in this
+    // codebase panics before returning, so that path is not reachable.
+    UART_LOCK.lock();
     let mut w = PanicWriter;
     w.write_str("\n\n*** KERNEL PANIC ***\n");
     if let Some(loc) = info.location() {
