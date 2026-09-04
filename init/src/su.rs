@@ -8,10 +8,11 @@ use core::arch::asm;
 
 mod auth;
 mod syscalls;
+#[path = "term.rs"]
+mod term;
 
-/// ioctl numbers — match the kernel's `fs_sys3/extra.rs` definitions.
-const TIOCSRAW: u64 = 0x5421;
-const TIOCRRAW: u64 = 0x5422;
+// Re-exported for readability at the call site below.
+use term::read_secret_line;
 
 #[unsafe(no_mangle)]
 /// # Safety
@@ -74,23 +75,18 @@ pub unsafe extern "C" fn _start(argc: usize, argv: *const u64, _envp: *const u64
         }
     };
 
-    // Prompt for password. Read it in raw mode so the cooked-mode
-    // echo doesn't leak it onto the screen. (Audit fix 🟡 #2.)
+    // Prompt for password. read_secret_line switches the terminal to raw
+    // mode itself (so the cooked-mode echo doesn't leak the password onto
+    // the screen, audit fix 🟡 #2) and loops until Enter — a single raw
+    // read() returns after ANY keypress, which made su submit a one-char
+    // password per key (2026-09-04 bug report).
     syscalls::write(1, b"Password: ".as_ptr(), 10);
-    let _ = syscalls::ioctl(0, TIOCSRAW, 0);
     let mut pass_buf = [0u8; 64];
-    let pn = syscalls::read(0, pass_buf.as_mut_ptr(), pass_buf.len() as u64);
-    let _ = syscalls::ioctl(0, TIOCRRAW, 0);
-    syscalls::write(1, b"\n".as_ptr(), 1);
-    if pn <= 0 {
+    let password = read_secret_line(&mut pass_buf);
+    if password.is_empty() {
         syscalls::write(1, b"su: authentication failed\n".as_ptr(), 27);
         syscalls::exit(1);
     }
-    let mut pn = pn as usize;
-    while pn > 0 && (pass_buf[pn - 1] == b'\n' || pass_buf[pn - 1] == b'\r') {
-        pn -= 1;
-    }
-    let password = &pass_buf[..pn];
 
     // Verify password via /etc/shadow
     if !auth::verify_shadow_password(username, password) {

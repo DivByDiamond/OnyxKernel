@@ -8,12 +8,11 @@
 mod auth;
 #[path = "../syscalls/mod.rs"]
 mod syscalls;
+#[path = "../term.rs"]
+mod term;
 
 mod backoff;
 mod seed;
-
-const TIOCSRAW: u64 = 0x5421;
-const TIOCRRAW: u64 = 0x5422;
 
 /// Write NUL-terminated concatenation of `parts` into `buf`, returning the
 /// length including the terminator. Strings must be NUL-terminated to match
@@ -148,27 +147,11 @@ pub unsafe extern "C" fn _start() -> ! {
         };
 
         syscalls::write(1, b"password: ".as_ptr(), 10);
-        let _ = syscalls::ioctl(0, TIOCSRAW, 0);
         let mut pass_buf = [0u8; 64];
-        let pn = syscalls::read(0, pass_buf.as_mut_ptr(), pass_buf.len() as u64);
-        let _ = syscalls::ioctl(0, TIOCRRAW, 0);
-        syscalls::write(1, b"\n".as_ptr(), 1);
-
-        // An empty submission (just Enter) is a valid password attempt: accounts
-        // seeded with an empty password must be able to log in without typing one.
-        if pn < 0 {
-            backoff::backoff_sleep(fails);
-            fails = fails.saturating_add(1);
-            continue;
-        }
-        let pn = pn as usize;
-        // Raw mode skips the kernel's CR/LF translation: Enter arrives as '\r', so it must
-        // be stripped here or the password hash never matches.
-        let mut pn = pn;
-        while pn > 0 && (pass_buf[pn - 1] == b'\n' || pass_buf[pn - 1] == b'\r') {
-            pn -= 1;
-        }
-        let password = &pass_buf[..pn];
+        // read_secret_line loops until Enter (a single raw read() returns
+        // after ANY keypress — the 2026-09-04 lockout bug) and restores
+        // cooked mode itself, including the terminating newline echo.
+        let password = term::read_secret_line(&mut pass_buf);
 
         let outcome = auth::verify_shadow_outcome(username, password);
         if outcome == auth::VerifyOutcome::Fail {

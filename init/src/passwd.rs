@@ -8,10 +8,10 @@ use core::arch::asm;
 
 mod auth;
 mod syscalls;
+mod term;
 
-/// ioctl numbers — match the kernel's `fs_sys3/extra.rs` definitions.
-const TIOCSRAW: u64 = 0x5421;
-const TIOCRRAW: u64 = 0x5422;
+// Re-exported for readability at the call sites below.
+use term::read_secret_line;
 
 #[unsafe(no_mangle)]
 /// # Safety
@@ -69,7 +69,7 @@ unsafe fn do_user_passwd() {
 
     let mut old_pass = [0u8; 64];
     syscalls::write(1, b"Current password: ".as_ptr(), 18);
-    read_password(&mut old_pass);
+    read_secret_line(&mut old_pass);
 
     if !auth::verify_shadow_password(me, &old_pass) {
         syscalls::write(1, b"passwd: Authentication failure\n".as_ptr(), 33);
@@ -79,10 +79,9 @@ unsafe fn do_user_passwd() {
     let mut new_pass = [0u8; 64];
     let mut confirm = [0u8; 64];
     syscalls::write(1, b"New password: ".as_ptr(), 14);
-    let n1 = read_password(&mut new_pass);
+    let n1 = read_secret_line(&mut new_pass);
     syscalls::write(1, b"Retype new password: ".as_ptr(), 22);
-    let n2 = read_password(&mut confirm);
-    syscalls::write(1, b"\n".as_ptr(), 1);
+    let n2 = read_secret_line(&mut confirm);
 
     if n1.is_empty() || n1.len() != n2.len() || !auth::const_time_eq(n1, n2) {
         syscalls::write(1, b"passwd: Passwords do not match\n".as_ptr(), 34);
@@ -118,10 +117,9 @@ unsafe fn do_root_passwd() {
     let mut new_pass = [0u8; 64];
     let mut confirm = [0u8; 64];
     syscalls::write(1, b"New password: ".as_ptr(), 14);
-    let n1 = read_password(&mut new_pass);
+    let n1 = read_secret_line(&mut new_pass);
     syscalls::write(1, b"Retype new password: ".as_ptr(), 22);
-    let n2 = read_password(&mut confirm);
-    syscalls::write(1, b"\n".as_ptr(), 1);
+    let n2 = read_secret_line(&mut confirm);
 
     if n1.is_empty() || n1.len() != n2.len() || !auth::const_time_eq(n1, n2) {
         syscalls::write(1, b"passwd: Passwords do not match\n".as_ptr(), 34);
@@ -150,27 +148,26 @@ unsafe fn read_line(buf: &mut [u8]) -> &[u8] {
     &buf[..n]
 }
 
-/// Read a password from stdin with the terminal temporarily switched
-/// to raw mode so the cooked-mode echo doesn't leak the password onto
-/// the screen. (Audit fix 🟡 #2.) Returns a slice into `buf`.
-unsafe fn read_password(buf: &mut [u8]) -> &[u8] {
-    let _ = syscalls::ioctl(0, TIOCSRAW, 0);
-    let res = read_line(buf);
-    let _ = syscalls::ioctl(0, TIOCRRAW, 0);
-    res
-}
+// The old local read_password() (single raw read, audit fix 🟡 #2) was
+// removed: in kernel raw mode one read() returns after ANY keypress, so a
+// one-char "password" was submitted on every key (see term.rs header for
+// the full post-mortem). read_secret_line() loops until Enter instead.
 
 /// Audit fix (🔴 #6): mirror the validation used by `useradd` so an
 /// operator can't inject a colon or newline into /etc/shadow via the
-/// root-passwd path. Rejects anything outside [A-Za-z0-9-_.] and the
-/// literal name "root" (root's password is managed via the ring-2
-/// branch which already targets the current uid).
+/// root-passwd path. Rejects anything outside [A-Za-z0-9-_.].
+///
+/// "root" is deliberately ALLOWED here (fix 2026-09-04): the ring-2 branch
+/// only runs for non-root callers, so rejecting "root" left the ring-1
+/// operator with NO way to reset root's own password — exactly the
+/// recovery path needed after a botched `passwd` run locked an account.
+/// Root is already omnipotent (it can rewrite /etc/shadow directly), so
+/// this grants nothing new; the charset check still blocks injection.
 fn valid_username(u: &[u8]) -> bool {
     !u.is_empty()
         && u.len() <= 31
         && u.iter()
             .all(|&b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_' || b == b'.')
-        && u != b"root"
 }
 
 #[panic_handler]
