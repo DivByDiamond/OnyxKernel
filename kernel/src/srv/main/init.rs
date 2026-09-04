@@ -55,6 +55,15 @@ pub(crate) unsafe fn launch() -> ! {
         );
 
         proc::init();
+        // Root-cause fix (SMP crash, todo.md "Отдельный SMP-краш под
+        // -smp 2"): unlike every other hart, the boot hart never calls
+        // `sched_enter_idle()` itself — it drops straight into
+        // `enter_user(1)` below — so nothing would ever populate
+        // `G_HART_IDLE_TF[0]` before the first time this hart genuinely
+        // needs to idle (everything it ran migrated away via work-stealing,
+        // or exited). Seed it now with a valid resume context instead of
+        // leaving `sched_yield` to discover a zeroed frame later.
+        proc::seed_boot_hart_idle_context(0);
         let ring = if r.ring == 1 {
             proc::PROC_RING_ROOT
         } else {
