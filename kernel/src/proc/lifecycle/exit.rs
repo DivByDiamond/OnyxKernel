@@ -20,12 +20,25 @@ pub unsafe fn exit(pid: u32, code: i32) {
     // returned node stays valid until reaped.
     unsafe {
         if let Some(p) = by_pid(pid) {
-            crate::kerr!(
-                "proc",
-                "pid %d exited code=%d",
-                onyx_core::fmt::Arg::from(pid),
-                onyx_core::fmt::Arg::from(code)
-            );
+            // Normal exit (code == 0) is INFO, not ERR: logging every clean
+            // shutdown as "[ERR] proc: pid N exited code=0" (e.g. after
+            // `exec passwd` ends a login session) made users believe the
+            // process had crashed (bug report 2026-09-04).
+            if code == 0 {
+                crate::kinf!(
+                    "proc",
+                    "pid %d exited code=%d",
+                    onyx_core::fmt::Arg::from(pid),
+                    onyx_core::fmt::Arg::from(code)
+                );
+            } else {
+                crate::kerr!(
+                    "proc",
+                    "pid %d exited code=%d",
+                    onyx_core::fmt::Arg::from(pid),
+                    onyx_core::fmt::Arg::from(code)
+                );
+            }
             let p_ptr = p as *mut _;
             for h in 0..MAX_HARTS {
                 crate::proc::scheduler::rq_lock(h);

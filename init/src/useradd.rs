@@ -8,6 +8,7 @@ use core::arch::asm;
 
 mod auth;
 mod syscalls;
+mod term;
 
 #[unsafe(no_mangle)]
 /// # Safety
@@ -52,7 +53,11 @@ pub unsafe extern "C" fn _start() -> ! {
 
     let mut password = [0u8; 64];
     syscalls::write(1, b"Password: ".as_ptr(), 10);
-    let pass = read_line(&mut password);
+    // read_secret_line: cooked read_line() echoed the new user's password
+    // onto the console in plaintext (same class of leak as audit fix 🟡 #2).
+    // The helper also loops until Enter — one raw read() returns per
+    // keypress, which broke every password prompt (2026-09-04 bug report).
+    let pass = term::read_secret_line(&mut password);
     if pass.is_empty() {
         syscalls::write(1, b"useradd: no password\n".as_ptr(), 23);
         syscalls::exit(1);
