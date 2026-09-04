@@ -54,6 +54,17 @@ fi
 echo "==> Generating font"
 "$ROOT/target/release/psfgen" "$BUILD/default.psf"
 
+# Build obrowse.onx from OnyxApps
+APPS_DIR="${ONYXAPPS_DIR:-$ROOT/../OnyxApps}"
+if [ -d "$APPS_DIR" ]; then
+    echo "==> Building OnyxApps (obrowse)"
+    (cd "$APPS_DIR" && PATH="$ROOT/../OnyxCompiller:$PATH" make) 2>&1 | tail -3
+    if [ -f "$APPS_DIR/build/obrowse.onx" ]; then
+        cp "$APPS_DIR/build/obrowse.onx" "$BUILD/obrowse.onx"
+        echo "    obrowse.onx copied to build/"
+    fi
+fi
+
 # Create enable-flag for the lsblk boot-time service.
 echo "1" > "$BUILD/lsblk.enabled" 2>/dev/null || true
 
@@ -77,6 +88,9 @@ MANIFEST="$BUILD/manifest.txt"
     echo "file $BUILD/default.psf /font/default.psf"
     if [ -f "$BUILD/onyxcc.onx" ]; then
         echo "file $BUILD/onyxcc.onx /bin/onyxcc --ring=1"
+    fi
+    if [ -f "$BUILD/obrowse.onx" ]; then
+        echo "file $BUILD/obrowse.onx /bin/obrowse --ring=1"
     fi
     echo "file $BUILD/argv_test.onx /bin/argv_test"
     echo "file $BUILD/fb_draw.onx /bin/fb_draw --ring=1"
