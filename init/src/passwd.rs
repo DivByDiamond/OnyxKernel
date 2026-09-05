@@ -122,8 +122,9 @@ unsafe fn do_user_passwd() {
         Ok(()) => {
             syscalls::write(1, b"passwd: password updated\n".as_ptr(), 25);
         }
-        Err(_) => {
-            syscalls::write(1, b"passwd: Failed to update password\n".as_ptr(), 34);
+        Err(errno) => {
+            syscalls::write(1, b"passwd: Failed to update password: ".as_ptr(), 36);
+            write_errno(errno);
         }
     }
 }
@@ -160,8 +161,9 @@ unsafe fn do_root_passwd() {
         Ok(()) => {
             syscalls::write(1, b"passwd: password updated\n".as_ptr(), 25);
         }
-        Err(_) => {
-            syscalls::write(1, b"passwd: Failed to update password\n".as_ptr(), 34);
+        Err(errno) => {
+            syscalls::write(1, b"passwd: Failed to update password: ".as_ptr(), 36);
+            write_errno(errno);
         }
     }
 }
