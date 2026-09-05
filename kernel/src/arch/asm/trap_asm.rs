@@ -79,8 +79,23 @@ trap_return:
     // holds the right value — leave it alone instead of overwriting it
     // with a stale or defaulted one. (See the matching drop_to_user fix
     // in this file for the other half of this bug.)
-    ld t0, 32(sp)
-    ld t1, 40(sp)
+    //
+    // Root-cause fix (KDF/hash_password nondeterminism under long-running
+    // user loops, 2026-09-05): t0/t1 used to be restored to their REAL
+    // (interrupted-context) values here, immediately after ra/gp — but the
+    // CSR bookkeeping further down (sepc/sstatus/satp/final-sp) then
+    // reused t0/t1 as scratch registers and never reloaded the real
+    // values before `sret`. Every single timer tick that interrupted user
+    // code got its t0/t1 silently replaced with leftover CSR-scratch
+    // garbage on resume — invisible for most code, but any register-heavy
+    // hot loop (e.g. the password KDF's SHA-256 core, which keeps working
+    // state in temporaries across thousands of iterations) would
+    // eventually get preempted mid-loop and resume with corrupted t0/t1,
+    // silently producing a wrong result with no fault or crash. Fixed by
+    // moving the real t0/t1 restore to the very end, after all CSR
+    // scratch work is done, and folding the final sp swap into a single
+    // `ld sp, 8(sp)` (address computed from the OLD sp before the load
+    // lands in sp) so no scratch register is needed for it at all.
     ld t2, 48(sp)
     ld s0, 56(sp)
     ld s1, 64(sp)
@@ -106,6 +121,8 @@ trap_return:
     ld t4, 224(sp)
     ld t5, 232(sp)
     ld t6, 240(sp)
+    // From here to the real t0/t1 restore below, t0/t1 hold only CSR
+    // scratch values — never the interrupted context's real registers.
     ld t0, 248(sp)
     csrw sepc, t0
     // Restore sstatus with SIE (bit 1) force-cleared: ALL trap-handler and
@@ -127,17 +144,20 @@ trap_return:
     srli t0, t0, 8
     andi t0, t0, 1
     bnez t0, .Lret_kernel
-    addi t1, sp, 288
-    csrw sscratch, t1
+    addi t0, sp, 288
+    csrw sscratch, t0
     j .Lret_finish
 .Lret_kernel:
     csrw sscratch, zero
 .Lret_finish:
-    ld t0, 8(sp)
-    ld t1, 280(sp)
-    csrw satp, t1
+    ld t0, 280(sp)
+    csrw satp, t0
     sfence.vma zero, zero
-    mv sp, t0
+    // Real t0/t1 restored last — nothing after this touches them except
+    // the final sp swap, which uses sp itself (not t0/t1) as scratch.
+    ld t1, 40(sp)
+    ld t0, 32(sp)
+    ld sp, 8(sp)
     sret
 
 .global sched_switch
