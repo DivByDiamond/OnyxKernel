@@ -70,11 +70,29 @@ pub fn hart_in_m_mode() -> bool {
 /// (e.g. from M-mode booted via OnyxBoot) traps to an unset mtvec.
 pub unsafe fn set_timer(stime: u64) {
     // SAFETY: ecall with a7=0 / a0=stime is the legacy SBI_SET_TIMER contract.
+    //
+    // Root cause (KDF/hash_password nondeterminism under long-running user
+    // loops, 2026-09-05): this asm! block only declared `a0`/`a7` as inputs.
+    // The SBI ecall ABI returns its status/value in a0/a1 — the firmware
+    // (OpenSBI, or this kernel's own mtrap_entry servicing the same legacy
+    // SBI_SET_TIMER contract) WRITES both on return. Because `a1` was never
+    // declared to the compiler at all (not even as clobbered), LLVM was free
+    // to keep some other live value cached in `a1` across this inline `ecall`
+    // — after inlining `set_timer` into `arm_timer`/`timer::handle`, whatever
+    // happened to be live in `a1` at that point (once every ~10ms, on every
+    // timer tick) got silently overwritten by the firmware's real return
+    // value. This reproduced identically under both the smode/OpenSBI and
+    // non-smode/mtrap_entry builds (both route through this same function)
+    // and was independent of the scheduler, paging, and QEMU itself —
+    // confirmed by a bare-metal, kernel-only repro with interrupts enabled.
+    // Declaring both registers `lateout` (clobbered, value discarded) tells
+    // the compiler this ecall may destroy them, matching the real ABI.
     unsafe {
         core::arch::asm!(
             "ecall",
             in("a7") 0usize,
-            in("a0") stime as usize,
+            inlateout("a0") stime as usize => _,
+            lateout("a1") _,
             options(nostack),
         );
     }

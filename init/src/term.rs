@@ -26,7 +26,8 @@ const ERASE_SEQ: [u8; 3] = [0x08, b' ', 0x08];
 /// The drain loop must NOT run on the very first call (login password)
 /// because there are no leftover bytes — blocking read() would consume
 /// the user's actual password input.
-static mut G_FIRST_CALL: bool = true;
+use core::sync::atomic::{AtomicBool, Ordering};
+static G_FIRST_CALL: AtomicBool = AtomicBool::new(true);
 
 /// Read a secret line from fd 0 (console) without local echo.
 ///
@@ -54,7 +55,7 @@ pub unsafe fn read_secret_line(buf: &mut [u8]) -> &[u8] {
     // Drain leftover bytes from the previous call's cooked-mode echo.
     // Skip on the very first call — there are no leftovers, and a blocking
     // read() would consume the user's actual password input.
-    if !G_FIRST_CALL {
+    if !G_FIRST_CALL.load(Ordering::Relaxed) {
         let mut drain = [0u8; 64];
         loop {
             let r = syscalls::read(0, drain.as_mut_ptr(), drain.len() as u64);
@@ -70,7 +71,7 @@ pub unsafe fn read_secret_line(buf: &mut [u8]) -> &[u8] {
             // Non-enter stale bytes - discard too
         }
     }
-    G_FIRST_CALL = false;
+    G_FIRST_CALL.store(false, Ordering::Relaxed);
 
     let mut n = 0usize;
     let mut chunk = [0u8; 32];
@@ -107,5 +108,6 @@ pub unsafe fn read_secret_line(buf: &mut [u8]) -> &[u8] {
     }
     let _ = syscalls::ioctl(0, TIOCRRAW, 0);
     syscalls::write(1, b"\n".as_ptr(), 1);
+
     &buf[..n]
 }

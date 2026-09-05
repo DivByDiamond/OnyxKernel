@@ -64,8 +64,11 @@ trap_return:
     // physical hart executing this code is always correct, unlike
     // whatever a trapframe (possibly from a migrated or freshly-created
     // process) happened to capture.
-    lw t0, 32(sp)
-    lw t1, 40(sp)
+    // Root-cause fix (KDF/hash_password nondeterminism under long-running
+    // user loops, 2026-09-05): see the fully-explained fix in trap_asm.rs
+    // (rv64) — t0/t1 must not be restored to their real values until AFTER
+    // all CSR-scratch use below, or every timer tick silently corrupts
+    // whatever the interrupted user code was keeping in them.
     lw t2, 48(sp)
     lw s0, 56(sp)
     lw s1, 64(sp)
@@ -97,13 +100,16 @@ trap_return:
     li t1, ~(1 << 1)
     and t0, t0, t1
     csrw sstatus, t0
-    addi t1, sp, 144
-    csrw sscratch, t1
-    lw t0, 8(sp)
-    lw t1, 280(sp)
-    csrw satp, t1
+    addi t0, sp, 144
+    csrw sscratch, t0
+    lw t0, 280(sp)
+    csrw satp, t0
     sfence.vma zero, zero
-    mv sp, t0
+    // Real t0/t1 restored last; the final sp swap uses sp itself as
+    // scratch (address computed from the OLD sp before the load lands).
+    lw t1, 40(sp)
+    lw t0, 32(sp)
+    lw sp, 8(sp)
     sret
 
 .global sched_switch
