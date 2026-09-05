@@ -36,7 +36,7 @@ pub unsafe extern "C" fn _start(argc: usize, argv: *const u64, _envp: *const u64
     }
 
     if target_len == 0 {
-        syscalls::write(1, b"su: username: ".as_ptr(), 14);
+        syscalls::write(1, b"su: username: ".as_ptr(), b"su: username: ".len());
         let mut buf = [0u8; 64];
         let n = syscalls::read(0, buf.as_mut_ptr(), buf.len() as u64);
         if n <= 0 {
@@ -51,7 +51,7 @@ pub unsafe extern "C" fn _start(argc: usize, argv: *const u64, _envp: *const u64
     }
 
     if target_len == 0 {
-        syscalls::write(1, b"su: no username\n".as_ptr(), 17);
+        syscalls::write(1, b"su: no username\n".as_ptr(), b"su: no username\n".len());
         syscalls::exit(1);
     }
 
@@ -70,7 +70,11 @@ pub unsafe extern "C" fn _start(argc: usize, argv: *const u64, _envp: *const u64
     let user_idx = match auth::find_user(&users, nusers, username) {
         Some(i) => i,
         None => {
-            syscalls::write(1, b"su: unknown user\n".as_ptr(), 18);
+            syscalls::write(
+                1,
+                b"su: unknown user\n".as_ptr(),
+                b"su: unknown user\n".len(),
+            );
             syscalls::exit(1);
         }
     };
@@ -80,17 +84,25 @@ pub unsafe extern "C" fn _start(argc: usize, argv: *const u64, _envp: *const u64
     // the screen, audit fix 🟡 #2) and loops until Enter — a single raw
     // read() returns after ANY keypress, which made su submit a one-char
     // password per key (2026-09-04 bug report).
-    syscalls::write(1, b"Password: ".as_ptr(), 10);
+    syscalls::write(1, b"Password: ".as_ptr(), b"Password: ".len());
     let mut pass_buf = [0u8; 64];
     let password = read_secret_line(&mut pass_buf);
     if password.is_empty() {
-        syscalls::write(1, b"su: authentication failed\n".as_ptr(), 27);
+        syscalls::write(
+            1,
+            b"su: authentication failed\n".as_ptr(),
+            b"su: authentication failed\n".len(),
+        );
         syscalls::exit(1);
     }
 
     // Verify password via /etc/shadow
     if !auth::verify_shadow_password(username, password) {
-        syscalls::write(1, b"\nsu: authentication failed\n".as_ptr(), 27);
+        syscalls::write(
+            1,
+            b"\nsu: authentication failed\n".as_ptr(),
+            b"\nsu: authentication failed\n".len(),
+        );
         // Audit fix (🔴 #11): exponential backoff on failed `su` attempts.
         // 0.25 s, 0.5 s, 1 s, 2 s, 4 s, 8 s, 16 s, 16 s, … — capped at 16 s.
         backoff_sleep(2);
@@ -103,7 +115,11 @@ pub unsafe extern "C" fn _start(argc: usize, argv: *const u64, _envp: *const u64
     let r1 = syscalls::setuid(target_uid as u64);
     let r2 = syscalls::setgid(target_gid as u64);
     if r1 < 0 || r2 < 0 {
-        syscalls::write(1, b"su: setuid/setgid failed\n".as_ptr(), 27);
+        syscalls::write(
+            1,
+            b"su: setuid/setgid failed\n".as_ptr(),
+            b"su: setuid/setgid failed\n".len(),
+        );
         syscalls::exit(1);
     }
 
@@ -129,7 +145,7 @@ pub unsafe extern "C" fn _start(argc: usize, argv: *const u64, _envp: *const u64
         shell_path[shell_len] = 0;
     }
     syscalls::exec(shell_path.as_ptr(), core::ptr::null());
-    syscalls::write(1, b"su: exec failed\n".as_ptr(), 16);
+    syscalls::write(1, b"su: exec failed\n".as_ptr(), b"su: exec failed\n".len());
     syscalls::exit(1);
 }
 

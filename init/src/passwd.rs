@@ -50,7 +50,7 @@ unsafe fn write_errno(errno: i64) {
         buf[i] = b'-';
     }
     syscalls::write(1, buf[i..].as_ptr(), buf.len() - i);
-    syscalls::write(1, b"\n".as_ptr(), 1);
+    syscalls::write(1, b"\n".as_ptr(), b"\n".len());
 }
 
 unsafe fn do_user_passwd() {
@@ -74,7 +74,11 @@ unsafe fn do_user_passwd() {
     let nusers = match auth::read_passwd(&mut users) {
         Ok(n) => n,
         Err(errno) => {
-            syscalls::write(1, b"passwd: cannot open /etc/passwd: ".as_ptr(), 34);
+            syscalls::write(
+                1,
+                b"passwd: cannot open /etc/passwd: ".as_ptr(),
+                b"passwd: cannot open /etc/passwd: ".len(),
+            );
             write_errno(errno);
             syscalls::exit(1);
         }
@@ -82,7 +86,11 @@ unsafe fn do_user_passwd() {
     let idx = match auth::find_user_by_uid(&users, nusers, uid) {
         Some(i) => i,
         None => {
-            syscalls::write(1, b"passwd: cannot identify current user\n".as_ptr(), 41);
+            syscalls::write(
+                1,
+                b"passwd: cannot identify current user\n".as_ptr(),
+                b"passwd: cannot identify current user\n".len(),
+            );
             syscalls::exit(1);
         }
     };
@@ -93,37 +101,65 @@ unsafe fn do_user_passwd() {
     }
     let me = &me_name[..me_len];
 
-    syscalls::write(1, b"Changing password for ".as_ptr(), 22);
+    syscalls::write(
+        1,
+        b"Changing password for ".as_ptr(),
+        b"Changing password for ".len(),
+    );
     syscalls::write(1, me.as_ptr(), me.len());
-    syscalls::write(1, b".\n".as_ptr(), 2);
+    syscalls::write(1, b".\n".as_ptr(), b".\n".len());
 
     let mut old_pass = [0u8; 64];
-    syscalls::write(1, b"Current password: ".as_ptr(), 18);
+    syscalls::write(
+        1,
+        b"Current password: ".as_ptr(),
+        b"Current password: ".len(),
+    );
     read_secret_line(&mut old_pass);
 
     if !auth::verify_shadow_password(me, &old_pass) {
-        syscalls::write(1, b"passwd: Authentication failure\n".as_ptr(), 33);
+        syscalls::write(
+            1,
+            b"passwd: Authentication failure\n".as_ptr(),
+            b"passwd: Authentication failure\n".len(),
+        );
         syscalls::exit(1);
     }
 
     let mut new_pass = [0u8; 64];
     let mut confirm = [0u8; 64];
-    syscalls::write(1, b"New password: ".as_ptr(), 14);
+    syscalls::write(1, b"New password: ".as_ptr(), b"New password: ".len());
     let n1 = read_secret_line(&mut new_pass);
-    syscalls::write(1, b"Retype new password: ".as_ptr(), 22);
+    syscalls::write(
+        1,
+        b"Retype new password: ".as_ptr(),
+        b"Retype new password: ".len(),
+    );
     let n2 = read_secret_line(&mut confirm);
 
     if n1.is_empty() || n1.len() != n2.len() || !auth::const_time_eq(n1, n2) {
-        syscalls::write(1, b"passwd: Passwords do not match\n".as_ptr(), 34);
+        syscalls::write(
+            1,
+            b"passwd: Passwords do not match\n".as_ptr(),
+            b"passwd: Passwords do not match\n".len(),
+        );
         syscalls::exit(1);
     }
 
     match auth::update_shadow_password(me, n1) {
         Ok(()) => {
-            syscalls::write(1, b"passwd: password updated\n".as_ptr(), 25);
+            syscalls::write(
+                1,
+                b"passwd: password updated\n".as_ptr(),
+                b"passwd: password updated\n".len(),
+            );
         }
         Err(errno) => {
-            syscalls::write(1, b"passwd: Failed to update password: ".as_ptr(), 36);
+            syscalls::write(
+                1,
+                b"passwd: Failed to update password: ".as_ptr(),
+                b"passwd: Failed to update password: ".len(),
+            );
             write_errno(errno);
         }
     }
@@ -131,38 +167,62 @@ unsafe fn do_user_passwd() {
 
 unsafe fn do_root_passwd() {
     let mut username = [0u8; 32];
-    syscalls::write(1, b"Username: ".as_ptr(), 10);
+    syscalls::write(1, b"Username: ".as_ptr(), b"Username: ".len());
     let uname = read_line(&mut username);
     if uname.is_empty() {
-        syscalls::write(1, b"passwd: no username\n".as_ptr(), 21);
+        syscalls::write(
+            1,
+            b"passwd: no username\n".as_ptr(),
+            b"passwd: no username\n".len(),
+        );
         syscalls::exit(1);
     }
 
     // Audit fix (🔴 #6): validate the username so a root operator can't
     // inject a colon or newline into /etc/passwd via this path either.
     if !valid_username(uname) {
-        syscalls::write(1, b"passwd: invalid username\n".as_ptr(), 26);
+        syscalls::write(
+            1,
+            b"passwd: invalid username\n".as_ptr(),
+            b"passwd: invalid username\n".len(),
+        );
         syscalls::exit(1);
     }
 
     let mut new_pass = [0u8; 64];
     let mut confirm = [0u8; 64];
-    syscalls::write(1, b"New password: ".as_ptr(), 14);
+    syscalls::write(1, b"New password: ".as_ptr(), b"New password: ".len());
     let n1 = read_secret_line(&mut new_pass);
-    syscalls::write(1, b"Retype new password: ".as_ptr(), 22);
+    syscalls::write(
+        1,
+        b"Retype new password: ".as_ptr(),
+        b"Retype new password: ".len(),
+    );
     let n2 = read_secret_line(&mut confirm);
 
     if n1.is_empty() || n1.len() != n2.len() || !auth::const_time_eq(n1, n2) {
-        syscalls::write(1, b"passwd: Passwords do not match\n".as_ptr(), 34);
+        syscalls::write(
+            1,
+            b"passwd: Passwords do not match\n".as_ptr(),
+            b"passwd: Passwords do not match\n".len(),
+        );
         syscalls::exit(1);
     }
 
     match auth::update_shadow_password(uname, n1) {
         Ok(()) => {
-            syscalls::write(1, b"passwd: password updated\n".as_ptr(), 25);
+            syscalls::write(
+                1,
+                b"passwd: password updated\n".as_ptr(),
+                b"passwd: password updated\n".len(),
+            );
         }
         Err(errno) => {
-            syscalls::write(1, b"passwd: Failed to update password: ".as_ptr(), 36);
+            syscalls::write(
+                1,
+                b"passwd: Failed to update password: ".as_ptr(),
+                b"passwd: Failed to update password: ".len(),
+            );
             write_errno(errno);
         }
     }

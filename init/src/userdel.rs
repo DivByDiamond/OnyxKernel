@@ -17,20 +17,32 @@ mod syscalls;
 pub unsafe extern "C" fn _start() -> ! {
     let ring = syscalls::getring();
     if ring != 1 {
-        syscalls::write(1, b"userdel: only root can delete users\n".as_ptr(), 38);
+        syscalls::write(
+            1,
+            b"userdel: only root can delete users\n".as_ptr(),
+            b"userdel: only root can delete users\n".len(),
+        );
         syscalls::exit(1);
     }
 
     let mut username = [0u8; 32];
-    syscalls::write(1, b"Username: ".as_ptr(), 10);
+    syscalls::write(1, b"Username: ".as_ptr(), b"Username: ".len());
     let uname = read_line(&mut username);
     if uname.is_empty() {
-        syscalls::write(1, b"userdel: no username\n".as_ptr(), 23);
+        syscalls::write(
+            1,
+            b"userdel: no username\n".as_ptr(),
+            b"userdel: no username\n".len(),
+        );
         syscalls::exit(1);
     }
 
     if uname == b"root" {
-        syscalls::write(1, b"userdel: cannot delete root\n".as_ptr(), 30);
+        syscalls::write(
+            1,
+            b"userdel: cannot delete root\n".as_ptr(),
+            b"userdel: cannot delete root\n".len(),
+        );
         syscalls::exit(1);
     }
 
@@ -45,23 +57,39 @@ pub unsafe extern "C" fn _start() -> ! {
     let nusers = auth::read_passwd(&mut users).unwrap_or(0);
 
     if auth::find_user(&users, nusers, uname).is_none() {
-        syscalls::write(1, b"userdel: user not found\n".as_ptr(), 26);
+        syscalls::write(
+            1,
+            b"userdel: user not found\n".as_ptr(),
+            b"userdel: user not found\n".len(),
+        );
         syscalls::exit(1);
     }
 
     // Remove from passwd
     if auth::delete_passwd_entry(uname).is_err() {
-        syscalls::write(1, b"userdel: failed to update /etc/passwd\n".as_ptr(), 40);
+        syscalls::write(
+            1,
+            b"userdel: failed to update /etc/passwd\n".as_ptr(),
+            b"userdel: failed to update /etc/passwd\n".len(),
+        );
         syscalls::exit(1);
     }
 
     // Remove from shadow
     if auth::delete_shadow_entry(uname).is_err() {
-        syscalls::write(1, b"userdel: failed to update /etc/shadow\n".as_ptr(), 41);
+        syscalls::write(
+            1,
+            b"userdel: failed to update /etc/shadow\n".as_ptr(),
+            b"userdel: failed to update /etc/shadow\n".len(),
+        );
         syscalls::exit(1);
     }
 
-    syscalls::write(1, b"userdel: user deleted\n".as_ptr(), 21);
+    syscalls::write(
+        1,
+        b"userdel: user deleted\n".as_ptr(),
+        b"userdel: user deleted\n".len(),
+    );
     syscalls::exit(0);
 }
 

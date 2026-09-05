@@ -69,7 +69,11 @@ pub unsafe extern "C" fn _start() -> ! {
     let blk_path = b"/dev/blk0\0";
     let fd = syscalls::open(blk_path.as_ptr(), 0, 0);
     if fd < 0 {
-        syscalls::write(1, b"lsblk: open /dev/blk0 failed\n".as_ptr(), 30);
+        syscalls::write(
+            1,
+            b"lsblk: open /dev/blk0 failed\n".as_ptr(),
+            b"lsblk: open /dev/blk0 failed\n".len(),
+        );
         syscalls::exit(1);
     }
 
@@ -77,18 +81,34 @@ pub unsafe extern "C" fn _start() -> ! {
     let mut mbr = [0u8; 512];
     let n = syscalls::read(fd as u64, mbr.as_mut_ptr(), 512);
     if n != 512 {
-        syscalls::write(1, b"lsblk: read failed\n".as_ptr(), 20);
+        syscalls::write(
+            1,
+            b"lsblk: read failed\n".as_ptr(),
+            b"lsblk: read failed\n".len(),
+        );
         syscalls::exit(1);
     }
 
     // Check MBR signature
     if mbr[510] != 0x55 || mbr[511] != 0xAA {
-        syscalls::write(1, b"lsblk: no MBR signature\n".as_ptr(), 25);
+        syscalls::write(
+            1,
+            b"lsblk: no MBR signature\n".as_ptr(),
+            b"lsblk: no MBR signature\n".len(),
+        );
         syscalls::exit(1);
     }
 
-    syscalls::write(1, b"Device: /dev/blk0\n".as_ptr(), 19);
-    syscalls::write(1, b"MBR signature: OK\n".as_ptr(), 20);
+    syscalls::write(
+        1,
+        b"Device: /dev/blk0\n".as_ptr(),
+        b"Device: /dev/blk0\n".len(),
+    );
+    syscalls::write(
+        1,
+        b"MBR signature: OK\n".as_ptr(),
+        b"MBR signature: OK\n".len(),
+    );
 
     // Parse partition table (offset 446, 4 entries)
     let parts = &mbr[446..510];
@@ -101,7 +121,7 @@ pub unsafe extern "C" fn _start() -> ! {
             continue;
         }
         if !found {
-            syscalls::write(1, b"\nPartitions:\n".as_ptr(), 13);
+            syscalls::write(1, b"\nPartitions:\n".as_ptr(), b"\nPartitions:\n".len());
             found = true;
         }
 
@@ -168,7 +188,11 @@ pub unsafe extern "C" fn _start() -> ! {
     }
 
     if !found {
-        syscalls::write(1, b"  (no partitions found)\n".as_ptr(), 24);
+        syscalls::write(
+            1,
+            b"  (no partitions found)\n".as_ptr(),
+            b"  (no partitions found)\n".len(),
+        );
     }
 
     syscalls::close(fd as u64);

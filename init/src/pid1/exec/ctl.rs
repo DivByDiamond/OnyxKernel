@@ -71,7 +71,7 @@ pub(crate) unsafe fn control_main(argc: usize, argv: *const u64) -> ! {
     if n > 0 {
         syscalls::write(1, resp_buf.as_ptr(), n as usize);
         if n as usize <= resp_buf.len() && resp_buf[n as usize - 1] != b'\n' {
-            syscalls::write(1, b"\n".as_ptr(), 1);
+            syscalls::write(1, b"\n".as_ptr(), b"\n".len());
         }
     } else {
         let m = b"init: no response from initd\n";

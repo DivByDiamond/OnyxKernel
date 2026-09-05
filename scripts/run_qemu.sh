@@ -28,7 +28,7 @@ echo "==> Converting userland ELFs → .onx (v2 default, --compress)"
 "$ROOT/target/release/elf2onx" --ring=1 --compress "$ROOT/target/riscv64gc-unknown-none-elf/release/onyx-hello" "$BUILD/hello.onx"
 "$ROOT/target/release/elf2onx" --ring=1 --compress "$ROOT/target/riscv64gc-unknown-none-elf/release/onyx-login" "$BUILD/login.onx"
 cp "$SHELL_DIR/build/osh.onx" "$BUILD/osh.onx"
-"$ROOT/target/release/elf2onx" --compress "$ROOT/target/riscv64gc-unknown-none-elf/release/onyx-passwd" "$BUILD/passwd.onx"
+"$ROOT/target/release/elf2onx" --ring=1 --compress "$ROOT/target/riscv64gc-unknown-none-elf/release/onyx-passwd" "$BUILD/passwd.onx"
 "$ROOT/target/release/elf2onx" --ring=1 --compress "$ROOT/target/riscv64gc-unknown-none-elf/release/onyx-useradd" "$BUILD/useradd.onx"
 "$ROOT/target/release/elf2onx" --ring=1 --compress "$ROOT/target/riscv64gc-unknown-none-elf/release/onyx-userdel" "$BUILD/userdel.onx"
 "$ROOT/target/release/elf2onx" --compress "$ROOT/target/riscv64gc-unknown-none-elf/release/onyx-argv-test" "$BUILD/argv_test.onx"
@@ -54,15 +54,19 @@ fi
 echo "==> Generating font"
 "$ROOT/target/release/psfgen" "$BUILD/default.psf"
 
-# Build obrowse.onx from OnyxApps
+# Build every OnyxApps application and stage its .onx into $BUILD so the
+# manifest loop below can pick all of them up dynamically (not just
+# obrowse — previously hardcoded here, silently leaving otop/vim/osnake/
+# ohttp/oed/dnstest out of /bin even though they built fine).
 APPS_DIR="${ONYXAPPS_DIR:-$ROOT/../OnyxApps}"
 if [ -d "$APPS_DIR" ]; then
-    echo "==> Building OnyxApps (obrowse)"
+    echo "==> Building OnyxApps (all apps)"
     (cd "$APPS_DIR" && PATH="$ROOT/../OnyxCompiller:$PATH" make) 2>&1 | tail -3
-    if [ -f "$APPS_DIR/build/obrowse.onx" ]; then
-        cp "$APPS_DIR/build/obrowse.onx" "$BUILD/obrowse.onx"
-        echo "    obrowse.onx copied to build/"
-    fi
+    for onx in "$APPS_DIR"/build/*.onx; do
+        [ -f "$onx" ] || continue
+        cp "$onx" "$BUILD/$(basename "$onx")"
+        echo "    $(basename "$onx") copied to build/"
+    done
 fi
 
 # Create enable-flag for the lsblk boot-time service.
@@ -82,15 +86,21 @@ MANIFEST="$BUILD/manifest.txt"
     echo "file $BUILD/init.onx /bin/init --ring=1"
     echo "file $BUILD/login.onx /bin/login --ring=1"
     echo "file $BUILD/osh.onx /bin/osh"
-    echo "file $BUILD/passwd.onx /bin/passwd"
+    echo "file $BUILD/passwd.onx /bin/passwd --ring=1"
     echo "file $BUILD/useradd.onx /bin/useradd --ring=1"
     echo "file $BUILD/userdel.onx /bin/userdel --ring=1"
     echo "file $BUILD/default.psf /font/default.psf"
     if [ -f "$BUILD/onyxcc.onx" ]; then
         echo "file $BUILD/onyxcc.onx /bin/onyxcc --ring=1"
     fi
-    if [ -f "$BUILD/obrowse.onx" ]; then
-        echo "file $BUILD/obrowse.onx /bin/obrowse --ring=1"
+    # All OnyxApps applications staged into $BUILD above, one manifest
+    # line each — replaces the old hardcoded obrowse-only entry.
+    if [ -d "$APPS_DIR" ]; then
+        for onx in "$APPS_DIR"/build/*.onx; do
+            [ -f "$onx" ] || continue
+            name="$(basename "$onx" .onx)"
+            echo "file $BUILD/$name.onx /bin/$name --ring=1"
+        done
     fi
     echo "file $BUILD/argv_test.onx /bin/argv_test"
     echo "file $BUILD/fb_draw.onx /bin/fb_draw --ring=1"

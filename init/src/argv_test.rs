@@ -44,7 +44,7 @@ pub unsafe extern "C" fn _start(a0: usize, a1: usize) -> ! {
     }
     write_dec(a1);
     unsafe {
-        syscalls::write(1, b"\n".as_ptr(), 1);
+        syscalls::write(1, b"\n".as_ptr(), b"\n".len());
     }
     syscalls::exit(0);
 }

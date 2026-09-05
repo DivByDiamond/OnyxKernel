@@ -153,6 +153,20 @@ pub unsafe fn read_hook(tf: &mut TrapFrame, fd: u64, buf: u64, len: u64) -> Opti
             Err(e) => return Some(e.as_i64()),
         };
         let f = vfs::fd_get(idx);
+        // Bug fix (2026-09-05): classify() only looked at the raw inode
+        // number, which is meaningless without knowing which filesystem it
+        // came from — PTY master/slave inodes (32.. and 40..) are devfs-local
+        // numbers, but onyxfs assigns its own inode numbers from the same
+        // small integer space. Once an image had enough files (e.g. after
+        // adding the OnyxApps binaries to /bin) that a freshly created
+        // onyxfs file — /etc/passwd on first boot — landed on inode 32+, its
+        // reads got silently hijacked into the PTY stream path and failed
+        // with EPIPE, even though it had nothing to do with any pty. Require
+        // the fd to actually be a devfs fd before treating its inode as a
+        // PTY node.
+        if f.fs != vfs::Fs::Devfs {
+            return None;
+        }
         let (pty_idx, master) = classify(f.ino)?;
         let nonblock = f.flags & O_NONBLOCK != 0;
         if len == 0 {
@@ -189,6 +203,11 @@ pub unsafe fn write_hook(tf: &mut TrapFrame, fd: u64, buf: u64, len: u64) -> Opt
             Err(e) => return Some(e.as_i64()),
         };
         let f = vfs::fd_get(idx);
+        // See the matching comment in read_hook: only devfs fds can be PTY
+        // nodes — the inode number alone is not enough to tell.
+        if f.fs != vfs::Fs::Devfs {
+            return None;
+        }
         let (pty_idx, master) = classify(f.ino)?;
         let nonblock = f.flags & O_NONBLOCK != 0;
         if len == 0 {

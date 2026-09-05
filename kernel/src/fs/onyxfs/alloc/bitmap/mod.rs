@@ -12,6 +12,23 @@ pub unsafe fn alloc_data_block() -> KResult<u32> {
     // SAFETY: single-threaded onyxfs exclusion for G_BUF/G_SB (see # Safety);
     // byte/bit indices are bounded by the 0..ONYFS_BLOCK_SIZE scan loops.
     unsafe {
+        // Bug fix (2026-09-05): same class of bug as alloc_inode() (see its
+        // header comment) — this scanned the entire 4096-byte bitmap block
+        // (32768 candidate data blocks) with no upper bound, so once enough
+        // blocks were in use it could hand back a block number past the
+        // actual data region (G_SB.total_blocks - data_blocks_start). The
+        // caller (e.g. login writing /etc/passwd for the first time) then
+        // silently wrote into whatever lay at that bogus block address —
+        // no error surfaced, but the write never landed where a later read
+        // would look, so the file came back empty. Reproduced by adding
+        // enough extra files at image-build time (OnyxApps) to push past
+        // the point where the first free bit the unbounded scan finds is
+        // still a genuinely valid block. Cap the scan at the real data
+        // block count, exactly like alloc_inode caps at inode_count.
+        let data_block_count = (G_SB).total_blocks.saturating_sub((G_SB).data_blocks_start);
+        if data_block_count == 0 {
+            return Err(Errno::NoSpace);
+        }
         let bm_blk = (G_SB).data_bitmap_start;
         let pb = &raw mut G_BUF;
         read_block(bm_blk, &mut *pb)?;
@@ -20,9 +37,12 @@ pub unsafe fn alloc_data_block() -> KResult<u32> {
                 continue;
             }
             for bit in 0..8u32 {
+                let bit_index = (byte_idx as u32) * 8 + bit;
+                if bit_index >= data_block_count {
+                    return Err(Errno::NoSpace);
+                }
                 if (*pb)[byte_idx] & (1 << bit) == 0 {
                     (*pb)[byte_idx] |= 1 << bit;
-                    let bit_index = (byte_idx as u32) * 8 + bit;
                     journal_log(bm_blk, &*pb)?;
                     write_block(bm_blk, &*pb)?;
                     return Ok((G_SB).data_blocks_start + bit_index);
