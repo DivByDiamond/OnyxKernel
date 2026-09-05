@@ -27,7 +27,11 @@ pub unsafe extern "C" fn _start() -> ! {
     let fb_path = b"/dev/fb0\0";
     let fd = syscalls::open(fb_path.as_ptr(), 0, 0);
     if fd < 0 {
-        syscalls::write(1, b"fb_draw: open /dev/fb0 failed\n".as_ptr(), 32);
+        syscalls::write(
+            1,
+            b"fb_draw: open /dev/fb0 failed\n".as_ptr(),
+            b"fb_draw: open /dev/fb0 failed\n".len(),
+        );
         syscalls::exit(1);
     }
 
@@ -41,7 +45,11 @@ pub unsafe extern "C" fn _start() -> ! {
     };
     let ret = syscalls::ioctl(fd as u64, FB_IOCTL_GET_INFO, &raw mut info as u64);
     if ret < 0 {
-        syscalls::write(1, b"fb_draw: ioctl failed\n".as_ptr(), 23);
+        syscalls::write(
+            1,
+            b"fb_draw: ioctl failed\n".as_ptr(),
+            b"fb_draw: ioctl failed\n".len(),
+        );
         syscalls::exit(1);
     }
 
@@ -51,7 +59,11 @@ pub unsafe extern "C" fn _start() -> ! {
     let flags = 1;
     let fb = syscalls::mmap(0, map_size, prot, flags, fd as u64, 0);
     if fb < 0 {
-        syscalls::write(1, b"fb_draw: mmap failed\n".as_ptr(), 22);
+        syscalls::write(
+            1,
+            b"fb_draw: mmap failed\n".as_ptr(),
+            b"fb_draw: mmap failed\n".len(),
+        );
         syscalls::exit(1);
     }
 
@@ -76,7 +88,11 @@ pub unsafe extern "C" fn _start() -> ! {
         }
     }
 
-    syscalls::write(1, b"fb_draw: gradient drawn (1280x720)\n".as_ptr(), 36);
+    syscalls::write(
+        1,
+        b"fb_draw: gradient drawn (1280x720)\n".as_ptr(),
+        b"fb_draw: gradient drawn (1280x720)\n".len(),
+    );
     syscalls::exit(0);
 }
 

@@ -52,13 +52,13 @@ pub unsafe extern "C" fn _start() -> ! {
         if show {
             let gl = entry.name.iter().position(|&b| b == 0).unwrap_or(32);
             if !first {
-                syscalls::write(1, b" ".as_ptr(), 1);
+                syscalls::write(1, b" ".as_ptr(), b" ".len());
             }
             syscalls::write(1, entry.name.as_ptr(), gl);
             first = false;
         }
     }
-    syscalls::write(1, b"\n".as_ptr(), 1);
+    syscalls::write(1, b"\n".as_ptr(), b"\n".len());
     syscalls::exit(0);
 }
 

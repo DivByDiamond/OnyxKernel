@@ -56,7 +56,11 @@ pub unsafe extern "C" fn _start() -> ! {
     let fb_path = b"/dev/fb0\0";
     let fd = syscalls::open(fb_path.as_ptr(), 0, 0);
     if fd < 0 {
-        syscalls::write(1, b"tui_demo: open /dev/fb0 failed\n".as_ptr(), 31);
+        syscalls::write(
+            1,
+            b"tui_demo: open /dev/fb0 failed\n".as_ptr(),
+            b"tui_demo: open /dev/fb0 failed\n".len(),
+        );
         syscalls::exit(1);
     }
     let mut info = FbInfo {
@@ -67,12 +71,20 @@ pub unsafe extern "C" fn _start() -> ! {
         size: 0,
     };
     if syscalls::ioctl(fd as u64, FB_IOCTL_GET_INFO, &raw mut info as u64) < 0 {
-        syscalls::write(1, b"tui_demo: ioctl failed\n".as_ptr(), 23);
+        syscalls::write(
+            1,
+            b"tui_demo: ioctl failed\n".as_ptr(),
+            b"tui_demo: ioctl failed\n".len(),
+        );
         syscalls::exit(1);
     }
     let fb_ptr = syscalls::mmap(0, info.size as u64, 3, 1, fd as u64, 0);
     if fb_ptr <= 0 {
-        syscalls::write(1, b"tui_demo: mmap failed\n".as_ptr(), 22);
+        syscalls::write(
+            1,
+            b"tui_demo: mmap failed\n".as_ptr(),
+            b"tui_demo: mmap failed\n".len(),
+        );
         syscalls::exit(1);
     }
     syscalls::close(fd as u64);

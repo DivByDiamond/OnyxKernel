@@ -26,7 +26,7 @@ pub(super) unsafe fn scan_and_start_services() {
             let m = b"[init:WARN] service table full - skipping ";
             syscalls::write(1, m.as_ptr(), m.len());
             syscalls::write(1, name_buf.as_ptr(), name_len);
-            syscalls::write(1, b"\n".as_ptr(), 1);
+            syscalls::write(1, b"\n".as_ptr(), b"\n".len());
             break;
         }
 
@@ -77,14 +77,14 @@ pub(super) unsafe fn try_spawn_service(idx: usize) -> bool {
         let m = b" pid=";
         syscalls::write(1, m.as_ptr(), m.len());
         write_dec(pid);
-        syscalls::write(1, b"\n".as_ptr(), 1);
+        syscalls::write(1, b"\n".as_ptr(), b"\n".len());
         true
     } else {
         write_state_file(name, b"failed");
         let m = b"[init:ERR] spawn failed for ";
         syscalls::write(1, m.as_ptr(), m.len());
         syscalls::write(1, name.as_ptr(), name.len());
-        syscalls::write(1, b"\n".as_ptr(), 1);
+        syscalls::write(1, b"\n".as_ptr(), b"\n".len());
         false
     }
 }

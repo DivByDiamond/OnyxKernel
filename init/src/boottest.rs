@@ -5,9 +5,9 @@ const BLK_DEV_MAX: u64 = 8;
 const EMBED_LBA: i64 = 10240;
 
 unsafe fn print_blk(idx: u64, msg: &[u8]) {
-    syscalls::write(1, b"[init] /dev/blk".as_ptr(), 15);
+    syscalls::write(1, b"[init] /dev/blk".as_ptr(), b"[init] /dev/blk".len());
     write_dec(idx as i64);
-    syscalls::write(1, b": ".as_ptr(), 2);
+    syscalls::write(1, b": ".as_ptr(), b": ".len());
     syscalls::write(1, msg.as_ptr(), msg.len());
 }
 
@@ -66,17 +66,17 @@ pub(crate) unsafe fn devfs_boot_test() {
         } else {
             let m = b"[init]   /dev/fb0: ";
             syscalls::write(1, m.as_ptr(), m.len());
-            syscalls::write(1, b"w=".as_ptr(), 2);
+            syscalls::write(1, b"w=".as_ptr(), b"w=".len());
             write_dec(info[0] as i64);
-            syscalls::write(1, b" h=".as_ptr(), 3);
+            syscalls::write(1, b" h=".as_ptr(), b" h=".len());
             write_dec(info[1] as i64);
-            syscalls::write(1, b" bpp=".as_ptr(), 5);
+            syscalls::write(1, b" bpp=".as_ptr(), b" bpp=".len());
             write_dec(info[2] as i64);
-            syscalls::write(1, b" pitch=".as_ptr(), 7);
+            syscalls::write(1, b" pitch=".as_ptr(), b" pitch=".len());
             write_dec(info[3] as i64);
-            syscalls::write(1, b" size=".as_ptr(), 6);
+            syscalls::write(1, b" size=".as_ptr(), b" size=".len());
             write_dec(info[4] as i64);
-            syscalls::write(1, b"\n".as_ptr(), 1);
+            syscalls::write(1, b"\n".as_ptr(), b"\n".len());
         }
         syscalls::close(fb_fd as u64);
     }

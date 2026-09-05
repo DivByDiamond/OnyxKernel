@@ -70,7 +70,7 @@ fn exec_shell(username: &[u8], shell_path: &[u8]) -> i64 {
 /// Process entry point: called directly by the kernel from the ELF entry
 /// address; the stack is freshly initialized per the RISC-V calling convention.
 pub unsafe extern "C" fn _start() -> ! {
-    syscalls::write(1, b"\nOnyxOS Login\n".as_ptr(), 14);
+    syscalls::write(1, b"\nOnyxOS Login\n".as_ptr(), b"\nOnyxOS Login\n".len());
 
     let mut users = [auth::PasswdEntry {
         name: [0; 32],
@@ -95,21 +95,21 @@ pub unsafe extern "C" fn _start() -> ! {
 
     let mut fails: u32 = 0;
     loop {
-        syscalls::write(1, b"\nUsers:\n".as_ptr(), 8);
+        syscalls::write(1, b"\nUsers:\n".as_ptr(), b"\nUsers:\n".len());
         for u in users[..nusers].iter() {
             let mut nl = 0;
             while nl < u.name.len() && u.name[nl] != 0 {
                 nl += 1;
             }
             if nl > 0 {
-                syscalls::write(1, b"  ".as_ptr(), 2);
+                syscalls::write(1, b"  ".as_ptr(), b"  ".len());
                 syscalls::write(1, u.name.as_ptr(), nl);
-                syscalls::write(1, b"\n".as_ptr(), 1);
+                syscalls::write(1, b"\n".as_ptr(), b"\n".len());
             }
         }
-        syscalls::write(1, b"\n".as_ptr(), 1);
+        syscalls::write(1, b"\n".as_ptr(), b"\n".len());
 
-        syscalls::write(1, b"login: ".as_ptr(), 7);
+        syscalls::write(1, b"login: ".as_ptr(), b"login: ".len());
         let mut user_buf = [0u8; 64];
         let n = syscalls::read(0, user_buf.as_mut_ptr(), user_buf.len() as u64);
         if n <= 0 {
@@ -140,14 +140,18 @@ pub unsafe extern "C" fn _start() -> ! {
         let user_idx = match auth::find_user(&users, nusers, username) {
             Some(i) => i,
             None => {
-                syscalls::write(1, b"Login incorrect\n\n".as_ptr(), 17);
+                syscalls::write(
+                    1,
+                    b"Login incorrect\n\n".as_ptr(),
+                    b"Login incorrect\n\n".len(),
+                );
                 backoff::backoff_sleep(fails);
                 fails = fails.saturating_add(1);
                 continue;
             }
         };
 
-        syscalls::write(1, b"password: ".as_ptr(), 10);
+        syscalls::write(1, b"password: ".as_ptr(), b"password: ".len());
         let mut pass_buf = [0u8; 64];
         // read_secret_line loops until Enter (a single raw read() returns
         // after ANY keypress — the 2026-09-04 lockout bug) and restores
@@ -156,7 +160,11 @@ pub unsafe extern "C" fn _start() -> ! {
 
         let outcome = auth::verify_shadow_outcome(username, password);
         if outcome == auth::VerifyOutcome::Fail {
-            syscalls::write(1, b"Login incorrect\n\n".as_ptr(), 17);
+            syscalls::write(
+                1,
+                b"Login incorrect\n\n".as_ptr(),
+                b"Login incorrect\n\n".len(),
+            );
             backoff::backoff_sleep(fails);
             fails = fails.saturating_add(1);
             continue;
@@ -178,9 +186,17 @@ pub unsafe extern "C" fn _start() -> ! {
 
         let is_root = users[user_idx].uid == 0;
         if is_root {
-            syscalls::write(1, b"Login OK (root, ring 1)\n".as_ptr(), 24);
+            syscalls::write(
+                1,
+                b"Login OK (root, ring 1)\n".as_ptr(),
+                b"Login OK (root, ring 1)\n".len(),
+            );
         } else {
-            syscalls::write(1, b"Login OK (user, ring 2)\n".as_ptr(), 24);
+            syscalls::write(
+                1,
+                b"Login OK (user, ring 2)\n".as_ptr(),
+                b"Login OK (user, ring 2)\n".len(),
+            );
             syscalls::dropping(2);
         }
 
@@ -207,6 +223,10 @@ pub unsafe extern "C" fn _start() -> ! {
             &users[user_idx].name[..name_len],
             &shell_path[..shell_len + 1],
         );
-        syscalls::write(1, b"login: exec failed\n".as_ptr(), 19);
+        syscalls::write(
+            1,
+            b"login: exec failed\n".as_ptr(),
+            b"login: exec failed\n".len(),
+        );
     }
 }

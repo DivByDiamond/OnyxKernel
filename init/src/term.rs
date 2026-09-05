@@ -92,7 +92,7 @@ pub unsafe fn read_secret_line(buf: &mut [u8]) -> &[u8] {
         }
     }
     let _ = syscalls::ioctl(0, TIOCRRAW, 0);
-    syscalls::write(1, b"\n".as_ptr(), 1);
+    syscalls::write(1, b"\n".as_ptr(), b"\n".len());
 
     &buf[..n]
 }
@@ -109,7 +109,7 @@ unsafe fn handle_byte(buf: &mut [u8], n: &mut usize, b: u8) {
     } else if (0x20..=0x7E).contains(&b) && *n < buf.len() {
         buf[*n] = b;
         *n += 1;
-        syscalls::write(1, b"*".as_ptr(), 1);
+        syscalls::write(1, b"*".as_ptr(), b"*".len());
     }
     // other control bytes are ignored, never stored
 }
