@@ -1,6 +1,6 @@
 use super::super::super::inode;
 use super::super::super::journal::journal_log;
-use super::super::super::{G_BUF, read_block, write_block};
+use super::super::super::{G_BUF, G_SB, read_block, write_block};
 use super::free_data_block;
 use onyx_core::errno::{Errno, KResult};
 use onyx_core::formats::{ONYFS_BLOCK_SIZE, ONYFS_DIRECT_BLKS, OnyfsInode};
@@ -17,6 +17,19 @@ pub unsafe fn alloc_inode() -> KResult<u32> {
     // against ONYFS_BLOCK_SIZE by construction of the loops.
     unsafe {
         const INODE_BITMAP_BLK: u32 = 1;
+        // Bug fix (2026-09-05): this scanned the entire 4096-byte bitmap
+        // block (32768 candidate inode numbers) with no upper bound, so it
+        // could hand back an ino past the actual inode table sized by
+        // G_SB.inode_count at mkimage time. read_inode() then correctly
+        // rejected that ino as out-of-range (EINVAL) the moment anything
+        // tried to write to the freshly "allocated" inode — reproduced by
+        // `passwd` on an image with only a couple dozen inodes: the shadow
+        // rewrite's temp-file create() silently handed back a bogus ino
+        // that write_fd() then failed on. Cap the scan at inode_count.
+        let inode_count = (G_SB).inode_count;
+        if inode_count == 0 {
+            return Err(Errno::NoSpace);
+        }
         let pb = &raw mut G_BUF;
         read_block(INODE_BITMAP_BLK, &mut *pb)?;
         for byte_idx in 0..ONYFS_BLOCK_SIZE {
@@ -24,9 +37,12 @@ pub unsafe fn alloc_inode() -> KResult<u32> {
                 continue;
             }
             for bit in 0..8u32 {
+                let bit_index = (byte_idx as u32) * 8 + bit;
+                if bit_index >= inode_count {
+                    return Err(Errno::NoSpace);
+                }
                 if (*pb)[byte_idx] & (1 << bit) == 0 {
                     (*pb)[byte_idx] |= 1 << bit;
-                    let bit_index = (byte_idx as u32) * 8 + bit;
                     journal_log(INODE_BITMAP_BLK, &*pb)?;
                     write_block(INODE_BITMAP_BLK, &*pb)?;
                     return Ok(bit_index + 1);

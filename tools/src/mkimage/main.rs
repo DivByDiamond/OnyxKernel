@@ -119,7 +119,19 @@ fn main() {
         eprintln!("warning: no files or directories added to image");
     }
 
-    let total_inodes = next_ino;
+    // Bug fix (2026-09-05): inode_count used to be exactly `next_ino` (the
+    // number of files actually baked into the image), leaving zero spare
+    // inodes. The kernel's alloc_inode() has no other source of new inode
+    // numbers, so ANY runtime file creation — passwd/useradd rewriting
+    // /etc/shadow or /etc/passwd via a temp-file-then-rename, users making
+    // new files — failed the moment it needed a single fresh inode
+    // (surfaced as passwd's "Failed to update password: EINVAL", since
+    // read_inode() correctly rejects an out-of-range ino). Reserve headroom
+    // beyond what's actually used at build time; only the bitmap bits for
+    // real files are marked used; the rest stay free for runtime creates.
+    let used_inodes = next_ino;
+    const SPARE_INODES: u32 = 256;
+    let total_inodes = used_inodes + SPARE_INODES;
     let inode_table_blocks = (total_inodes as usize).div_ceil(inodes_per_block) as u32;
     let mut data_blocks_needed: u32 = 0;
     for _d in &dirs {
@@ -175,7 +187,7 @@ fn main() {
             },
         );
     }
-    inode::write_bitmaps(&mut img, total_inodes, data_blocks_needed);
+    inode::write_bitmaps(&mut img, used_inodes, data_blocks_needed);
     inode::write_table(
         &mut img,
         &dirs,

@@ -125,7 +125,15 @@ pub unsafe extern "C" fn _start() -> ! {
         let username = &user_buf[..n];
 
         if username.is_empty() {
-            syscalls::write(1, b"Login incorrect\n\n".as_ptr(), 17);
+            // A bare Enter here is not a failed login attempt: it's most
+            // often a stray leftover byte queued before this process's
+            // first read() ever runs (e.g. OnyxBoot's own boot-menu Enter
+            // keypress, still sitting in the UART FIFO when /bin/login
+            // starts) rather than the user actually submitting an empty
+            // name. Treating it as "Login incorrect" was why the very
+            // first login attempt after boot always failed while a second,
+            // identical attempt succeeded (2026-09-05 bug report). Just
+            // re-prompt silently instead of counting it as a failure.
             continue;
         }
 
