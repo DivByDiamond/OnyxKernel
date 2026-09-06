@@ -15,44 +15,48 @@ static G_SAVE_PA: AtomicUsize = AtomicUsize::new(0);
 
 impl AnsiTerm {
     /// Scroll the region up by one line (content moves up).
+    ///
+    /// Operates on the console PAINT surface (back buffer when double
+    /// buffering is active), so a scroll never shows half-copied rows on
+    /// the visible screen; the presenter publishes the finished frame.
     pub(super) fn scroll_up(&mut self) {
-        let (_, pitch, bpp, _, base) = fb_info();
-        if bpp != 32 || base == 0 {
+        let (_, pitch, bpp, _) = paint_info();
+        if bpp != 32 || paint_base_addr() == 0 {
             return;
         }
         let row_bytes = pitch * FONT_H;
         // Move rows top+1..=bot up by one.
         for row in self.top..self.bot {
-            let dst = base + row * row_bytes;
-            let src = base + (row + 1) * row_bytes;
-            // SAFETY: base/pitch come from fb::info() (validated fb geometry), rows stay inside top..=bot < fb height, and dst/src are exactly one row apart so the copy is non-overlapping within the mapped framebuffer.
+            let dst = paint_base_addr() + row * row_bytes;
+            let src = paint_base_addr() + (row + 1) * row_bytes;
+            // SAFETY: base/pitch come from the fb::info()-validated geometry (front or same-geometry back surface), rows stay inside top..=bot < fb height, and dst/src are exactly one row apart so the copy is non-overlapping within the mapped surface.
             unsafe {
                 core::ptr::copy_nonoverlapping(src as *const u8, dst as *mut u8, row_bytes);
             }
         }
         // Clear the bottom row of the region.
-        let dst = base + self.bot * row_bytes;
+        let dst = paint_base_addr() + self.bot * row_bytes;
         clear_row_bytes(dst, row_bytes, self.bg);
     }
 
     /// Scroll the region down by one line (content moves down).
     pub(super) fn scroll_down(&mut self) {
-        let (_, pitch, bpp, _, base) = fb_info();
-        if bpp != 32 || base == 0 {
+        let (_, pitch, bpp, _) = paint_info();
+        if bpp != 32 || paint_base_addr() == 0 {
             return;
         }
         let row_bytes = pitch * FONT_H;
         let mut row = self.bot;
         while row > self.top {
-            let dst = base + row * row_bytes;
-            let src = base + (row - 1) * row_bytes;
-            // SAFETY: same fb::info()-validated geometry; rows descend with src one row above dst, so the copy is non-overlapping within the mapped framebuffer.
+            let dst = paint_base_addr() + row * row_bytes;
+            let src = paint_base_addr() + (row - 1) * row_bytes;
+            // SAFETY: same paint-surface geometry contract as scroll_up; rows descend with src one row above dst, so the copy is non-overlapping within the mapped surface.
             unsafe {
                 core::ptr::copy_nonoverlapping(src as *const u8, dst as *mut u8, row_bytes);
             }
             row -= 1;
         }
-        let dst = base + self.top * row_bytes;
+        let dst = paint_base_addr() + self.top * row_bytes;
         clear_row_bytes(dst, row_bytes, self.bg);
     }
 
@@ -101,9 +105,13 @@ impl AnsiTerm {
     }
 
     fn clear_row(&mut self, row: usize) {
-        let (_, pitch, bpp, _, base) = fb_info();
-        if bpp == 32 && base != 0 {
-            clear_row_bytes(base + row * pitch * FONT_H, pitch * FONT_H, self.bg);
+        let (_, pitch, bpp, _) = paint_info();
+        if bpp == 32 && paint_base_addr() != 0 {
+            clear_row_bytes(
+                paint_base_addr() + row * pitch * FONT_H,
+                pitch * FONT_H,
+                self.bg,
+            );
         } else {
             for x in 0..self.cols * FONT_W {
                 for dy in 0..FONT_H {
@@ -133,6 +141,13 @@ impl AnsiTerm {
 
     /// Draw the cursor block at the current position (called by the kernel
     /// after console writes when the cursor is visible).
+    ///
+    /// Legacy direct-mode path only (no back buffer): it paints the paint
+    /// surface, which IS the visible framebuffer in that mode. In
+    /// double-buffered mode the cursor is drawn by the presenter via
+    /// [`Self::draw_cursor_front`] so a redraw never shows a cursor at an
+    /// intermediate position (one of the two flicker artifacts in the
+    /// original bug report).
     pub fn draw_cursor(&mut self) {
         if !self.cursor_visible {
             return;
@@ -144,6 +159,21 @@ impl AnsiTerm {
             (self.fg, self.bg)
         };
         fb::draw_char(self.cur_col * FONT_W, self.cur_row * FONT_H, b' ', bg, fg);
+    }
+
+    /// Present-time cursor: paint the cursor block over the frame that was
+    /// just copied to the VISIBLE front buffer. Called by the presenter with
+    /// the console write lock held; the next present overwrites the front
+    /// again, so the block never bakes into the back-buffer frame content.
+    pub(super) fn draw_cursor_front(&mut self) {
+        if !self.cursor_visible {
+            return;
+        }
+        // Effective (reverse-adjusted) foreground color: the historical
+        // cursor drew a space glyph with swapped colors, which resolves to
+        // exactly this solid block.
+        let block = if self.reverse { self.bg } else { self.fg };
+        fb::draw_cursor_cell_front(self.cur_col, self.cur_row, block);
     }
 
     // ── Alt-screen swap (CSI ?1049 h/l, todo v0.6 #3) ────────────────────
@@ -167,8 +197,9 @@ impl AnsiTerm {
             return;
         }
         // SAFETY: save surface is a pmm-owned contiguous run of `bytes`
-        // length; the front buffer is fb::info()-validated of the same size;
-        // non-overlapping by construction.
+        // length; the paint surface is fb::info()-validated of the same size
+        // (front, or the same-geometry back buffer); non-overlapping by
+        // construction.
         unsafe {
             core::ptr::copy_nonoverlapping(base as *const u8, pa as *mut u8, bytes);
         }
@@ -200,13 +231,28 @@ fn fb_info() -> (usize, usize, usize, usize, usize) {
     fb::info()
 }
 
-/// (front buffer VA, size in bytes) — None when fb is not 32bpp or absent.
+/// (paint surface VA, pitch, bpp, height) — the console paint target:
+/// back buffer when double buffering is active, else the front buffer.
+/// Row-byte arithmetic uses the shared fb pitch, so both surfaces are
+/// interchangeable here.
+fn paint_info() -> (usize, usize, usize, usize) {
+    let (_, pitch, bpp, height, _) = fb_info();
+    (paint_base_addr(), pitch, bpp, height)
+}
+
+/// VA of the console paint surface (0 never returned while fb is enabled:
+/// falls back to the front buffer base).
+fn paint_base_addr() -> usize {
+    fb::paint_base() as usize
+}
+
+/// (paint surface VA, size in bytes) — None when fb is not 32bpp or absent.
 fn surface() -> Option<(usize, usize)> {
-    let (w, pitch, bpp, _, base) = fb_info();
-    if bpp != 32 || base == 0 || w == 0 {
+    let (base, pitch, bpp, height) = paint_info();
+    if bpp != 32 || base == 0 || pitch == 0 {
         return None;
     }
-    Some((base, pitch * (fb::height() / FONT_H) * FONT_H))
+    Some((base, pitch * (height / FONT_H) * FONT_H))
 }
 
 /// Allocate (once) and publish the saved-normal surface. Returns its VA or

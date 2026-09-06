@@ -33,6 +33,23 @@ impl UartLock {
         UART_LOCK_OWNER.store(hart, Ordering::Release);
         UART_LOCK_DEPTH.store(1, Ordering::Relaxed);
     }
+    /// Non-blocking acquire for interrupt contexts (console frame
+    /// presenter): returns false instead of spinning when another hart is
+    /// mid-write. Reentrant on the owning hart like [`lock`].
+    pub(crate) fn try_lock(&self) -> bool {
+        let hart = crate::proc::process::hart_id() as i32;
+        if UART_LOCK_OWNER.load(Ordering::Acquire) == hart {
+            UART_LOCK_DEPTH.fetch_add(1, Ordering::Relaxed);
+            return true;
+        }
+        if RAW_UART_LOCK.try_lock() {
+            UART_LOCK_OWNER.store(hart, Ordering::Release);
+            UART_LOCK_DEPTH.store(1, Ordering::Relaxed);
+            true
+        } else {
+            false
+        }
+    }
     pub(crate) fn unlock(&self) {
         if UART_LOCK_DEPTH.fetch_sub(1, Ordering::Relaxed) == 1 {
             UART_LOCK_OWNER.store(-1, Ordering::Release);

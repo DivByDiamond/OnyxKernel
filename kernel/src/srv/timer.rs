@@ -144,6 +144,11 @@ pub unsafe fn handle() {
         // soft timers once per tick so TUI event loops stay live while
         // user processes sleep in poll().
         crate::srv::event::pump();
+        // Console frame presenter (TUI anti-flicker): publish the pending
+        // back-buffer frame once console output has settled. No-op unless
+        // the frame is dirty and due; skips ticks while a writer holds the
+        // console lock, so a frame is never presented mid-write.
+        crate::drivers::fb_term::ansi::present_tick();
     }
 }
 pub fn uptime_us() -> u64 {
