@@ -1,19 +1,20 @@
 use crate::drivers::virtio::{
-    R_DEVICE_ID, R_GUEST_FEATURES, R_HOST_FEATURES, R_MAGIC_VALUE, R_STATUS, R_VERSION,
-    VIRTIO_S_ACK, VIRTIO_S_DRIVER, VIRTIO_S_DRIVER_OK, VIRTIO_S_FEATURES_OK, VqAvail, VqDesc,
-    VqUsed, reg_r, reg_w,
+    R_DEVICE_ID, R_GUEST_FEATURES, R_GUEST_FEATURES_SEL, R_HOST_FEATURES, R_HOST_FEATURES_SEL,
+    R_MAGIC_VALUE, R_STATUS, R_VERSION, VIRTIO_F_VERSION_1, VIRTIO_S_ACK, VIRTIO_S_DRIVER,
+    VIRTIO_S_DRIVER_OK, VIRTIO_S_FEATURES_OK, VqAvail, VqDesc, VqUsed, reg_r, reg_w,
 };
 use crate::mm::pmm;
 use core::ptr;
 use onyx_core::errno::{Errno, KResult};
+use onyx_core::fmt::Arg;
 
 pub const VIRTIO_ID_GPU: u32 = 16;
 pub const GPU_WIDTH: usize = 1280;
 pub const GPU_HEIGHT: usize = 720;
 
 const C_RESOURCE_CREATE_2D: u32 = 0x101;
-const C_SET_SCANOUT: u32 = 0x10B;
-const C_FLUSH_RESOURCE: u32 = 0x10C;
+const C_SET_SCANOUT: u32 = 0x103;
+const C_FLUSH_RESOURCE: u32 = 0x104;
 
 #[derive(Clone, Copy)]
 #[repr(C)]
@@ -40,6 +41,7 @@ struct SetScanout {
     rect_y: u32,
     rect_w: u32,
     rect_h: u32,
+    scanout_id: u32,
     resource_id: u32,
 }
 
@@ -104,7 +106,14 @@ pub unsafe fn init(base: usize, width: u32, height: u32) -> KResult<()> {
         if G_GPU.base != 0 {
             return Err(Errno::Busy);
         }
-        let modern = reg_r(base, R_VERSION) >= 2;
+        let ver = reg_r(base, R_VERSION);
+        let modern = ver >= 2;
+        crate::kinf!(
+            "virtio-gpu",
+            "probe ver=%d modern=%d",
+            onyx_core::fmt::Arg::from(ver),
+            onyx_core::fmt::Arg::from(modern as u32)
+        );
         G_GPU.base = base;
         G_GPU.modern = modern;
         G_GPU.width = width;
@@ -112,11 +121,22 @@ pub unsafe fn init(base: usize, width: u32, height: u32) -> KResult<()> {
         G_GPU.last_used = 0;
         reg_w(base, R_STATUS, 0);
         reg_w(base, R_STATUS, VIRTIO_S_ACK | VIRTIO_S_DRIVER);
-        reg_w(
-            base,
-            R_GUEST_FEATURES,
-            reg_r(base, R_HOST_FEATURES) & 0x1FFF_FFFF,
-        );
+        // 64-bit feature negotiation via sel registers (mirror virtio-blk's correct path),
+        // but only advertise VERSION_1 for modern transports — legacy devices
+        // reject it and the control queue never starts.
+        reg_w(base, R_HOST_FEATURES_SEL, 1);
+        let host_hi = reg_r(base, R_HOST_FEATURES);
+        reg_w(base, R_HOST_FEATURES_SEL, 0);
+        let host_lo = reg_r(base, R_HOST_FEATURES);
+        let mut guest_hi = host_hi;
+        if modern {
+            guest_hi |= VIRTIO_F_VERSION_1;
+        }
+        reg_w(base, R_GUEST_FEATURES_SEL, 0);
+        reg_w(base, R_GUEST_FEATURES, host_lo & 0x1FFF_FFFF);
+        reg_w(base, R_GUEST_FEATURES_SEL, 1);
+        reg_w(base, R_GUEST_FEATURES, guest_hi);
+        reg_w(base, R_GUEST_FEATURES_SEL, 0);
         if modern {
             reg_w(
                 base,
@@ -124,7 +144,7 @@ pub unsafe fn init(base: usize, width: u32, height: u32) -> KResult<()> {
                 VIRTIO_S_ACK | VIRTIO_S_DRIVER | VIRTIO_S_FEATURES_OK,
             );
             if reg_r(base, R_STATUS) & VIRTIO_S_FEATURES_OK == 0 {
-                return Err(Errno::Inval);
+                crate::kwrn!("virtio-gpu", "device did not set FEATURES_OK, continuing");
             }
         }
         xfer::setup_queue(
@@ -133,16 +153,29 @@ pub unsafe fn init(base: usize, width: u32, height: u32) -> KResult<()> {
             &raw mut G_GPU.used,
             base,
         )?;
-        reg_w(
-            base,
-            R_STATUS,
-            VIRTIO_S_ACK | VIRTIO_S_DRIVER | VIRTIO_S_DRIVER_OK,
+        if modern {
+            reg_w(
+                base,
+                R_STATUS,
+                VIRTIO_S_ACK | VIRTIO_S_DRIVER | VIRTIO_S_FEATURES_OK | VIRTIO_S_DRIVER_OK,
+            );
+        } else {
+            reg_w(
+                base,
+                R_STATUS,
+                VIRTIO_S_ACK | VIRTIO_S_DRIVER | VIRTIO_S_DRIVER_OK,
+            );
+        }
+        crate::kinf!(
+            "virtio-gpu",
+            "status after DRIVER_OK=%x",
+            Arg::from(reg_r(base, R_STATUS))
         );
         let fb_pages = (width as usize * height as usize * 4).div_ceil(4096);
         let fb_pa = pmm::alloc_n(fb_pages)? as *mut u8;
         G_GPU.fb = fb_pa;
         let rid = 1u32;
-        xfer::cmd_create2d(
+        if let Err(e) = xfer::cmd_create2d(
             G_GPU.desc,
             G_GPU.avail,
             G_GPU.used,
@@ -151,8 +184,16 @@ pub unsafe fn init(base: usize, width: u32, height: u32) -> KResult<()> {
             rid,
             width,
             height,
-        )?;
-        xfer::cmd_attach(
+        ) {
+            crate::kwrn!(
+                "virtio-gpu",
+                "create2d failed err=%d",
+                Arg::from(e.as_i64())
+            );
+            return Err(e);
+        }
+        crate::kinf!("virtio-gpu", "create2d ok");
+        if let Err(e) = xfer::cmd_attach(
             G_GPU.desc,
             G_GPU.avail,
             G_GPU.used,
@@ -161,8 +202,12 @@ pub unsafe fn init(base: usize, width: u32, height: u32) -> KResult<()> {
             rid,
             fb_pa as u32,
             width * height * 4,
-        )?;
-        xfer::cmd_scanout(
+        ) {
+            crate::kwrn!("virtio-gpu", "attach failed err=%d", Arg::from(e.as_i64()));
+            return Err(e);
+        }
+        crate::kinf!("virtio-gpu", "attach ok");
+        if let Err(e) = xfer::cmd_scanout(
             G_GPU.desc,
             G_GPU.avail,
             G_GPU.used,
@@ -171,16 +216,30 @@ pub unsafe fn init(base: usize, width: u32, height: u32) -> KResult<()> {
             rid,
             width,
             height,
-        )?;
-        xfer::send_cmd(
+        ) {
+            crate::kwrn!("virtio-gpu", "scanout failed err=%d", Arg::from(e.as_i64()));
+            return Err(e);
+        }
+        crate::kinf!("virtio-gpu", "scanout ok");
+        // Flush is a simple 24-byte header command — allocate a pmm page for DMA visibility.
+        let flush_buf = pmm::alloc_zero()? as usize;
+        {
+            let h = hdr(C_FLUSH_RESOURCE);
+            core::ptr::copy_nonoverlapping(&h as *const _ as *const u8, flush_buf as *mut u8, 24);
+        }
+        if let Err(e) = xfer::send_cmd(
             G_GPU.desc,
             G_GPU.avail,
             G_GPU.used,
             &raw mut G_GPU.last_used,
             base,
-            &hdr(C_FLUSH_RESOURCE) as *const _ as *mut u8,
+            flush_buf as *mut u8,
             24,
-        )?;
+        ) {
+            crate::kwrn!("virtio-gpu", "flush failed err=%d", Arg::from(e.as_i64()));
+            return Err(e);
+        }
+        crate::kinf!("virtio-gpu", "flush ok");
         Ok(())
     }
 }
