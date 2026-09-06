@@ -37,12 +37,16 @@ fn echo_char(b: u8) {
     // and this keystroke-echo path wrote to it completely unlocked,
     // another real cross-hart UART race found while chasing the SMP crash
     // (todo.md, "Отдельный SMP-краш под -smp 2").
+    //
+    // The fb echo (console_putc) takes the same lock: it paints the
+    // console back buffer, and painting under the lock keeps the presenter
+    // from copying a half-echoed frame (backspace = BS/SP/BS).
     crate::srv::klog::UART_LOCK.lock();
     uart::putc(b);
-    crate::srv::klog::UART_LOCK.unlock();
     if fb::enabled() {
         fb_term::ansi::console_putc(b);
     }
+    crate::srv::klog::UART_LOCK.unlock();
 }
 
 /// First byte of a read: honors O_NONBLOCK (None instead of blocking),
