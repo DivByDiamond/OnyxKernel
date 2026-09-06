@@ -29,8 +29,17 @@ pub fn info() -> (usize, usize, usize, usize, usize) {
 }
 
 /// Blend-safe pixel write used by the ANSI eraser (handles 16/32 bpp).
+/// Targets the console paint surface (back buffer when double buffering
+/// is active, else the front buffer).
 pub fn put_pixel_blend(x: usize, y: usize, color: u32) {
     put_pixel(x, y, color);
+}
+
+/// Front-buffer base (kernel direct-mapped VA of the visible surface).
+#[inline]
+pub fn front_base() -> *mut u8 {
+    // SAFETY: plain read of the G_FB.base pointer, set once at single-threaded init (SIE=0).
+    unsafe { G_FB.base }
 }
 
 static mut G_FB: Fb = Fb {
@@ -141,6 +150,10 @@ pub unsafe fn init_device(
             enabled: true,
         };
         clear();
+        // Anti-flicker: allocate the console back buffer for this geometry
+        // right away (single-threaded init context, pmm is up and fresh).
+        // On failure the console keeps legacy direct-to-front painting.
+        draw::init_back_buffer();
         // Geometry is now established/changed (todo P2 #1): flag the resize
         // so the first TIOCGWINSZ after this delivers SIGWINCH. At boot
         // there is no foreground process, so the direct signal is a no-op.
@@ -161,14 +174,36 @@ pub fn clear() {
     }
 }
 
+/// Pixel write onto the console paint surface (back buffer when double
+/// buffering is active, else the visible front buffer). The paint base
+/// itself is [`draw::paint_base`], re-exported as `fb::paint_base`.
 fn put_pixel(x: usize, y: usize, color: u32) {
-    // SAFETY: x/y are bounds-checked against width/height and off is derived from the validated pitch/bpp, so each volatile store stays inside the framebuffer set up at init.
+    // Bounds/format checks plus the volatile stores live in
+    // put_pixel_at_base (front and back share the validated geometry).
+    put_pixel_at_base(draw::paint_base(), x, y, color);
+}
+
+/// Pixel write onto the VISIBLE front buffer. Used only by the present-time
+/// cursor block (drawn after the back buffer is copied over the front).
+pub(crate) fn put_pixel_front(x: usize, y: usize, color: u32) {
+    // Bounds/format checks plus the volatile stores live in
+    // put_pixel_at_base; this targets the visible front surface only.
+    put_pixel_at_base(front_base(), x, y, color);
+}
+
+/// Raw pixel write to an explicit surface base (front or back; both share
+/// the validated G_FB geometry and pixel format).
+///
+/// # Safety contract (enforced by callers)
+/// `base` must be the front framebuffer base or the published back-buffer
+/// base, both of `pitch * height` bytes with the installed bpp.
+fn put_pixel_at_base(base: *mut u8, x: usize, y: usize, color: u32) {
+    // SAFETY: x/y are bounds-checked against width/height and off is derived from the validated pitch/bpp, so each volatile store stays inside the surface set up at init.
     unsafe {
         if !G_FB.enabled || x >= G_FB.width || y >= G_FB.height {
             return;
         }
         let off = y * G_FB.pitch + x * (G_FB.bpp / 8);
-        let base = G_FB.base;
         if G_FB.bpp <= 16 {
             // RGB565 (r5g6b5), little-endian — the OC2R monitor format.
             let px = rgb32_to_r5g6b5(color);
@@ -192,8 +227,38 @@ pub mod scroll;
 pub use draw::*;
 pub use scroll::*;
 
-// get_back_buffer/swap_buffers (double buffering) live in draw.rs; the
-// previous stub versions here were removed in favour of the real ones.
+// Console double buffering (back-buffer paint surface, debounced present,
+// init_back_buffer/double_buffered/paint_base/present) lives in draw.rs;
+// the lazy get_back_buffer/swap_buffers stubs were replaced by it.
+
+/// Test-only hook: install a host-provided surface as the front buffer so
+/// host integration tests can drive the real paint/present pipeline without
+/// pmm/UART (both are uninitialized on the host test harness). Never built
+/// into the kernel image (cfg(test) on the bin test target only).
+#[cfg(test)]
+pub unsafe fn test_install_front(base: *mut u8, w: usize, h: usize, stride: usize, bpp: usize) {
+    // SAFETY: test-only; G_FB is otherwise written by init/init_device.
+    unsafe {
+        G_FB = Fb {
+            base,
+            width: w,
+            height: h,
+            pitch: stride,
+            bpp,
+            enabled: true,
+        };
+    }
+}
+
+/// Test-only hook: disable the framebuffer between host tests.
+#[cfg(test)]
+pub fn test_uninstall_front() {
+    // SAFETY: test-only; puts the driver back into its pre-init state.
+    unsafe {
+        G_FB.enabled = false;
+        G_FB.base = core::ptr::null_mut();
+    }
+}
 
 /// Quantize an 8-8-8 RGB value to the OC2R monitor's r5g6b5 (RGB565)
 /// little-endian pixel format: R 5 bits (bits 11-15), G 6 bits (bits 5-10),

@@ -58,5 +58,9 @@ fn draw_banner() {
             y += 16;
         }
         fb::draw_str(10, y + 8, "Booting...", 0x00AAAA, 0x000000);
+        // The banner paints into the console BACK buffer (double-buffered
+        // anti-flicker path); present it once so it is visible immediately
+        // instead of waiting for the first debounced console present.
+        fb::present();
     }
 }
