@@ -143,7 +143,16 @@ impl AnsiTerm {
             b's' => self.save_cursor(),
             b'u' => self.restore_cursor(),
             b'h' | b'l' => {
-                if self.private && self.nparams >= 1 {
+                // DEC private modes (ESC[?25l, ESC[?1049h ...). The guard used
+                // to require nparams >= 1, but nparams only counts ';'
+                // separators: the canonical single-param form "?25l" arrives
+                // with nparams == 0 and the mode sitting in params[0], so
+                // cursor hide/show was silently ignored (TUIs hide the
+                // cursor via ?25l during redraw — exactly the flash window).
+                // params[0] holds the first parameter in both encodings;
+                // a parameterless form leaves params[0] == 0, which no
+                // private mode uses (no-op in set_private_mode).
+                if self.private {
                     self.set_private_mode(self.params[0], cmd == b'h');
                 }
             }
