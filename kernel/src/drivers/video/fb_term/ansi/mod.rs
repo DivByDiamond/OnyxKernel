@@ -96,6 +96,7 @@ fn now_ticks() -> u64 {
 }
 
 #[inline]
+#[allow(clippy::unnecessary_cast)]
 fn load_tick(a: &AtomicTickStore) -> u64 {
     a.load(Ordering::Acquire) as u64
 }

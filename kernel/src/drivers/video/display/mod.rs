@@ -132,15 +132,32 @@ pub unsafe fn init_display(_fdt_addr: usize) -> KResult<()> {
         ];
         for &b in &virtio_bases {
             if virtio_gpu::probe(b) {
-                if virtio_gpu::init(b, 1280, 720).is_ok() {
-                    let fb_pa = virtio_gpu::fb_addr() as usize;
-                    if fb_pa != 0 {
-                        fb::init(fb_pa).ok();
-                        G_DISPLAY.fb_base = virtio_gpu::fb_addr();
-                        G_DISPLAY.fb_size = virtio_gpu::fb_size();
-                        G_DISPLAY.enabled = true;
-                        found_virtio_gpu = true;
-                        crate::kinf!("display", "virtio-gpu at %p", Arg::from(b));
+                crate::kinf!("display", "virtio-gpu probe hit base=%p", Arg::from(b));
+                match virtio_gpu::init(b, 1280, 720) {
+                    Ok(()) => {
+                        let fb_pa = virtio_gpu::fb_addr() as usize;
+                        if fb_pa != 0 {
+                            fb::init(fb_pa).ok();
+                            G_DISPLAY.fb_base = virtio_gpu::fb_addr();
+                            G_DISPLAY.fb_size = virtio_gpu::fb_size();
+                            G_DISPLAY.enabled = true;
+                            found_virtio_gpu = true;
+                            crate::kinf!("display", "virtio-gpu at %p", Arg::from(b));
+                        } else {
+                            crate::kwrn!(
+                                "display",
+                                "virtio-gpu init ok but fb=0 at %p",
+                                Arg::from(b)
+                            );
+                        }
+                    }
+                    Err(e) => {
+                        crate::kwrn!(
+                            "display",
+                            "virtio-gpu init failed at %p err=%d",
+                            Arg::from(b),
+                            Arg::from(e.as_i64())
+                        );
                     }
                 }
                 break;

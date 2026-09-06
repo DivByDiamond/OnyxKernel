@@ -1,4 +1,5 @@
-use crate::drivers::fb;
+use crate::drivers::video::ramfb;
+use crate::drivers::{fb, virtio_gpu};
 use crate::mm::pmm;
 use onyx_core::fmt::Arg;
 
@@ -30,16 +31,95 @@ pub(crate) unsafe fn init_and_draw() {
             }
         }
         if !fb::enabled() {
-            let fb_pages = fb::size_bytes().div_ceil(4096);
-            let fb_pa = pmm::alloc_n(fb_pages).ok().map(|pa| {
-                crate::kinf!("fb", "allocated at %p", Arg::from(pa));
-                pa as usize
-            });
-            if let Some(pa) = fb_pa {
-                if fb::init(pa).is_ok() {
-                    crate::kinf!("fb", "init ok");
-                } else {
-                    crate::kwrn!("fb", "init failed");
+            // Try virtio-gpu (QEMU virt -device virtio-gpu-device) before falling
+            // back to invisible RAM. The virtio-mmio bases are the fixed QEMU
+            // virt constants; the GPU is probed synchronously and its framebuffer
+            // becomes the visible front buffer if init succeeds.
+            let virtio_bases = [
+                0x1000_1000usize,
+                0x1000_2000,
+                0x1000_3000,
+                0x1000_4000,
+                0x1000_5000,
+                0x1000_6000,
+                0x1000_7000,
+                0x1000_8000,
+            ];
+            let mut tried_gpu = false;
+            for &b in &virtio_bases {
+                if virtio_gpu::probe(b) {
+                    tried_gpu = true;
+                    crate::kinf!("display", "virtio-gpu probe hit base=%p", Arg::from(b));
+                    match virtio_gpu::init(b, 1280, 720) {
+                        Ok(()) => {
+                            let fb_pa = virtio_gpu::fb_addr() as usize;
+                            if fb_pa != 0 {
+                                if fb::init(fb_pa).is_ok() {
+                                    crate::kinf!("display", "virtio-gpu at %p", Arg::from(b));
+                                } else {
+                                    crate::kwrn!(
+                                        "display",
+                                        "virtio-gpu fb init failed at %p",
+                                        Arg::from(b)
+                                    );
+                                }
+                            } else {
+                                crate::kwrn!(
+                                    "display",
+                                    "virtio-gpu init ok but fb=0 at %p",
+                                    Arg::from(b)
+                                );
+                            }
+                        }
+                        Err(e) => {
+                            crate::kwrn!(
+                                "display",
+                                "virtio-gpu init failed at %p err=%d",
+                                Arg::from(b),
+                                Arg::from(e.as_i64())
+                            );
+                        }
+                    }
+                    break;
+                }
+            }
+            if !fb::enabled() {
+                // ramfb (QEMU -device ramfb) as second fallback — no virtio
+                // queue, just a fw_cfg write. Works with -display gtk and
+                // requires no vgabios.
+                if let Ok(pa) = unsafe { ramfb::init(1280, 720) }
+                    && fb::init(pa).is_ok()
+                {
+                    crate::kinf!("display", "ramfb at %p", Arg::from(pa));
+                }
+            }
+            if !fb::enabled() {
+                // PCI VGA (bochs-display) as third fallback for QEMU virt.
+                if let Ok(vga_pa) = unsafe { crate::drivers::bus::pci::find_vga_fb() }
+                    && vga_pa >= 0x4000_0000
+                    && fb::init_device(vga_pa, 1280, 720, 1280 * 4, 32).is_ok()
+                {
+                    crate::kinf!("display", "pci VGA at %p", Arg::from(vga_pa));
+                }
+            }
+            if !fb::enabled() {
+                if tried_gpu {
+                    crate::kwrn!(
+                        "display",
+                        "virtio-gpu+ramfb+PCI VGA failed, falling back to RAM"
+                    );
+                }
+                let fb_pages = fb::size_bytes().div_ceil(4096);
+                let fb_pa = pmm::alloc_n(fb_pages).ok().map(|pa| {
+                    crate::kinf!("fb", "allocated at %p", Arg::from(pa));
+                    pa as usize
+                });
+                if let Some(pa) = fb_pa {
+                    if fb::init(pa).is_ok() {
+                        crate::kinf!("fb", "init ok");
+                    } else {
+                        crate::kwrn!("fb", "init failed");
+                    }
                 }
             }
         }
