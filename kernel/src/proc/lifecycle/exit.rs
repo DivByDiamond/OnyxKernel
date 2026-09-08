@@ -68,6 +68,15 @@ pub unsafe fn exit(pid: u32, code: i32) {
             for h in 0..locked_harts {
                 crate::proc::scheduler::rq_unlock(h);
             }
+            // SMP respawn-crash fix v4: remove the dying Proc from every IPC
+            // channel's sleep-wake list. The lists hold raw `*mut Proc`; a
+            // waiter killed while parked left a dangling entry, and the next
+            // wait_wake_all wrote state/wait_next through freed memory that
+            // the respawn storm's alloc_proc had already recycled. Must run
+            // before the node can be reaped (kfree in waitpid) — exit() is
+            // the last point where the pointer is guaranteed to still be the
+            // dead process's own.
+            crate::ipc::disconnect_waiter(p_ptr);
             for i in 0..p.fds.len() {
                 if p.fds[i].used {
                     let token = crate::fs::vfs::fd_token(i, p.fds[i].epoch);
