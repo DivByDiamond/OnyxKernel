@@ -88,7 +88,14 @@ pub unsafe fn handle(tf: &mut TrapFrame) {
                     plic::dispatch();
                 }
                 INTR_S_SOFT => {
-                    crate::kwrn!("trap", "unhandled S-soft interrupt");
+                    // Cross-hart TLB-shootdown IPI (destroy_root broadcast,
+                    // forwarded from M-mode by mtrap_entry): ack the pending
+                    // S-soft bit and flush this hart's TLB. sfence.vma is
+                    // hart-local, so a remote address-space teardown needs
+                    // this per-hart flush or stale TLB entries keep freed
+                    // page-table/data pages writable from this hart.
+                    crate::arch::csr::clear_sip(0x2);
+                    crate::arch::csr::sfence_vma_all();
                 }
                 _ => {
                     crate::kwrn!(
