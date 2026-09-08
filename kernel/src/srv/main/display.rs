@@ -87,7 +87,7 @@ pub(crate) unsafe fn init_and_draw() {
                 // ramfb (QEMU -device ramfb) as second fallback — no virtio
                 // queue, just a fw_cfg write. Works with -display gtk and
                 // requires no vgabios.
-                if let Ok(pa) = unsafe { ramfb::init(1280, 720) }
+                if let Ok(pa) = ramfb::init(1280, 720)
                     && fb::init(pa).is_ok()
                 {
                     crate::kinf!("display", "ramfb at %p", Arg::from(pa));
@@ -95,7 +95,7 @@ pub(crate) unsafe fn init_and_draw() {
             }
             if !fb::enabled() {
                 // PCI VGA (bochs-display) as third fallback for QEMU virt.
-                if let Ok(vga_pa) = unsafe { crate::drivers::bus::pci::find_vga_fb() }
+                if let Ok(vga_pa) = crate::drivers::bus::pci::find_vga_fb()
                     && vga_pa >= 0x4000_0000
                     && fb::init_device(vga_pa, 1280, 720, 1280 * 4, 32).is_ok()
                 {
