@@ -40,6 +40,68 @@ unsafe fn wait_wake_all(wait_head: &mut *mut crate::proc::Proc) {
     }
 }
 
+/// Remove a dying process from a channel's sleep-wake list.
+///
+/// SMP respawn-crash fix v4 (2026-09-08): `wait_enqueue` stores the caller's
+/// raw `*mut Proc` in `send_wait`/`recv_wait`, but NOTHING unlinked the
+/// entry when the waiter died — `exit()` never walked these lists, so a
+/// channel kept a dangling `Proc*` across reaps. The reaped node's memory is
+/// recycled by the next `alloc_proc`, and the NEXT wake on that channel
+/// (`wait_wake_all`) then wrote `state = Ready` / `wait_next = null` through
+/// the freed pointer — corrupting whatever live process now occupies that
+/// slot (its `state` field sits at offset 5, next at ~offset 65560). With
+/// the respawn storm recycling ~200 Procs/s through init's request/response
+/// channels, a corrupted `tf`/`state` on the recycled node resurfaced as the
+/// "kernel-mode jump into the dead child's text" crash family. Called from
+/// `proc::exit` for every channel slot while holding that channel's lock;
+/// the dying process cannot be running or waiting elsewhere by then.
+///
+/// # Safety
+///
+/// `p` must be the exiting Proc pointer (never dereferenced here beyond
+/// pointer comparison — no field access, so it stays safe even if the node
+/// were somehow already recycled); each channel's lock is taken inside.
+pub unsafe fn disconnect_waiter(p: *mut crate::proc::Proc) {
+    unsafe {
+        for ch in G_CHANNELS.iter_mut() {
+            ch.lock.lock();
+            // Unlink from recv_wait.
+            let mut cur = ch.recv_wait;
+            let mut prev: *mut crate::proc::Proc = core::ptr::null_mut();
+            while !cur.is_null() {
+                let next = (*cur).wait_next;
+                if cur == p {
+                    if prev.is_null() {
+                        ch.recv_wait = next;
+                    } else {
+                        (*prev).wait_next = next;
+                    }
+                } else {
+                    prev = cur;
+                }
+                cur = next;
+            }
+            // Unlink from send_wait.
+            cur = ch.send_wait;
+            prev = core::ptr::null_mut();
+            while !cur.is_null() {
+                let next = (*cur).wait_next;
+                if cur == p {
+                    if prev.is_null() {
+                        ch.send_wait = next;
+                    } else {
+                        (*prev).wait_next = next;
+                    }
+                } else {
+                    prev = cur;
+                }
+                cur = next;
+            }
+            ch.lock.unlock();
+        }
+    }
+}
+
 /// # Safety: `buf` must point to `len` readable bytes; `tf`, if given, must be the caller's current trap frame for sched_yield; chan_id is bounds-checked against CHAN_MAX; ring/wait-list mutation runs under the channel spinlock, always released before sched_yield.
 pub unsafe fn send(
     chan_id: u32,
