@@ -692,6 +692,61 @@ pid 1 при повторном spawn.
       - Статус в трекере: вынесено в отдельный открытый пункт
         "SMP: instruction page fault на тексте мёртвого процесса в
         окне respawn" (см. КРИТИЧНО ниже).
+
+      **ПОПЫТКА ФИКСА 2026-09-08 (три волны, сужает, но НЕ закрывает)**:
+      Автоматизированный стресс-харнесс (pexpect-стиль, boot→login→exit,
+      11-12 прогонов на волну) + дизассемблер релизного ELF. Три
+      конкурирующих механизма найдены и закрыты в коде (см. коммит
+      "fix(smp): respawn-race hardening" — sched.rs, exit.rs, mtrap.rs,
+      smp.rs, csr.rs, regs.rs, trap.rs):
+      1. **Гонка exit() ↔ dequeue/steal (in-flight Proc)**: exit публиковал
+         Exited ПОД proc_list_lock, но удалял из runqueue'й ПООЧЕРЁДНО
+         (rq_lock(h) по одному), поэтому чужой dequeue мог забрать узел,
+         пока exit не дошёл до его очереди; реап kfree'ил Proc, следующий
+         spawn получал ту же память → резюм чужого tf (у которого ra =
+         юзер-текст мёртвого ребёнка = 0x12000). Фиксы: (a) Ready-guard в
+         sched_yield — dequeued/stolen узел с состоянием != Ready
+         отбрасывается без резюма (sched.rs, оба места); (b) exit() теперь
+         держит ВСЕ rq-локи (по возрастанию — дедлок-фри, все остальные
+         держат максимум один) поверх публикации Exited + remove из всех
+         очередей (exit.rs).
+      2. **Отсутствие cross-hart TLB shootdown**: destroy_root() делал
+         только ЛОКАЛЬНЫЙ sfence.vma_all — другой харт, на котором процесс
+         когда-то исполнялся (work-stealing), держал TLB-записи юзер-VA →
+         уже освобождённые кадры; запись через устаревший TLB после
+         переаллокации портила ЧУЖУЮ память (в т.ч. page-table страницы
+         следующего login) — объясняет варианты "load fault 0x15000 внутри
+         kinf!-форматирования" (мусорный &str) и мусорный hexdump-поток +
+         "attempt to subtract with overflow". Фикс: полноценный IPI
+         shootdown — destroy_root рассылает S-soft IPI всем online-хартам
+         через новый arch::smp::send_soft_ipi (CLINT msip, regs.rs
+         clint_msip_hart), mtrap_entry (M-mode, mtrap.rs .Lm_soft_fwd)
+         гасит MSIP и взводит mip.SSIP, S-mode обработчик INTR_S_SOFT
+         (srv/trap.rs) ack-ит SSIP (csr.rs: новый clear_sip/read_sip/
+         set_sip) и делает sfence_vma_all на своём харте.
+      3. **Порядок publish/removal**: раньше Exited публиковался ПОСЛЕ
+         начала снятия с очередей — теперь публикация всегда под всеми
+         rq-локами, так что окно "dequeue до публикации" закрыто
+         полностью.
+      **Результат волн**: базовая линия 6/11 фолтов (ra=0x12000 ~100%
+      сигнатур). После v1 (Ready-guard): ra=0x12000 почти исчез, вылезли
+      ЛИКВИДИРОВАННЫЕ маскировкой варианты (0x15000-нагрузка, illegal
+      instr pid=3/4, hexdump+subtract-panic). После v2+v3: ra=0x12000
+      всё ещё доминирует (2/12 clean под -smp 2; 1/4 clean под -smp 8,
+      те же sepc=0x12000 на hart 2/3). Все три фикса оставлены в коде —
+      каждый закрывает РЕАЛЬНОЕ окно, но остался четвёртый путь.
+      **Главный неопровергнутый след для следующего захода**: sp в
+      illegal-instr варианте = 0x80282238 — это НЕ ни один kstack
+      процесса (kstack'и лежат в 64KB Proc-блоках в heap), это похоже на
+      статическую область ядра — то есть харт, потерявший pid=1, уходит
+      в ГЛУБОКИЙ kernel-стек, а не в Proc-kstack; подозрение — испорчен
+      G_HART_CURRENT/G_HART_IDLE_TF[heart] или trap_entry-sscratch путь
+      при ровно ДВУХ подряд "respawning" без "onx: seg" между ними
+      (spawn провалился мгновенно? vfs::open упал?) — надо логировать
+      результат sys_spawn в ensure_login и весь путь sched_switch
+      для pid=1. Отдельно: журнал стресс-логов и харнесс лежат в
+      /tmp/onyx_stress (вне репо; стресс-скрипт стоит закоммитить в
+      scripts/).
 - [ ] Бо́льшие recv-буферы / recv semantics — `tcp_recv` сейчас никогда
       не возвращает `0` (только `Ok(n>0)` или `Err(NoEnt)` пока нет
       данных, `Err(Inval)` после TIMEWAIT); нет чистого сигнала "peer
