@@ -75,8 +75,9 @@
 в записи "ВОЛНА 4" внутри большой SMP-записи ниже). Фикс:
 `ipc::disconnect_waiter` из exit() + три предыдущих укрепления
 (Ready-guard, rq-атомарный exit, IPI TLB shootdown). Стресс после серии:
-12/12 clean `-smp 2`, 6/6 clean `-smp 8` (база: 6/11 фолтов). Открытым
-остаётся только коммит стресс-харнесса в scripts/.
+12/12 clean `-smp 2`, 6/6 clean `-smp 8` (база: 6/11 фолтов). Стресс-харнесс
+закоммичен: `scripts/smp_respawn_stress.sh` + `scripts/onyxfs_journal_e2e.sh`
+(bash + C-инжектор, без Python-зависимостей).
 Историческая сигнатура (до фикса): kernel-mode pid=1 на hart 1 прыгает по
 ra=0x12000 (текст ЗАВЕРШЁННОГО login.onx) сразу после
 `respawning /bin/login`; варианты (0xC sepc=0x12000 / 0x5 stval=0x1) —
@@ -764,9 +765,10 @@ ra=0x12000 (текст ЗАВЕРШЁННОГО login.onx) сразу после
       6/6 clean под -smp 8** (было 6/11 фолтов под -smp 2 до всей серии).
       Все четыре механизма (in-flight Proc, publish/removal порядок,
       cross-hart TLB, IPC wait-листы) закрыты; SMP-специфичный
-      respawn-краш больше не воспроизводится. Стресс-харнесс
-      (/tmp/onyx_stress/stress.py, pexpect-стиль) стоит закоммитить в
-      scripts/ при следующей правке.
+      respawn-краш больше не воспроизводится. Стресс-харнесс закоммичен:
+      `scripts/smp_respawn_stress.sh` (bash, N прогонов boot→login→exit с
+      классификацией фолтов), для journal e2e —
+      `scripts/onyxfs_journal_e2e.sh` + `scripts/onyxfs_journal_inject.c`.
 - [ ] Бо́льшие recv-буферы / recv semantics — `tcp_recv` сейчас никогда
       не возвращает `0` (только `Ok(n>0)` или `Err(NoEnt)` пока нет
       данных, `Err(Inval)` после TIMEWAIT); нет чистого сигнала "peer
