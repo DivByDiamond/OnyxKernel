@@ -79,6 +79,13 @@ pub const CLINT_MTIME: u64 = CLINT_BASE + 0xBFF8;
 pub const fn clint_mtimecmp_hart(hart: usize) -> u64 {
     CLINT_BASE + 0x4000 + 8 * hart as u64
 }
+/// Per-hart MSIP register (machine software-interrupt pending). Used as the
+/// cross-hart IPI doorbell: raising bit 0 makes the target hart take an
+/// M-mode soft interrupt, which `mtrap_entry` forwards to S-mode (remote
+/// harts then run `sfence_vma_all` — see destroy_root's TLB broadcast).
+pub const fn clint_msip_hart(hart: usize) -> u64 {
+    CLINT_BASE + hart as u64
+}
 pub const CLINT_FREQ_QEMU: u64 = 10_000_000;
 pub const PLIC_BASE: u64 = 0x0C00_0000;
 #[inline]

@@ -78,11 +78,29 @@ mtrap_entry:
 .Lm_interrupt:
     andi t2, t1, 0xf
     li t1, 7
-    bne t2, t1, .Lm_restore
+    beq t2, t1, .Lm_timer_fwd
+    li t1, 3
+    beq t2, t1, .Lm_soft_fwd
+    j .Lm_restore
+.Lm_timer_fwd:
     li t2, 0x80
     csrc mie, t2
     li t2, 0x20
     csrs mip, t2
+    j .Lm_restore
+.Lm_soft_fwd:
+    // Cross-hart IPI doorbell (destroy_root TLB broadcast): MSIP raised by
+    // the sending hart's CLINT write is already visible in mip.MSIP; clear
+    // MSIP at the source (CLINT MMIO) so it does not re-fire, then raise
+    // mip.SSIP so the delegated S-mode soft interrupt runs the remote
+    // sfence_vma_all in srv::trap.
+    csrr t1, mhartid
+    li t2, 0x02000000
+    add t2, t2, t1
+    sw zero, 0(t2)
+    li t2, 0x2
+    csrs mip, t2
+    j .Lm_restore
 .Lm_restore:
     ld a0, 16(t0)
     ld t2, 8(t0)

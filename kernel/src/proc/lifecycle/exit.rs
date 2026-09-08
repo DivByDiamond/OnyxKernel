@@ -40,9 +40,32 @@ pub unsafe fn exit(pid: u32, code: i32) {
                 );
             }
             let p_ptr = p as *mut _;
+            // SMP respawn-crash fix v2 (2026-09-08): hold ALL runqueue locks
+            // (ascending, deadlock-free: every other rq user holds at most
+            // one) across the Exited publish + removal from every queue.
+            // v1 published Exited first and removed per-queue afterwards,
+            // which still left a window: a hart that dequeued the node just
+            // before our removal loop observed Ready and resumed a process
+            // whose teardown was already underway (live signature under
+            // -smp 2: kernel write/Load faults on garbage format-string
+            // pointers, illegal instruction at pid=1 sepc=0x1008). With all
+            // rq locks held, no dequeue/steal can be mid-flight on this
+            // node: any hart that dequeued it earlier re-validates state
+            // under its own rq lock (sched.rs Ready-guard) and now reliably
+            // sees Exited; any hart that dequeues later can no longer find
+            // the node at all.
+            let mut locked_harts = 0usize;
             for h in 0..MAX_HARTS {
                 crate::proc::scheduler::rq_lock(h);
+                locked_harts += 1;
+            }
+            proc_list_lock();
+            p.state = ProcState::Exited;
+            for h in 0..MAX_HARTS {
                 let _ = crate::proc::scheduler::runqueue::remove(h, p_ptr);
+            }
+            proc_list_unlock();
+            for h in 0..locked_harts {
                 crate::proc::scheduler::rq_unlock(h);
             }
             for i in 0..p.fds.len() {
@@ -73,8 +96,11 @@ pub unsafe fn exit(pid: u32, code: i32) {
             // child exiting in that window left the parent asleep forever.
             // The parent observes (exit_code, Exited) atomically through the
             // same lock; Release on unlock makes both writes visible before any
-            // wake. Lock order matches globals.rs: PROC_LIST_LOCK outermost,
-            // rq_lock nested inside.
+            // wake. Lock order: PROC_LIST_LOCK outermost, rq_lock nested
+            // (globals.rs) — the bulk rq locks taken above were released
+            // before this section, and the parent-wake below re-takes its
+            // single rq_lock inside this proc_list_lock as before. (The
+            // Exited store above is idempotent: same value, same lock.)
             p.exit_code = code;
             proc_list_lock();
             p.state = ProcState::Exited;

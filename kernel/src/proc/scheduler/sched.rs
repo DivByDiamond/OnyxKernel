@@ -106,6 +106,38 @@ pub unsafe fn sched_yield(tf: &mut TrapFrame) {
 
         let mut next = dequeue(hartid);
 
+        // Root-cause fix (SMP respawn crash, 2026-09-08): a dequeued node may
+        // be a process that is concurrently inside exit() on ANOTHER hart.
+        // exit() removes the process from every runqueue while holding each
+        // queue's rq_lock in turn (NOT atomically across harts), so a
+        // dequeue/steal on this hart can win the race for a queue that exit()
+        // has not locked yet. The node we then hold is published Exited, its
+        // fds/AS are torn down, and the reaper kfree()s it — the very next
+        // spawn's alloc_proc kmallocs the same memory. Resuming such an
+        // in-flight pointer splats the DEAD child's saved user trap frame
+        // (ra/regs = login text addresses) over the fresh Proc and
+        // context-switches into it: live signature observed under -smp 2 was
+        // "kernel-mode pid=1 page fault at ra=sepc=0x12000" — an address
+        // inside the ALREADY EXITED login.onx text (seg 0x10000..0x13650),
+        // fetched with the kernel satp (scause 0xC), plus a twin variant
+        // faulting on a corrupted G_HART_CURRENT slot (load fault at 0x1,
+        // scause 0x5). Guard: while still holding OUR rq_lock, re-check the
+        // dequeued node's state; anything not enqueuable-by-us (Exited =
+        // mid-exit, Free = freed/reused, Creating = not yet published,
+        // Stopped = parked, Waiting = blocked) must not be resumed. Put it
+        // back on OUR queue only if it is still Ready (exit() has not yet
+        // reached its remove loop for this queue — its own remove() will
+        // unlink it, and enqueue's on_rq check keeps the flags consistent);
+        // otherwise drop it and let the next dequeue/steal find real work.
+        // The stale candidate is simply abandoned here — never dereferenced
+        // again after the state read, and never resumed.
+        if !next.is_null() {
+            let st = (*next).state;
+            if !matches!(st, ProcState::Ready) {
+                next = core::ptr::null_mut();
+            }
+        }
+
         // Bug (proc MINOR #6): if dequeue returns the same process we just
         // enqueued (the only runnable process on this hart), don't bother
         // doing a context switch to ourselves — that's wasted work (save
@@ -148,14 +180,24 @@ pub unsafe fn sched_yield(tf: &mut TrapFrame) {
         if next.is_null() {
             rq_unlock(hartid);
             let stolen = steal(hartid);
+            // Same stale-candidate guard as the local dequeue above (see the
+            // root-cause fix comment there): steal() dequeues under the
+            // VICTIM's lock, but exit()'s per-queue removal loop may simply
+            // not have reached the victim's queue yet, so the stolen node can
+            // already be Exited (or worse: freed/reused). A non-Ready node is
+            // abandoned without being resumed; if it is still Ready we own a
+            // legitimate steal.
             if !stolen.is_null() {
-                (*stolen).state = ProcState::Running;
-                set_current_for_hart(hartid, stolen);
-                G_NEED_RESCHED[hartid].store(false, Ordering::Release);
-                let kstack_top = (*stolen).kstack.as_ptr().add(KSTACK_SIZE) as usize;
-                let dst = (kstack_top - core::mem::size_of::<TrapFrame>()) as *mut TrapFrame;
-                ptr::write_volatile(dst, (*stolen).tf);
-                crate::arch::asm::sched_switch(dst as usize);
+                let st = (*stolen).state;
+                if matches!(st, ProcState::Ready) {
+                    (*stolen).state = ProcState::Running;
+                    set_current_for_hart(hartid, stolen);
+                    G_NEED_RESCHED[hartid].store(false, Ordering::Release);
+                    let kstack_top = (*stolen).kstack.as_ptr().add(KSTACK_SIZE) as usize;
+                    let dst = (kstack_top - core::mem::size_of::<TrapFrame>()) as *mut TrapFrame;
+                    ptr::write_volatile(dst, (*stolen).tf);
+                    crate::arch::asm::sched_switch(dst as usize);
+                }
             }
             rq_lock(hartid);
             next = dequeue(hartid);

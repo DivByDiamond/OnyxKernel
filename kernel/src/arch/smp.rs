@@ -70,6 +70,32 @@ pub unsafe fn set_cpu_online(hart: usize, v: bool) {
     }
 }
 
+/// Raise the machine software-interrupt pending bit on a REMOTE hart via its
+/// CLINT MSIP register (cross-hart IPI doorbell).
+///
+/// `mtrap_entry` (M-mode, always resident) demasks MSIP on the target hart
+/// and forwards it to S-mode by setting `mip.SSIP`; the S-mode trap handler
+/// acks it and runs `sfence_vma_all` (see destroy_root's TLB broadcast and
+/// srv::trap's soft-IPI handling). Clearing MSIP here prevents the M-mode
+/// interrupt from re-firing after the target acks.
+///
+/// # Safety
+///
+/// `hart` must be < MAX_HARTS and its CLINT MSIP register must exist (QEMU
+/// virt / boards with the legacy CLINT). Caller must not hold a spinlock the
+/// remote hart's IPI path needs — the IPI handler only touches per-hart CSRs
+/// and `sfence.vma`, so any existing spinlock is safe.
+pub unsafe fn send_soft_ipi(hart: usize) {
+    // SAFETY: CLINT MSIP MMIO per the caller contract; write-then-clear makes
+    // the M-mode handler on the target see one pending pulse, ack it, and
+    // leave the bit clear (no re-fire loop).
+    unsafe {
+        let msip = crate::arch::regs::clint_msip_hart(hart) as *mut u32;
+        core::ptr::write_volatile(msip, 1);
+        core::ptr::write_volatile(msip, 0);
+    }
+}
+
 /// Fixed SMP release mailbox, shared with the bootloader.
 ///
 /// OnyxBoot parks secondary harts polling this physical address (see
