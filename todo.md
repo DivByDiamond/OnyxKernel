@@ -15,6 +15,11 @@
 
 ## 🎯 DEADLINE: 15 сентября 2026 (см. PLAN.md для детального расписания)
 
+> Статус на 2026-09-08 (стресс-аудит): из трёх плановых блокеров P1-P3 все
+> закрыты; остался 1 свежий открытый SMP-фолт (см. КРИТИЧНО) + long-tail
+> (recv-EOF, FAT32 write/LFN, UART IRQ-rx, Ctrl+D, SBI SRST, rv32 mtrap).
+> Journal crash-recovery e2e — автоматизирован и PASS.
+
 ## ✅ Готово (архив, детали в git-истории):
 
 - Rust-рерайт (~98%, global_asm!), динамические процессы, 3 ring'а + syscall ACL, 85 syscall'ов
@@ -41,7 +46,38 @@
 - TUI library stubs (2026-08-31): Widget trait + Button/Label/TextBox заглушки + tui_demo
   (null fb pointer, text rendering TODO) — начальная структура, не рабочая
 
+### ✅ Фиксы 2026-09-04/06 (живые QEMU-тесты, в todo не вписывались — вписано 2026-09-08):
+- [x] login-путь: чтение секретных строк побайтово до Enter (9326a11), drain-гонки
+      read_secret_line (b97a67f, ccfa274), порча пароля при retype/retry (ad7d7d0),
+      исчерпание inode-таблицы → passwd EINVAL (7785feb), permission-биты "others"
+      сдвигались в биты owner (f1d4c2e)
+- [x] wait() возвращал ENOENT до фактического выхода ребёнка (0bd7869) — теперь
+      рескан exited-детей после каждого sched_yield вместо первого отказа
+- [x] trap-return регистровая порча + SBI ecall clobber (6c461a6): trap_return
+      восстанавливал t0/t1 слишком рано и переиспользовал их как CSR-scratch до
+      sret — каждый таймерный тик тихо портил t0/t1 на выходе из прерывания
+      (ломало, напр., SHA-256 KDF-хотлуп → недетерминизм пароля); sbi::set_timer
+      ecall теперь объявляет a0/a1 clobbered (SBI ABI пишет a1 на возврате)
+- [x] PTY inode collision: pty::stream классифицировала ЛЮБОЙ fd как PTY по
+      номеру inode — файлы с inode ≥ 32 (после добавления OnyxApps в /bin)
+      hijack'ались в PTY-путь и падали с EPIPE (983ec36); + bounds-check
+      alloc_data_block, + ~90 хардкодов длины write() в onyx_init
+- [x] Консоль/display (2780b4a, 394f874, c60315c, 37850e8): double-buffered
+      paint-surface (антифликер TUI), дебаунс презентации кадров, курсор в
+      момент презентации, ESC[?25h/?25l/?1049 без ';'-сепаратора, фикс
+      virtio-gpu init + ramfb для видимой графики в QEMU
+
 ## ❌ КРИТИЧНО ДО 15 СЕНТЯБРЯ:
+
+### 🔥 SMP: instruction page fault на тексте мёртвого процесса в окне respawn (ОТКРЫТО, 2026-09-08)
+Вынесено из записи про SMP-краш (ниже, "Рекомендация/СТРЕСС-ПОВТОР 2026-09-08").
+Воспроизводимость: boot → login → `exit` из osh, `-smp 2` — фолт в ~55% прогонов,
+`-smp 1` — 0%. Сигнатура: kernel-mode pid=1 на hart 1 прыгает по ra=0x12000
+(текст ЗАВЕРШЁННОГО login.onx) сразу после `respawning /bin/login`; детали и оба
+варианта (0xC sepc=0x12000 / 0x5 stval=0x1) — в записи "СТРЕСС-ПОВТОР 2026-09-08"
+внутри большой SMP-записи ниже. Первичные подозреваемые: kstack reuse при
+spawn-шторме, dangling Proc/tf в dequeue/steal, exec-разрушение старого AS у
+pid 1 при повторном spawn.
 
 ### 🔥 Найдено и починено при живом тесте ohttp в QEMU (2026-09-01)
 Тестировал `OnyxApps/apps/ohttp` в QEMU (`-netdev user` + `guestfwd`); по ходу
@@ -623,6 +659,39 @@
       сразу после `let mut next = dequeue(hartid);` (строка 107) и
       сверить, совпадает ли `next`'s pid с ожидаемым/живым процессом в
       момент печати.
+
+      **СТРЕСС-ПОВТОР 2026-09-08 (свежая сборка с фиксами 5-6 сентября):
+      SMP-клаш НЕ закрыт, сигнатура уточнена.** Автоматизированный
+      стресс (boot → login → `exit` из osh, по ~56с на прогон):
+      **6/11 фолтов под -smp 2, 3/3 чисто под -smp 1** (SMP-специфичность
+      подтверждена ещё раз). Сигнатура теперь ДРУГАЯ, узкая и стабильная:
+      - Окно: всегда сразу после `proc: pid 2 exited code=0` →
+        `[init] login session ended` → `[init] respawning /bin/login`,
+        т.е. init (pid 1) спаунит/эксекает новый login.
+      - Всегда hart 1, всегда pid=1, kernel-mode, ring=1.
+      - Вариант A: `scause=0xC (instruction page fault) sepc=0x12000
+        stval=0x12000 satp=0x8000000000080d87 root_pa=0x80d87000
+        ra=0x12000 a7=5120`. 0x12000 лежит ВНУТРИ текста ПРЕДЫДУЩЕГО
+        (уже завершённого) login.onx (seg vaddr=0x10000, memsz=13900 →
+        0x10000..0x13650): ядро в kernel-mode прыгнуло в код МЁРТВОГО
+        юзер-процесса (при ядерном satp → instruction page fault).
+        ra тоже = 0x12000.
+      - Вариант B: `scause=0x5 (load access fault) sepc=0x14048
+        stval=0x1` — чтение по адресу 0x1; sepc=0x14048 — сразу за
+        концом того же сегмента. Похоже на один и тот же сбой с разным
+        мусором.
+      - В "чистых" прогонах init бесконечно респаунит login
+        (spawn/exit-шторм ~200/сек, тысячи циклов без единого фолта).
+      - Старая сигнатура `scause=0x7 s10=0 в affinity-ветке sched_yield`
+        больше не наблюдалась НИ РАЗУ; гипотеза про гонку exit()/steal()
+        в dequeue не подтвердилась и не опроверглась — она просто
+        перестала быть актуальной как описание текущего фолта. Новый
+        фолт = испорченное ra (или sp→чужой стек) на kernel stack
+        pid 1 в окне spawn+exec: возврат по ra=юзер-тексту мёртвого
+        ребёнка при активном ядерном satp.
+      - Статус в трекере: вынесено в отдельный открытый пункт
+        "SMP: instruction page fault на тексте мёртвого процесса в
+        окне respawn" (см. КРИТИЧНО ниже).
 - [ ] Бо́льшие recv-буферы / recv semantics — `tcp_recv` сейчас никогда
       не возвращает `0` (только `Ok(n>0)` или `Err(NoEnt)` пока нет
       данных, `Err(Inval)` после TIMEWAIT); нет чистого сигнала "peer
@@ -695,24 +764,64 @@ O_NONBLOCK → EAGAIN; libc: struct winsize + pty_open()
       `core/src/crypto/kdf.rs` и тест `locked_account_fields_fail_closed`.
 
 ### Платформа / время:
-- [ ] RTC под sedna (gettimeofday от реального времени)
-- [ ] nanosleep точность (SBI set_timer vs CLINT)
-- [ ] SBI-звонки (get_spec_version, reboot/shutdown через SRST)
+- [~] RTC под sedna (gettimeofday от реального времени) — драйвер есть
+      (`drivers/platform/rtc.rs` Goldfish+SiFive, probe в `srv/main/early/probe.rs:114`),
+      но используется только для энтропии; gettimeofday всё ещё от uptime
+      (`fs_sys3/time.rs:164` «no RTC synchronization yet») — осталась интеграция
+- [~] nanosleep точность (SBI set_timer vs CLINT) — rv64 ЗАКРЫТ (arm_timer
+      идёт через arch::sbi::set_timer для smode и non-smode, `srv/timer_arm.rs:82-89`);
+      остался rv32 non-smode на прямом CLINT MMIO (нужен mtrap_32 по аналогии)
+- [ ] SBI-звонки (get_spec_version, reboot/shutdown через SRST) — в sbi.rs
+      только hart_in_m_mode + legacy v0.1 set_timer; SRST/спека не реализованы
 
 ### Ввод / QoL:
-- [ ] Ctrl+D = EOF в cooked-read
-- [ ] backspace/стрелки в raw-режиме
-- [ ] osh история + tab-completion
-- [ ] UART IRQ-driven rx (PLIC-регистрация)
+- [x] backspace/стрелки в raw-режиме — СДЕЛАНО в userspace osh (OnyxShell
+      `src/repl/raw.rs`: backspace, ↑↓←→, Home/End/Delete в обеих xterm/vt220
+      формах, Ctrl+D=exit); ядро в raw — намеренный passthrough (2026-09-08 аудит)
+- [x] osh история + tab-completion — СДЕЛАНО в репозитории OnyxShell
+      (`src/features/history.rs`: ring-буфер, стрелки, !-expansion;
+      `src/features/service/mod.rs:19`: tab_complete) — пункт в todo ядра,
+      но osh живёт в OnyxShell (2026-09-08 аудит)
+- [ ] Ctrl+D = EOF в cooked-read — ОТКРЫТО: `console_read.rs::cooked_read`
+      знает только \r/\n и backspace, 0x04 нигде не обрабатывается
+- [ ] UART IRQ-driven rx (PLIC-регистрация) — ОТКРЫТО: uart.rs polling
+      (LSR-poll в getc), ни одна регистрация в PLIC не используется
 
 ### Тесты:
-- [~] journal crash-recovery с реальным блочным I/O (ручной QEMU-цикл)
+- [x] journal crash-recovery с реальным блочным I/O — АВТОМАТИЗИРОВАНО
+      (2026-09-08, e2e QEMU-цикл, скрипт вне репо — при коммите положить в
+      scripts/): инжект синтетической транзакции в journal-область boot.img →
+      положительный исход (commit_end есть → payload воспроизведён в
+      data-блок, журнал обнулён на mount) и отрицательный (torn tx без
+      commit_end → отброшена, блок не тронут, журнал обнулён). Оба PASS на
+      свежем образе; pure-логика scan/replay также покрыта host-тестами
+      `core/src/formats/tests/onyfs.rs`.
 
 ## ✅ Найдено и ИСПРАВЛЕНО (2026-08-29):
 - [x] xHCI init: MaxScratchpad читался из HCSPARAMS1 → HCSPARAMS2
 - [x] virtio-blk сериализация: per-device SpinLock G_QLOCK
 - [x] font UAF: буфер намеренно не освобождается (leak ограничен)
 - [x] SAFETY-комментарии волна 2: fs/, syscall/, net/, proc/ (~1200 строк)
+
+## 📋 Аудит открытых пунктов README/roadmap (2026-09-08, сверка с кодом):
+- README «❌ Осталось»: **UDP/DHCP/DNS** — закрыть в README (реализовано: net/dhcp,
+  net/dns.rs + syscall #89, подключено в srv/main/mod.rs:70); **getdents64
+  batching** — закрыть в README (батчинг-цикл в fs_sys3/extra/info.rs:37-76,
+  несколько записей за вызов); **USB** — переформулировать: URB-слой +
+  EHCI control/bulk transfer есть (bus/usb/core.rs, hcd.rs), ОТКРЫТ только
+  xHCI transfer; **FAT32 LFN** — подтверждено открытым (LFN-записи
+  пропускаются, fs/fat32/dir/mod.rs:138); **FAT32 write через VFS** —
+  подтверждено открытым (fat32/write/* готовы, но vfs/fd/rw.rs:52-61 для
+  Fs::Fat32 возвращает NoSys на write; читает — да, пишет — нет);
+  **динамическая загрузка модулей** — открыта (только /proc/modules со
+  встроенными). README.ru.md синкнуть с README.md.
+- Дополнительный мелкий фикс-кандидат: readme kernel claim «16 FD slots»
+  vs код — сверить при следующей правке README.
+- Сеть (README ❌ UDP/DHCP/DNS) и recv-EOF: подтверждено аудитой — tcp_recv
+  по-прежнему возвращает Err(NoEnt) вместо Ok(0) при peer FIN
+  (net/tcp/sock.rs:117-119, FIN-флага в TcpConn нет, buf 2048), obrowse
+  живёт на Content-Length workaround. Пункт «Большие recv-буферы /
+  recv semantics» ОСТАЁТСЯ открытым.
 
 ## 🤝 Принятые компромиссы (не баги):
 - lto=false: fat/thin ломают линк ядра (__rust_alloc после LTO-merge)
