@@ -54,6 +54,7 @@ pub(super) fn tcp_transition(
             // FIN must land exactly at rcv_nxt to be accepted.
             if flags & FIN != 0 && seq.wrapping_add(payload.len() as u32) == c.rcv_nxt {
                 c.rcv_nxt = c.rcv_nxt.wrapping_add(1);
+                c.peer_fin = true;
                 if c.state == 2 {
                     c.state = 4;
                     out[1] = SEG_FIN_ACK;

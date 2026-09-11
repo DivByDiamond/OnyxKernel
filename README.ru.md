@@ -45,19 +45,19 @@ OnyxKernel — 64-битное RISC-V ядро ОС (~98% Rust, ассембле
 - **Журнал предзаписи (WAL)** — восстановление после сбоев при монтировании
 - **VFS с таблицей монтирования** — OnyxFS, procfs, ipcfs
 - **IPC каналы** — `chan_create` / `connect` / `send` / `recv` / `close`; именованные каналы через `/ipc/*` VFS
-- **Syscall ABI** — 83 системных вызова: POSIX `open`/`fstat`/`waitpid`/`fork`/`execve`, `ioctl`, `mprotect`, `sigaction`, `clock_gettime`, `setuid`/`setgid`, `chown`/`fchown`, `sched_setaffinity` и др.
+- **Syscall ABI** — 90 системных вызовов: POSIX `open` (`O_CREAT`/`O_TRUNC`/`O_APPEND`/`O_NONBLOCK`)/`fstat`/`waitpid`/`fork`/`execve`, `getdents64` (батчинг), `ioctl`, `mprotect`, `sigaction`/`sigprocmask`/`sigreturn`, `clock_gettime`, `umask`, `poll`, `readlink`/`symlink`, `chmod`/`fchmod`, `chown`/`fchown`, `sched_setaffinity`, `net_connect`/`net_send`/`net_recv`/`net_close` (TCP-клиент), `net_resolve` (DNS) и др.
 - **Реестр модулей** — драйверы регистрируются как модули; `/proc/modules` показывает список; инфраструктура для будущей динамической загрузки
 - **Юнит-тесты драйверов** — 18 тестов для UART и VirtIO (константы, структуры, начальное состояние)
 - **Вытесняющая многозадачность** — планирование по таймеру, `NEED_RESCHED` → `sched_yield`
-- **Доставка сигналов** — `SYS_kill`, `SIGKILL` завершает процесс
+- **Доставка сигналов** — `SYS_kill` с полной поддержкой `sigaction`/`sigprocmask`/`sigreturn` для user-space обработчиков; SIGKILL и SIGSTOP нельзя перехватить или заблокировать
 - **Блокирующий wait** — состояние `Waiting` + `sched_yield` для уведомления о завершении потомка
 - **Framebuffer-консоль** — поддержка шрифтов PSF1/PSF2, загрузка `/font/default.psf` при старте
-- **Драйверы оборудования** — UART (NS16550A), VirtIO block, PCI, PLIC
+- **Драйверы оборудования** — UART (NS16550A), VirtIO (block/net/rng/gpu/console/input), SDHCI, GMAC, USB (xHCI/EHCI/OHCI), фреймбуфер, PCI, PLIC
 - **Парсер FDT** — обнаружение устройств через дерево устройств (память, PLIC, устройства)
 - **Пер-процессная таблица FD** — 16 слотов на процесс с capability-токенами
 - **Юзерленд** — `/bin/login`, `/bin/osh` (shell), `/bin/passwd`, `/bin/useradd`, `/bin/userdel`
 - **Аутентификация** — `/etc/passwd` + `/etc/shadow`; интерактивная установка пароля root при первой загрузке
-- **Файловая система /proc** — `version`, `cpuinfo`, `meminfo`, `uptime`, `load`, `stat`
+- **Файловая система /proc** — `version`, `cpuinfo`, `meminfo`, `uptime`, `load`, `stat`, `modules`
 
 ----
 
@@ -287,21 +287,18 @@ osh> _
 - Аутентификация: /etc/passwd + /etc/shadow, первый запуск
 - /proc: version, cpuinfo, meminfo, uptime, load, stat, modules
 - Per-process FD таблицы (16 слотов, capability токены)
-- Сетевой стек (Ethernet/IP/TCP) с syscall интерфейсом
+- Сетевой стек (Ethernet/IP/UDP/TCP) с DHCP, DNS-резолвером и syscall-интерфейсом
 - Write-ahead журнал + восстановление при монтировании
 - Flashback снэпшоты с RLE + COW
 - Динамические процессы (без PROC_MAX)
 - Preemptive multitasking (100 Hz)
 - Сигналы с user-space обработчиками
-- 83 системных вызова
+- 90 системных вызовов
 
 ### ❌ Осталось сделать:
-- **FAT32** — чтение файлов (сейчас заглушки)
-- **USB** — URB-передача (сейчас только probe/init)
-- **symlink/readlink** — символические ссылки в OnyxFS
-- **chmod/fchmod** — права доступа в OnyxFS
-- **fsync** — реальный flush на диск
-- **UDP/DHCP/DNS** — сетевой стек
+- **USB xHCI transfer** — URB-слой и EHCI/OHCI control/bulk transfer готовы (`bus/usb/`); открыт только transfer-путь xHCI
+- **FAT32 long filenames (LFN)** — сейчас поддерживаются только 8.3 короткие имена
+- **FAT32 write через VFS layer** — функции `write()`/`create()`/`unlink()` в `fat32/write.rs` готовы, но VFS-layer (`vfs/rw.rs`, `vfs/file.rs`) ещё не вызывает их для `Fs::Fat32`
 - **Динамическая загрузка модулей** — загрузка ELF-модулей ядра из userspace
 
 ----

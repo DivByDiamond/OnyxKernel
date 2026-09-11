@@ -28,6 +28,10 @@ pub(in crate::net) struct TcpConn {
     pub(in crate::net) recv_buf: [u8; BUF_SIZE],
     pub(in crate::net) recv_len: usize,
     pub(in crate::net) recv_head: usize,
+    /// Set by the state machine when the peer's FIN is accepted: once the
+    /// recv ring drains, tcp_recv returns Ok(0) (clean EOF) instead of
+    /// "no data yet". False for our own active close (TIMEWAIT via state 3).
+    pub(in crate::net) peer_fin: bool,
     /// uptime_us() deadline past which a state-4 slot is freed.
     /// 0 = no deadline (connection not in TIMEWAIT).
     pub(in crate::net) tw_deadline_us: u64,

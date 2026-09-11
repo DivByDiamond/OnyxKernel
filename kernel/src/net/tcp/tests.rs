@@ -18,6 +18,7 @@ fn test_conn() -> TcpConn {
         recv_buf: [0; BUF_SIZE],
         recv_len: 0,
         recv_head: 0,
+        peer_fin: false,
         tw_deadline_us: 0,
     }
 }
@@ -71,6 +72,7 @@ fn test_fin_sequence_established_to_timewait() {
     assert_eq!(c.state, 4);
     assert_eq!(out, [0, SEG_FIN_ACK]);
     assert_eq!(c.rcv_nxt, 5002);
+    assert!(c.peer_fin);
     assert_eq!(c.tw_deadline_us, 777 + TIMEWAIT_US);
     // A stale retransmitted FIN (seq no longer matches rcv_nxt) during
     // TIMEWAIT is ignored: no re-ACK and no state/deadline change.
@@ -102,6 +104,9 @@ fn test_state3_ack_to_timewait_and_unexpected_segments() {
     c.snd_nxt = 1010;
     assert_eq!(tcp_transition(&mut c, 0, 1005, 0x10, &[], 42), [0, 0]);
     assert_eq!(c.state, 4);
+    // Active close never sets peer_fin: recv keeps reporting "no data",
+    // not EOF, for slots lingering in TIMEWAIT after our own FIN.
+    assert!(!c.peer_fin);
     assert_eq!(c.tw_deadline_us, 42 + TIMEWAIT_US);
     assert_eq!(c.send_len, 5); // drain_acked freed the acked prefix
     // State 3 without ACK flag: no transition.
@@ -156,6 +161,7 @@ fn test_conn_table_alloc_port_sweep() {
             recv_buf: [0; BUF_SIZE],
             recv_len: 0,
             recv_head: 0,
+            peer_fin: false,
             tw_deadline_us: 0,
         });
         // alloc_local_port never hands out a port already in use.

@@ -92,7 +92,8 @@ fn syscall_allowed_uid(nr: u64, ring: u8, uid: Option<u32>) -> bool {
         | SYS_chmod
         | SYS_fchmod
         | SYS_chown
-        | SYS_fchown => ring <= proc::PROC_RING_ROOT,
+        | SYS_fchown
+        | SYS_reboot => ring <= proc::PROC_RING_ROOT,
         // kill() is open to ring 2 (todo P2 #5) — the syscall layer
         // (sys_kill) enforces the own-process-group restriction for
         // unprivileged callers; root/kernel may signal anything.
@@ -168,6 +169,7 @@ mod tests {
             SYS_snapshot_rollback,
             SYS_snapshot_list,
             SYS_fsync,
+            SYS_reboot,
         ];
         for &nr in &ring1_only {
             assert!(!syscall_allowed_uid(nr, PROC_RING_USER, Some(1000)));
@@ -203,7 +205,7 @@ mod tests {
 
     #[test]
     fn test_unknown_syscall_numbers_denied() {
-        for &nr in &[0u64, 90, 200, u64::MAX] {
+        for &nr in &[0u64, 91, 200, u64::MAX] {
             for ring in [PROC_RING_KERNEL, PROC_RING_ROOT, PROC_RING_USER] {
                 assert!(!syscall_allowed_uid(nr, ring, Some(0)));
             }
