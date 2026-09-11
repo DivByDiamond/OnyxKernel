@@ -16,10 +16,14 @@ use onyx_core::fmt::Arg;
 const FW_CFG_BASE: usize = 0x10100000;
 const FW_CFG_DATA: usize = FW_CFG_BASE;
 const FW_CFG_SELECTOR: usize = FW_CFG_BASE + 8;
-#[allow(dead_code)]
 const FW_CFG_DMA: usize = FW_CFG_BASE + 16;
 
 const FW_CFG_FILE_DIR: u16 = 0x0019;
+
+/// DMA control bits (QEMU fw_cfg spec): bit3 selects a file (upper 16 bits
+/// carry its selector), bit4 requests a write. Bit1 (read) must stay clear.
+const FW_CFG_DMA_CTL_SELECT: u32 = 0x08;
+const FW_CFG_DMA_CTL_WRITE: u32 = 0x10;
 
 #[allow(dead_code)]
 #[repr(C, packed)]
@@ -28,6 +32,17 @@ struct FwCfgFile {
     select: u16,
     reserved: u16,
     name: [u8; 56],
+}
+
+/// Layout QEMU's fw_cfg DMA engine expects at the address written to
+/// `FW_CFG_DMA`: control, then length, then the target buffer address —
+/// all big-endian, packed with no gaps (spec: "the field at the lowest
+/// address is the control field").
+#[repr(C, packed)]
+struct FwCfgDmaAccess {
+    control: u32,
+    length: u32,
+    address: u64,
 }
 
 #[repr(C, packed)]
@@ -111,15 +126,47 @@ pub unsafe fn init(width: u32, height: u32) -> KResult<usize> {
             height: height.to_be(),
             stride: (width * 4).to_be(),
         };
-        // Select the ramfb file.
-        Mmio::<u16>::at(FW_CFG_SELECTOR).write(sel.to_be());
-        // Write the config struct via the data register (big-endian bytes).
-        let bytes = core::slice::from_raw_parts(
-            &cfg as *const _ as *const u8,
-            core::mem::size_of::<RamfbCfg>(),
+        // Since QEMU 2.9, plain writes to the fw_cfg data register are
+        // no-ops — the guest must use the DMA interface to actually push
+        // bytes into a write-callback file like etc/ramfb (spec: "writes
+        // are reinstated, but only through the DMA interface"). Byte-by-
+        // byte writes to FW_CFG_DATA silently do nothing, which is why
+        // this used to report "configured" while QEMU never switched the
+        // display away from the placeholder surface.
+        let dma_pa = pmm::alloc_zero()? as usize;
+        let dma = dma_pa as *mut FwCfgDmaAccess;
+        core::ptr::write_volatile(
+            dma,
+            FwCfgDmaAccess {
+                control: (((sel as u32) << 16) | FW_CFG_DMA_CTL_SELECT | FW_CFG_DMA_CTL_WRITE)
+                    .to_be(),
+                length: (core::mem::size_of::<RamfbCfg>() as u32).to_be(),
+                address: (&cfg as *const RamfbCfg as u64).to_be(),
+            },
         );
-        for &b in bytes {
-            Mmio::<u8>::at(FW_CFG_DATA).write(b);
+        // A single 64-bit write of the (big-endian) DMA-access-struct
+        // address triggers the transfer.
+        Mmio::<u64>::at(FW_CFG_DMA).write((dma_pa as u64).to_be());
+        // Poll for completion: QEMU clears `control` to 0 on success and
+        // sets bit0 (error) on failure; this transfer is synchronous on
+        // current QEMU but the spec allows bits to linger briefly.
+        let mut spins = 0u32;
+        loop {
+            let ctrl = u32::from_be(core::ptr::read_volatile(core::ptr::addr_of!(
+                (*dma).control
+            )));
+            if ctrl == 0 {
+                break;
+            }
+            if ctrl & 1 != 0 {
+                crate::kwrn!("ramfb", "dma write error ctrl=0x%x", Arg::from(ctrl));
+                return Err(Errno::Io);
+            }
+            spins += 1;
+            if spins > 5_000_000 {
+                crate::kwrn!("ramfb", "dma write timeout ctrl=0x%x", Arg::from(ctrl));
+                return Err(Errno::Io);
+            }
         }
         crate::kinf!(
             "ramfb",
