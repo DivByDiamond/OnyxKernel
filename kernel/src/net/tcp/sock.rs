@@ -43,6 +43,7 @@ unsafe fn tcp_connect_inner(dst_ip: [u8; 4], port: u16) -> KResult<usize> {
             recv_buf: [0; BUF_SIZE],
             recv_len: 0,
             recv_head: 0,
+            peer_fin: false,
             tw_deadline_us: 0,
         });
         if let Some(ref conn) = CONNS[cid] {
@@ -115,6 +116,13 @@ unsafe fn tcp_recv_inner(cid: usize, buf: &mut [u8]) -> KResult<usize> {
     unsafe {
         let conn = CONNS[cid].as_mut().ok_or(Errno::Inval)?;
         if conn.recv_len == 0 {
+            // Peer sent FIN and the receive ring is drained: clean EOF.
+            // Report Ok(0) so callers can distinguish "peer done" from
+            // "no data yet" (Err(NoEnt)) — HTTP responses without
+            // Content-Length rely on this signal.
+            if conn.peer_fin {
+                return Ok(0);
+            }
             return Err(Errno::NoEnt);
         }
         let n = buf.len().min(conn.recv_len);

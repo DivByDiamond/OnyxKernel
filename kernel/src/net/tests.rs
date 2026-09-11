@@ -192,6 +192,7 @@ fn test_net_tables_concurrent_exclusivity() {
                         recv_buf: [0; crate::net::tcp::conn::BUF_SIZE],
                         recv_len: 0,
                         recv_head: 0,
+                        peer_fin: false,
                         tw_deadline_us: 0,
                     });
                     *c = cid;

@@ -168,6 +168,15 @@ fn cooked_read(tf: &mut TrapFrame, dst: *mut u8, len: u64) -> i64 {
                             echo_char(0x08);
                         }
                     }
+                } else if b == 0x04 {
+                    // Ctrl+D (EOT, canonical EOF): with a pending partial
+                    // line, deliver it immediately without the newline;
+                    // on an empty line report end-of-file (read() == 0).
+                    // Not echoed, matching POSIX line-discipline practice.
+                    if n == 0 {
+                        return 0;
+                    }
+                    break;
                 } else {
                     // SAFETY: n < max <= len-1 per the loop guard above.
                     unsafe {

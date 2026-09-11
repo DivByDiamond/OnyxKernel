@@ -95,6 +95,7 @@ pub const SYS_mouse_read: u64 = 86; // mouse_read(*event) -> 0 or -errno
 pub const SYS_poll: u64 = 87; // poll(*pollfd, nfds, timeout) -> ready count
 pub const SYS_umask: u64 = 88; // umask(new_mask) -> old_mask
 pub const SYS_net_resolve: u64 = 89; // net_resolve(name_ptr, ip_out_ptr) -> 0 or -errno
+pub const SYS_reboot: u64 = 90; // reboot(cmd) — 0 = power off, 1 = restart; never returns
 
 // ── Flags / constants used by syscalls ─────────────────────────────────
 

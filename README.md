@@ -63,7 +63,7 @@ Part of the [OnyxOS](https://github.com/anomalyco/OnyxOS) ecosystem. Booted by
 - **Write-ahead journal** — crash recovery on mount
 - **VFS with mount table** — OnyxFS, procfs, ipcfs
 - **IPC channels** — `chan_create` / `connect` / `send` / `recv` / `close`; named channels via `/ipc/*` VFS
-- **Syscall ABI** — 85 syscalls: POSIX-flavoured `open` with `O_CREAT/O_TRUNC/O_APPEND`, `fstat`, `waitpid`, `fork`, `execve`, `getdents64`, `ioctl`, `mprotect`, `sigaction`/`sigprocmask`/`sigreturn`, `clock_gettime`, `isatty`, `getentropy`, `setuid`/`setgid`, `fsync`, `truncate` with length (full zero/shrink/extend support), `ftruncate`, `readlink`/`symlink` (real implementation, not stubs), `chmod`/`fchmod` (real mode-bit storage in inode), `chown`/`fchown` (real uid/gid storage), `sched_setaffinity`/`sched_getaffinity`, `net_connect`/`net_send`/`net_recv`/`net_close` (TCP client), plus the original `spawn`/`wait`/`exec`/`sbrk`/`kill`/`sigmask`/`snapshot_*`/`create`/`mkdir`/IPC channel set.
+- **Syscall ABI** — 90 syscalls: POSIX-flavoured `open` with `O_CREAT/O_TRUNC/O_APPEND/O_NONBLOCK`, `fstat`, `waitpid`, `fork`, `execve`, `getdents64` (batched), `ioctl`, `mprotect`, `sigaction`/`sigprocmask`/`sigreturn`, `clock_gettime`, `isatty`, `getentropy`, `setuid`/`setgid`, `fsync`, `truncate` with length (full zero/shrink/extend support), `ftruncate`, `readlink`/`symlink` (real implementation, not stubs), `chmod`/`fchmod` (real mode-bit storage in inode), `chown`/`fchown` (real uid/gid storage), `umask`, `sched_setaffinity`/`sched_getaffinity`, `poll` (POLLIN/POLLOUT/POLLERR + timeout), `net_connect`/`net_send`/`net_recv`/`net_close` (TCP client), `net_resolve` (DNS A-record lookup), plus the original `spawn`/`wait`/`exec`/`sbrk`/`kill`/`sigmask`/`snapshot_*`/`create`/`mkdir`/IPC channel set.
 - **Dynamic module registry** — built-in drivers register as modules; `/proc/modules` lists loaded modules; infrastructure for future dynamic loading
 - **Driver unit tests** — 18 unit tests for UART and VirtIO drivers (constants, struct layouts, initial state)
 - **Preemptive multitasking** — timer tick scheduling with `NEED_RESCHED` → `sched_yield`
@@ -73,12 +73,12 @@ Part of the [OnyxOS](https://github.com/anomalyco/OnyxOS) ecosystem. Booted by
 - **Proper ELF-style initial stack** — argc + argv + envp + auxv (AT_PAGESZ, AT_RANDOM, AT_ENTRY, AT_UID/GID, AT_NULL); compatible with musl/picolibc/glibc `_start`.
 - **Demand-paged heap** — `sbrk(N)` no longer just bumps a pointer; new pages are mapped on demand via `pmm::alloc_zero` + `vmm::map_one_pub`.
 - **Framebuffer console** — PSF1/PSF2 font support, `/font/default.psf` loaded at boot
-- **Hardware drivers** — UART (NS16550A), VirtIO block, PCI, PLIC
+- **Hardware drivers** — UART (NS16550A), VirtIO (block/net/rng/gpu/console/input), SDHCI, GMAC, USB (xHCI/EHCI/OHCI), framebuffer, PCI, PLIC
 - **FDT parser** — device tree discovery (memory, PLIC, devices)
 - **Per-process FD table** — 16 slots per process with capability tokens
 - **Userland** — `/bin/login`, `/bin/osh` (shell), `/bin/passwd`, `/bin/useradd`, `/bin/userdel`
 - **Authentication** — `/etc/passwd` + `/etc/shadow`; first-boot interactive root password setup
-- **/proc filesystem** — `version`, `cpuinfo`, `meminfo`, `uptime`, `load`, `stat`
+- **/proc filesystem** — `version`, `cpuinfo`, `meminfo`, `uptime`, `load`, `stat`, `modules`
 
 ----
 
@@ -308,18 +308,16 @@ osh> _
 - Authentication: /etc/passwd + /etc/shadow, first-boot root password setup
 - /proc filesystem: version, cpuinfo, meminfo, uptime, load, stat, modules
 - Per-process FD tables (16 slots with capability tokens)
-- Network stack (Ethernet/IP/TCP) with syscall interface
+- Network stack (Ethernet/IP/UDP/TCP) with DHCP, DNS resolver and syscall interface
 - Write-ahead journal + crash recovery on mount
 - Flashback snapshots with RLE compression + COW
 - Dynamic processes (no PROC_MAX limit)
 - Preemptive multitasking (100 Hz timer)
 - Signal delivery with user-space handlers
-- 85 syscalls total
+- 90 syscalls total
 
 ### ❌ Осталось:
-- **USB** — реализовать URB-передачу (сейчас только probe/init)
-- **UDP/DHCP/DNS** — сетевой стек (TCP-клиент уже работает)
-- **getdents64 batching** — сейчас работает, но без батчинга (по одной записи за раз)
+- **USB xHCI transfer** — URB-слой и EHCI/OHCI control/bulk transfer готовы (`bus/usb/`); открыт только transfer-путь xHCI
 - **FAT32 long filenames (LFN)** — сейчас поддерживаются только 8.3 short names
 - **FAT32 write через VFS layer** — функции `write()`/`create()`/`unlink()` в `fat32/write.rs` готовы, но VFS-layer (`vfs/rw.rs`, `vfs/file.rs`) ещё не вызывает их для `Fs::Fat32`
 - **Динамическая загрузка модулей** — загрузка ELF-модулей ядра из userspace

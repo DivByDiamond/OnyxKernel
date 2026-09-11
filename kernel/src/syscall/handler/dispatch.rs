@@ -192,6 +192,7 @@ pub unsafe fn handle(tf: &mut TrapFrame) -> i64 {
                 a0 as *mut crate::syscall::input_sys::MouseEvent,
             ),
             SYS_poll => crate::syscall::poll_sys::sys_poll(tf, a0, a1, a2 as i64),
+            SYS_reboot => crate::syscall::power_sys::sys_reboot(a0),
             _ => Errno::NoSys.as_i64(),
         };
         Errno::translate_syscall_result(raw)
