@@ -14,7 +14,7 @@ pub unsafe fn dup(token: FdToken) -> KResult<FdToken> {
         let idx = fd_check(token)?;
         let fd = fd_get(idx);
         let new_idx = alloc_fd(fd.perms)?;
-        fd_set(new_idx, fd.ino, fd.size, fd.fs, fd.pos);
+        fd_set(new_idx, fd.ino, fd.size, fd.fs, fd.pos, fd.mnt);
         // Status flags (O_NONBLOCK/O_APPEND/...) belong to the open file
         // description semantics-wise; our fd table has no shared-OFD concept,
         // so dup copies them into the new slot (POSIX-adjacent behavior).
@@ -55,20 +55,24 @@ pub unsafe fn create_pipe() -> KResult<(FdToken, FdToken)> {
             (*p)[r_idx].size = 0;
             (*p)[r_idx].fs = Fs::Ipc;
             (*p)[r_idx].pos = 0;
+            (*p)[r_idx].mnt = crate::fs::vfs::MNT_ROOT as u8;
             (*p)[w_idx].ino = pipe_ino;
             (*p)[w_idx].size = 0;
             (*p)[w_idx].fs = Fs::Ipc;
             (*p)[w_idx].pos = 0;
+            (*p)[w_idx].mnt = crate::fs::vfs::MNT_ROOT as u8;
         } else {
             let p = crate::proc::current();
             p.fds[r_idx].ino = pipe_ino;
             p.fds[r_idx].size = 0;
             p.fds[r_idx].fs = Fs::Ipc;
             p.fds[r_idx].pos = 0;
+            p.fds[r_idx].mnt = crate::fs::vfs::MNT_ROOT as u8;
             p.fds[w_idx].ino = pipe_ino;
             p.fds[w_idx].size = 0;
             p.fds[w_idx].fs = Fs::Ipc;
             p.fds[w_idx].pos = 0;
+            p.fds[w_idx].mnt = crate::fs::vfs::MNT_ROOT as u8;
         }
         let r_fd = fd_get(r_idx);
         let w_fd = fd_get(w_idx);

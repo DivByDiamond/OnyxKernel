@@ -95,6 +95,9 @@ pub struct Proc {
     pub readdir_idx: u32,
     pub readdir_active: bool,
     pub readdir_fs: crate::fs::vfs::Fs,
+    /// Mount slot (as stored in VfsFd::mnt) the readdir cursor belongs to;
+    /// keeps per-mount inodes with the same number from sharing a cursor.
+    pub readdir_mnt: u8,
     pub root_refcount: *mut u32,
     pub all_next: *mut Proc,
     pub next: *mut Proc,
@@ -163,6 +166,7 @@ impl Proc {
                 epoch: 0,
                 cloexec: false,
                 flags: 0,
+                mnt: crate::fs::vfs::MNT_ROOT as u8,
             }; PROC_MAX_FDS],
             root_refcount: ptr::null_mut(),
             all_next: ptr::null_mut(),
@@ -181,6 +185,7 @@ impl Proc {
             readdir_idx: 0,
             readdir_active: false,
             readdir_fs: crate::fs::vfs::Fs::None,
+            readdir_mnt: crate::fs::vfs::MNT_ROOT as u8,
         }
     }
 }

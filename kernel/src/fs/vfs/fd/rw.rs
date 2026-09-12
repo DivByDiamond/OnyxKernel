@@ -1,5 +1,5 @@
 use crate::fs::vfs::{
-    FdToken, Fs, PERM_READ, PERM_WRITE, fd_check, fd_check_perm, fd_get, fd_update_pos,
+    FdToken, Fs, PERM_READ, PERM_WRITE, fd_check, fd_check_perm, fd_get, fd_update_pos, with_mount,
 };
 use crate::fs::{devfs, fat32, ipcfs, onyxfs, procfs};
 use onyx_core::errno::{Errno, KResult};
@@ -14,6 +14,7 @@ pub unsafe fn read(token: FdToken, buf: *mut u8, len: u32) -> KResult<u32> {
     // SAFETY: fd_check_perm validates idx and epoch; the backend read fns
     // receive a buffer the syscall layer already validated/translated for
     // `len` bytes (user_ptr_ok), and the position math is saturating.
+    // with_mount activates the fd's mount context (root for pseudo fds).
     unsafe {
         let idx = fd_check_perm(token, PERM_READ)?;
         let fd = fd_get(idx);
@@ -22,9 +23,10 @@ pub unsafe fn read(token: FdToken, buf: *mut u8, len: u32) -> KResult<u32> {
         if to_read == 0 {
             return Ok(0);
         }
+        let mnt = fd.mnt as usize;
         let read_n = match fd.fs {
-            Fs::Onyx => onyxfs::read(fd.ino, buf, fd.pos, to_read)?,
-            Fs::Fat32 => fat32::read(fd.ino, buf, fd.pos, to_read)?,
+            Fs::Onyx => with_mount(mnt, || onyxfs::read(fd.ino, buf, fd.pos, to_read))?,
+            Fs::Fat32 => with_mount(mnt, || fat32::read(fd.ino, buf, fd.pos, to_read))?,
             Fs::Proc => procfs::read(fd.ino, buf, fd.pos, to_read)?,
             Fs::Ipc => ipcfs::read(fd.ino, buf, fd.pos, to_read)?,
             Fs::Devfs => devfs::read(fd.ino, buf, fd.pos, to_read)?,
@@ -44,12 +46,14 @@ pub unsafe fn write(token: FdToken, buf: *const u8, len: u32) -> KResult<u32> {
     // SAFETY: fd_check_perm validates idx and epoch; backends get a buffer
     // the syscall layer validated for `len` bytes. The direct G_KERNEL_FDS /
     // p.fds size write below targets the current context's fd slot with a
-    // checked idx, same contract as fd_update_pos.
+    // checked idx, same contract as fd_update_pos. with_mount holds FS_LOCK
+    // and runs the write in the fd's mount context.
     unsafe {
         let idx = fd_check_perm(token, PERM_WRITE)?;
         let fd = fd_get(idx);
+        let mnt = fd.mnt as usize;
         let written = match fd.fs {
-            Fs::Onyx => onyxfs::write(fd.ino, buf, fd.pos, len)?,
+            Fs::Onyx => with_mount(mnt, || onyxfs::write(fd.ino, buf, fd.pos, len))?,
             Fs::Proc => return Err(Errno::Perm),
             Fs::Ipc => ipcfs::write(fd.ino, buf, fd.pos, len)?,
             _ => return Err(Errno::NoSys),

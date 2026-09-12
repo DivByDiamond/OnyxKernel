@@ -76,10 +76,12 @@ pub(crate) unsafe fn is_eoc(v: u32) -> bool {
     v >= FAT32_EOC
 }
 
+mod context;
 mod dir;
 mod helpers;
 mod write;
 
+pub(crate) use context::*;
 pub use dir::*;
 pub(crate) use helpers::*;
 pub use write::*;

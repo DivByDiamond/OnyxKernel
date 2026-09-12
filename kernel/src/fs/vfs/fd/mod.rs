@@ -5,3 +5,4 @@ pub mod fsync;
 pub mod ops;
 pub mod rw;
 pub mod seek;
+pub mod table;

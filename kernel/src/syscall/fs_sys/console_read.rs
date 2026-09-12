@@ -10,16 +10,14 @@ use crate::arch::trap_frame::TrapFrame;
 use crate::drivers::{fb, fb_term, uart};
 use crate::proc;
 use crate::syscall::abi::O_NONBLOCK;
-use crate::syscall::tty::filter_input;
+use crate::syscall::tty::{console_next_byte, console_ready};
 use onyx_core::errno::Errno;
 
 use super::noncanon_read::noncanon_read;
 
-/// Next line-disciplined byte from the UART, or None when the input FIFO is
-/// empty. Ctrl+C is consumed here and turned into SIGINT (filter_input).
 #[inline]
 fn next_byte() -> Option<u8> {
-    uart::getc().and_then(filter_input)
+    console_next_byte()
 }
 
 #[inline]
@@ -128,7 +126,7 @@ fn cooked_read(tf: &mut TrapFrame, dst: *mut u8, len: u64) -> i64 {
     // know whether a complete line is pending. Best effort: EAGAIN only
     // when the hardware FIFO is completely empty; a partially typed line
     // still blocks for its completion (documented compromise, todo P1 #3).
-    if stdin_nonblock() && !uart::rx_ready() {
+    if stdin_nonblock() && !console_ready() {
         return Errno::Again.as_i64();
     }
     let echo = stdin_echo();
@@ -140,7 +138,7 @@ fn cooked_read(tf: &mut TrapFrame, dst: *mut u8, len: u64) -> i64 {
         }
         match next_byte() {
             None => {
-                if stdin_nonblock() && n == 0 && !uart::rx_ready() {
+                if stdin_nonblock() && n == 0 && !console_ready() {
                     return Errno::Again.as_i64();
                 }
                 // SAFETY: syscall-path yield (see console_read contract).

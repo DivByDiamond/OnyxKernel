@@ -160,6 +160,48 @@ pub unsafe fn dev(idx: usize) -> *mut VirtioBlkDev {
     }
 }
 
+/// virtio-mmio device config space start: 0xF0 in the legacy (0.9.x)
+/// layout, 0x100 in the modern (1.0) layout. `blk_capacity` below.
+const R_CFG_LEGACY: u32 = 0xF0;
+const R_CFG_MODERN: u32 = 0x100;
+
+/// Capacity of a virtio-blk device in 512-byte sectors — the same unit as
+/// the `lba` parameters of `virtio_req::read`/`write`. Returns 0 for an
+/// invalid device index or a device reporting no capacity.
+///
+/// # Safety
+///
+/// Kernel context only (SIE=0, see crate::sync); reads read-only config
+/// registers of the MMIO device at the probed base (same address contract
+/// as `reg_r`).
+pub unsafe fn blk_capacity(dev_idx: usize) -> u64 {
+    // SAFETY: dev() documents null for out-of-range idx (checked); the
+    // config registers are 4-byte aligned MMIO reads on a probed virtio-mmio
+    // base. capacity is a little-endian u64 at config+0, blk_size a u32 at
+    // config+8 per the virtio-blk spec.
+    unsafe {
+        let d = dev(dev_idx);
+        if d.is_null() {
+            return 0;
+        }
+        let cfg = if (*d).modern {
+            R_CFG_MODERN
+        } else {
+            R_CFG_LEGACY
+        };
+        let base = (*d).base;
+        let lo = reg_r(base, cfg) as u64;
+        let hi = reg_r(base, cfg + 4) as u64;
+        let cap = lo | (hi << 32);
+        let bs = reg_r(base, cfg + 8);
+        if bs > 512 {
+            cap * (bs as u64 / 512)
+        } else {
+            cap
+        }
+    }
+}
+
 pub mod queue;
 pub mod virtio_req;
 pub mod virtio_rng;

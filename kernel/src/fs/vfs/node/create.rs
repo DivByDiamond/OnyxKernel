@@ -1,34 +1,19 @@
 //! File creation — `create` (regular file) and `mkdir` (directory).
+use super::split_parent;
 use crate::fs::onyxfs;
 use crate::fs::vfs::{
-    FdToken, Fs, PERM_READ, PERM_SEEK, PERM_WRITE, alloc_fd, fd_token, resolve_mount,
+    FdToken, Fs, PERM_READ, PERM_SEEK, PERM_WRITE, alloc_fd, fd_set, fd_token, resolve_path,
+    with_mount,
 };
 use crate::proc;
 use onyx_core::errno::{Errno, KResult};
-
-/// Split a NUL-free path like "/foo/bar/baz" into ("foo/bar", "baz").
-/// The leading '/' is stripped. If the path has no '/', returns ("", "foo").
-/// Used by `create` and `mkdir` to find the parent directory.
-///
-/// # Safety
-///
-/// No unsafe operations inside; only bounds-checked slice arithmetic. The
-/// unsafe signature mirrors the symlink.rs helper for symmetry.
-unsafe fn split_parent(path: &[u8]) -> (&[u8], &[u8]) {
-    let p = if !path.is_empty() && path[0] == b'/' {
-        &path[1..]
-    } else {
-        path
-    };
-    match p.iter().rposition(|&b| b == b'/') {
-        Some(idx) => (&p[..idx], &p[idx + 1..]),
-        None => (&[], p),
-    }
-}
+use onyx_core::formats::ONYFS_ROOT_INO;
 
 /// Create a new regular file at `path` and open it with read+write+seek
 /// permissions. Returns the new fd token. `mode` is the OnyxFS mode bits
-/// (e.g. `ONYFS_DT_REG`).
+/// (e.g. `ONYFS_DT_REG`). Creation is supported on OnyxFS mounts only;
+/// FAT32 is a read-only driver here and pseudo-fs paths have no parent
+/// directory concept in the VFS sense.
 ///
 /// # Safety
 ///
@@ -36,35 +21,37 @@ unsafe fn split_parent(path: &[u8]) -> (&[u8], &[u8]) {
 /// (kernel-side slice); runs in the calling process's syscall context.
 pub unsafe fn create(path: &[u8], mode: u32) -> KResult<FdToken> {
     // SAFETY: path is a kernel-side slice (from parse_user_path); the fd
-    // slot written below was claimed by alloc_fd in this context. onyxfs::create
-    // takes no cross-hart lock (journal is crash recovery only); concurrent
-    // creates are not serialized — caller must not race across harts.
+    // slot written below was claimed by alloc_fd in this context.
+    // with_mount holds FS_LOCK and swaps the onyxfs singleton into the
+    // target mount's context for the duration of create + chown.
     unsafe {
-        if path.is_empty() || path[0] != b'/' {
-            return Err(Errno::Inval);
+        let (fs, rel, slot) = resolve_path(path)?;
+        match fs {
+            Fs::Proc => return Err(Errno::Perm),
+            Fs::Onyx => {}
+            _ => return Err(Errno::NoSys),
         }
-        // Reject creation under procfs.
-        let name = &path[1..];
-        let (fs, _) = crate::fs::vfs::resolve_mount(name);
-        if fs == Fs::Proc {
-            return Err(Errno::Perm);
-        }
-        let (parent_path, filename) = split_parent(path);
+        let (parent_rel, filename) = split_parent(rel);
         if filename.is_empty() {
             return Err(Errno::Inval);
         }
-        let mut st = onyxfs::OnyfsStat::default();
-        let parent_ino = if parent_path.is_empty() {
-            onyx_core::formats::ONYFS_ROOT_INO
-        } else {
-            onyxfs::lookup(parent_path, &mut st)?
-        };
-        let new_ino = onyxfs::create(parent_ino, filename, mode)?;
-        let cur_uid = proc::current().uid;
-        let cur_gid = proc::current().gid;
-        let _ = onyxfs::set_uid_gid(new_ino, cur_uid, cur_gid);
+        // Read uid/gid before entering the fs critical section. During early
+        // boot there may be no current process yet; kernel-created nodes then
+        // belong to root rather than dereferencing a null current pointer.
+        let (cur_uid, cur_gid) = proc::current_opt().map_or((0, 0), |p| (p.uid, p.gid));
+        let new_ino = with_mount(slot, || -> KResult<u32> {
+            let mut st = onyxfs::OnyfsStat::default();
+            let parent_ino = if parent_rel.is_empty() {
+                ONYFS_ROOT_INO
+            } else {
+                onyxfs::lookup(parent_rel, &mut st)?
+            };
+            let ino = onyxfs::create(parent_ino, filename, mode)?;
+            let _ = onyxfs::set_uid_gid(ino, cur_uid, cur_gid);
+            Ok(ino)
+        })?;
         let idx = alloc_fd(PERM_READ | PERM_WRITE | PERM_SEEK)?;
-        crate::fs::vfs::fd_set(idx, new_ino, 0, Fs::Onyx, 0);
+        fd_set(idx, new_ino, 0, Fs::Onyx, 0, slot as u8);
         let fd = crate::fs::vfs::fd_get(idx);
         Ok(fd_token(idx, fd.epoch))
     }
@@ -77,33 +64,31 @@ pub unsafe fn create(path: &[u8], mode: u32) -> KResult<FdToken> {
 /// Caller contract: path comes from the syscall layer's parse_user_path
 /// (kernel-side slice); runs in the calling process's syscall context.
 pub unsafe fn mkdir(path: &[u8]) -> KResult<()> {
-    // SAFETY: path is kernel-side. onyxfs::mkdir/set_uid_gid take no
-    // cross-hart lock (journal is crash recovery only); concurrent mkdirs
-    // are not serialized — caller must not race across harts.
+    // SAFETY: path is kernel-side. with_mount holds FS_LOCK around
+    // mkdir + chown on the target mount's singleton context.
     unsafe {
-        if path.is_empty() || path[0] != b'/' {
-            return Err(Errno::Inval);
+        let (fs, rel, slot) = resolve_path(path)?;
+        match fs {
+            Fs::Proc => return Err(Errno::Perm),
+            Fs::Onyx => {}
+            _ => return Err(Errno::NoSys),
         }
-        let name = &path[1..];
-        let (fs, _) = resolve_mount(name);
-        if fs == Fs::Proc {
-            return Err(Errno::Perm);
-        }
-        let (parent_path, dirname) = split_parent(path);
+        let (parent_rel, dirname) = split_parent(rel);
         if dirname.is_empty() {
             return Err(Errno::Inval);
         }
-        let mut st = onyxfs::OnyfsStat::default();
-        let parent_ino = if parent_path.is_empty() {
-            onyx_core::formats::ONYFS_ROOT_INO
-        } else {
-            onyxfs::lookup(parent_path, &mut st)?
-        };
-        let new_ino = onyxfs::mkdir(parent_ino, dirname)?;
-        let cur_uid = proc::current().uid;
-        let cur_gid = proc::current().gid;
-        let _ = onyxfs::set_uid_gid(new_ino, cur_uid, cur_gid);
-        Ok(())
+        let (cur_uid, cur_gid) = proc::current_opt().map_or((0, 0), |p| (p.uid, p.gid));
+        with_mount(slot, || -> KResult<()> {
+            let mut st = onyxfs::OnyfsStat::default();
+            let parent_ino = if parent_rel.is_empty() {
+                ONYFS_ROOT_INO
+            } else {
+                onyxfs::lookup(parent_rel, &mut st)?
+            };
+            let new_ino = onyxfs::mkdir(parent_ino, dirname)?;
+            let _ = onyxfs::set_uid_gid(new_ino, cur_uid, cur_gid);
+            Ok(())
+        })
     }
 }
 

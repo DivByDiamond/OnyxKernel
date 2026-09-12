@@ -1,23 +1,8 @@
+use super::split_parent;
 use crate::fs::onyxfs;
-use crate::fs::vfs::{Fs, resolve_mount};
+use crate::fs::vfs::{Fs, resolve_path, with_mount};
 use onyx_core::errno::{Errno, KResult};
 use onyx_core::formats::ONYFS_ROOT_INO;
-
-/// # Safety
-///
-/// No unsafe operations inside; only bounds-checked slice arithmetic. The
-/// unsafe signature mirrors the create.rs helper for symmetry.
-unsafe fn split_parent(path: &[u8]) -> (&[u8], &[u8]) {
-    let p = if !path.is_empty() && path[0] == b'/' {
-        &path[1..]
-    } else {
-        path
-    };
-    match p.iter().rposition(|&b| b == b'/') {
-        Some(idx) => (&p[..idx], &p[idx + 1..]),
-        None => (&[], p),
-    }
-}
 
 /// Create a symbolic link at `linkpath` pointing to `target`.
 ///
@@ -31,32 +16,30 @@ unsafe fn split_parent(path: &[u8]) -> (&[u8], &[u8]) {
 /// # Safety
 ///
 /// Caller contract: target/linkpath come from the syscall layer's
-/// parse_user_path (kernel-side slices).
+/// parse_user_path (kernel-side slices). with_mount holds FS_LOCK and
+/// activates the link's mount context for the whole operation.
 pub unsafe fn symlink(target: &[u8], linkpath: &[u8]) -> KResult<()> {
-    // SAFETY: both slices are kernel-side (from parse_user_path). onyxfs::symlink
-    // takes no cross-hart lock (journal is crash recovery only); concurrent
-    // symlink creations are not serialized — caller must not race across harts.
+    // SAFETY: both slices are kernel-side (from parse_user_path); the
+    // singleton switch/run/restore is fenced by with_mount (FS_LOCK).
     unsafe {
-        if linkpath.is_empty() || linkpath[0] != b'/' {
-            return Err(Errno::Inval);
-        }
-        let name = &linkpath[1..];
-        let (fs, _) = resolve_mount(name);
+        let (fs, rel, slot) = resolve_path(linkpath)?;
         if fs != Fs::Onyx {
             return Err(Errno::NoSys);
         }
-        let (parent_path, filename) = split_parent(linkpath);
+        let (parent_rel, filename) = split_parent(rel);
         if filename.is_empty() {
             return Err(Errno::Inval);
         }
-        let mut st = onyxfs::OnyfsStat::default();
-        let parent_ino = if parent_path.is_empty() {
-            ONYFS_ROOT_INO
-        } else {
-            onyxfs::lookup(parent_path, &mut st)?
-        };
-        onyxfs::symlink(parent_ino, filename, target)?;
-        Ok(())
+        with_mount(slot, || -> KResult<()> {
+            let mut st = onyxfs::OnyfsStat::default();
+            let parent_ino = if parent_rel.is_empty() {
+                ONYFS_ROOT_INO
+            } else {
+                onyxfs::lookup(parent_rel, &mut st)?
+            };
+            onyxfs::symlink(parent_ino, filename, target)?;
+            Ok(())
+        })
     }
 }
 
@@ -71,23 +54,21 @@ pub unsafe fn symlink(target: &[u8], linkpath: &[u8]) -> KResult<()> {
 /// Caller contract: path comes from the syscall layer's parse_user_path
 /// (kernel-side slice); buf is a validated, writable user range of bufsiz
 /// bytes for user callers (checked upstream) or a valid kernel buffer.
+/// with_mount activates the link's mount context under FS_LOCK.
 pub unsafe fn readlink(path: &[u8], buf: *mut u8, bufsiz: u32) -> KResult<u32> {
-    // SAFETY: path is kernel-side; buf is a validated user range of bufsiz
-    // bytes for user callers (user_ptr_ok upstream, translated) or a valid
-    // kernel buffer; onyxfs::readlink bounds its copy to bufsiz.
+    // SAFETY: path is kernel-side; buf validity is per the # Safety
+    // contract and onyxfs::readlink bounds its copy to bufsiz.
     unsafe {
-        if path.is_empty() || path[0] != b'/' {
-            return Err(Errno::Inval);
-        }
-        let name = &path[1..];
-        let (fs, _) = resolve_mount(name);
+        let (fs, rel, slot) = resolve_path(path)?;
         if fs != Fs::Onyx {
             return Err(Errno::NoSys);
         }
-        let mut st = onyxfs::OnyfsStat::default();
-        // readlink acts on the link itself — resolve the path without following
-        // the final component (POSIX semantics).
-        let ino = onyxfs::lookup_nofollow(name, &mut st)?;
-        onyxfs::readlink(ino, buf, bufsiz)
+        with_mount(slot, || -> KResult<u32> {
+            let mut st = onyxfs::OnyfsStat::default();
+            // readlink acts on the link itself — resolve the path without
+            // following the final component (POSIX semantics).
+            let ino = onyxfs::lookup_nofollow(rel, &mut st)?;
+            onyxfs::readlink(ino, buf, bufsiz)
+        })
     }
 }

@@ -1,13 +1,24 @@
+//! FD allocation, token validation, and cross-mount rename dispatch.
+//!
+//! Raw table accessors (`fd_get`/`fd_set`/...) live in the sibling `table`
+//! module; both are re-exported through `vfs`.
+
 use onyx_core::errno::{Errno, KResult};
 
-use crate::fs::vfs::vnode::{Fs, VFS_MAX_FDS, VfsFd, fd_token_epoch, fd_token_idx};
+use super::table::fd_get;
+use crate::fs::vfs::mount::{rel_to_abs, resolve_path, with_mount};
+use crate::fs::vfs::vnode::{Fs, MAX_MOUNTS, VFS_MAX_FDS, VfsFd, fd_token_epoch, fd_token_idx};
 
 /// # Safety
 ///
-/// No unsafe operations; unsafe signature kept for API symmetry with the
-/// other fd-table helpers. Any kernel context may call it.
+/// Reads this hart's current-process slot; safe for any kernel context.
+///
+/// Kernel FD table is used when the current hart has no process context.
+/// A user process may only allocate FDs from its own syscall context, so
+/// a missing current slot is either boot-time kernel work or a service task
+/// running without a process; both must use the kernel table.
 pub(crate) unsafe fn is_kernel_boot() -> bool {
-    crate::proc::current_pid() == 0
+    crate::proc::current_opt().is_none()
 }
 
 pub(crate) static mut G_KERNEL_FDS: [VfsFd; VFS_MAX_FDS] = [VfsFd {
@@ -20,6 +31,7 @@ pub(crate) static mut G_KERNEL_FDS: [VfsFd; VFS_MAX_FDS] = [VfsFd {
     epoch: 0,
     cloexec: false,
     flags: 0,
+    mnt: crate::fs::vfs::mount::MNT_ROOT as u8,
 }; VFS_MAX_FDS];
 
 /// # Safety
@@ -84,7 +96,8 @@ pub(crate) unsafe fn alloc_fd(perms: u32) -> KResult<usize> {
 /// # Safety
 ///
 /// Caller contract: token must come from fd_token() of a live fd; this
-/// re-validates idx < VFS_MAX_FDS and the epoch itself.
+/// re-validates idx (< VFS_MAX_FDS) and the epoch itself (low 12 bits,
+/// see vnode::fd_token for compact 32-bit encoding).
 pub(crate) unsafe fn fd_check(token: crate::fs::vfs::vnode::FdToken) -> KResult<usize> {
     // SAFETY: bounds-checks idx (< VFS_MAX_FDS) and the epoch before any
     // fd-table access; kernel-boot vs current-proc split per is_kernel_boot().
@@ -94,47 +107,10 @@ pub(crate) unsafe fn fd_check(token: crate::fs::vfs::vnode::FdToken) -> KResult<
             return Err(Errno::BadFd);
         }
         let fd = fd_get(idx);
-        if !fd.used || fd.epoch != fd_token_epoch(token) {
+        if !fd.used || (fd.epoch & 0xFFF) != fd_token_epoch(token) {
             return Err(Errno::BadFd);
         }
         Ok(idx)
-    }
-}
-
-/// # Safety
-///
-/// Caller contract: idx < VFS_MAX_FDS, obtained from fd_check() at the call
-/// site (e.g. sys_fcntl F_SETFD); runs in the fd-owning process's syscall
-/// context.
-pub(crate) unsafe fn fd_set_cloexec(idx: usize, cloexec: bool) {
-    // SAFETY: idx is pre-validated (< VFS_MAX_FDS) by the fd_check call at
-    // the call site; the table written is this hart's current process's.
-    unsafe {
-        if is_kernel_boot() {
-            let p = &raw mut G_KERNEL_FDS;
-            (*p)[idx].cloexec = cloexec;
-        } else {
-            let p = crate::proc::current();
-            p.fds[idx].cloexec = cloexec;
-        }
-    }
-}
-
-/// # Safety
-///
-/// Caller contract: idx < VFS_MAX_FDS from fd_check() (F_SETFL/sys_open);
-/// runs in the fd-owning process's syscall context.
-pub(crate) unsafe fn fd_set_flags(idx: usize, flags: u32) {
-    // SAFETY: idx is pre-validated (< VFS_MAX_FDS) by the fd_check call at
-    // the call site; the table written is this hart's current process's.
-    unsafe {
-        if is_kernel_boot() {
-            let p = &raw mut G_KERNEL_FDS;
-            (*p)[idx].flags = flags;
-        } else {
-            let p = crate::proc::current();
-            p.fds[idx].flags = flags;
-        }
     }
 }
 
@@ -158,93 +134,34 @@ pub(crate) unsafe fn fd_check_perm(
     }
 }
 
+/// Rename within one OnyxFS mount. Cross-mount renames (or renames that
+/// touch a non-Onyx path) are rejected with ENOSYS instead of silently
+/// operating on whichever mount happened to own the driver singletons.
+///
 /// # Safety
 ///
-/// Caller contract: idx < VFS_MAX_FDS (callers obtain it from fd_check /
-/// fd_check_perm); must run in the fd-owning process's syscall context or
-/// kernel boot. Returns a snapshot copy, so no aliasing survives the call.
-pub(crate) unsafe fn fd_get(idx: usize) -> VfsFd {
-    // SAFETY: idx is caller-validated (< VFS_MAX_FDS) via fd_check upstream;
-    // plain copy out of the fd table of the current context (see # Safety).
-    unsafe {
-        if is_kernel_boot() {
-            let p = &raw const G_KERNEL_FDS;
-            (*p)[idx]
-        } else {
-            let p = crate::proc::current();
-            p.fds[idx]
-        }
-    }
-}
-
-/// # Safety
-///
-/// Caller contract: idx < VFS_MAX_FDS and is the slot allocated for this
-/// open (allocated by alloc_fd); runs in the fd-owning context.
-pub(crate) unsafe fn fd_set(idx: usize, ino: u32, size: u32, fs: Fs, pos: u32) {
-    // SAFETY: idx is the slot just claimed by alloc_fd in this context;
-    // writing it cannot race with any other user of that slot.
-    unsafe {
-        if is_kernel_boot() {
-            let p = &raw mut G_KERNEL_FDS;
-            (*p)[idx].ino = ino;
-            (*p)[idx].size = size;
-            (*p)[idx].fs = fs;
-            (*p)[idx].pos = pos;
-        } else {
-            let p = crate::proc::current();
-            p.fds[idx].ino = ino;
-            p.fds[idx].size = size;
-            p.fds[idx].fs = fs;
-            p.fds[idx].pos = pos;
-        }
-    }
-}
-
-/// # Safety
-///
-/// Caller contract: idx < VFS_MAX_FDS, validated by fd_check/fd_check_perm
-/// at the call site; runs in the fd-owning process's syscall context.
-pub(crate) unsafe fn fd_update_pos(idx: usize, pos: u32) {
-    // SAFETY: idx is caller-validated via fd_check upstream; writes only the
-    // pos field of the owning process's fd slot.
-    unsafe {
-        if is_kernel_boot() {
-            let p = &raw mut G_KERNEL_FDS;
-            (*p)[idx].pos = pos;
-        } else {
-            let p = crate::proc::current();
-            p.fds[idx].pos = pos;
-        }
-    }
-}
-
-/// # Safety
-///
-/// Caller contract: idx < VFS_MAX_FDS, validated by fd_check at the call
-/// site; runs in the fd-owning process's syscall context.
-pub(crate) unsafe fn fd_clear(idx: usize) {
-    // SAFETY: idx is caller-validated via fd_check upstream; marks the slot
-    // unused in the owning context's table only.
-    unsafe {
-        if is_kernel_boot() {
-            let p = &raw mut G_KERNEL_FDS;
-            (*p)[idx].used = false;
-        } else {
-            let p = crate::proc::current();
-            p.fds[idx].used = false;
-        }
-    }
-}
-
-/// # Safety
-///
-/// Caller contract: forward-only pass-through to onyxfs::rename, which owns
-/// the actual on-disk safety contract (journal + lock discipline there).
+/// Caller contract: both paths are absolute and kernel-owned (parsed by the
+/// syscall layer). `with_mount` holds FS_LOCK and swaps the onyxfs singleton
+/// into the target mount's context for the duration of the rename; paths
+/// longer than the 256-byte user-path limit are rejected with ERANGE.
 pub unsafe fn rename(old_path: &[u8], new_path: &[u8]) -> KResult<()> {
-    // SAFETY: only marks the call unsafe-required by the onyxfs::rename
-    // signature; path slices are kernel-side validated lengths. onyxfs::rename
-    // performs no cross-hart locking — concurrent renames from two harts are
-    // not serialized (journal only covers crash recovery).
-    unsafe { crate::fs::onyxfs::rename(old_path, new_path) }
+    // SAFETY: resolve_path/with_mount uphold the FS_LOCK contract; buffers
+    // are fixed-size stack arrays written before being read.
+    unsafe {
+        let (fs_a, rel_a, slot_a) = resolve_path(old_path)?;
+        let (fs_b, rel_b, slot_b) = resolve_path(new_path)?;
+        if fs_a != Fs::Onyx || fs_b != Fs::Onyx || slot_a != slot_b {
+            return Err(Errno::NoSys);
+        }
+        let mut buf_a = [0u8; 256];
+        let mut buf_b = [0u8; 256];
+        if slot_a >= MAX_MOUNTS {
+            // Root fs: the original absolute paths are already onyxfs-shaped.
+            with_mount(slot_a, || crate::fs::onyxfs::rename(old_path, new_path))
+        } else {
+            let a = rel_to_abs(rel_a, &mut buf_a).ok_or(Errno::Range)?;
+            let b = rel_to_abs(rel_b, &mut buf_b).ok_or(Errno::Range)?;
+            with_mount(slot_a, || crate::fs::onyxfs::rename(a, b))
+        }
+    }
 }

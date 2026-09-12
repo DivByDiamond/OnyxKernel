@@ -15,9 +15,9 @@ fn test_fd_token_boundaries() {
     assert_eq!(fd_token_idx(token), 0);
     assert_eq!(fd_token_epoch(token), 0);
 
-    let token = fd_token(0xFFFF, 0xDEAD_BEEF);
-    assert_eq!(fd_token_idx(token), 0xFFFF);
-    assert_eq!(fd_token_epoch(token), 0xDEAD_BEEF);
+    let token = fd_token(15, 0xFFF);
+    assert_eq!(fd_token_idx(token), 15);
+    assert_eq!(fd_token_epoch(token), 0xFFF);
 }
 
 #[test]
@@ -63,14 +63,14 @@ fn test_vfs_fd_default() {
 
 #[test]
 fn test_fd_token_none_components() {
-    assert_eq!(fd_token_idx(FD_TOKEN_NONE) as u32, 0xFFFF_FFFF);
-    assert_eq!(fd_token_epoch(FD_TOKEN_NONE), 0xFFFF_FFFF);
+    assert_eq!(fd_token_idx(FD_TOKEN_NONE) as u32, 15);
+    assert_eq!(fd_token_epoch(FD_TOKEN_NONE), 0xFFF);
 }
 
 #[test]
 fn test_fd_token_composed() {
-    for idx in [0usize, 1, 15, 255, 0xFFFF] {
-        for epoch in [0u32, 1, 42, u32::MAX] {
+    for idx in [0usize, 1, 15] {
+        for epoch in [0u32, 1, 42, 0xFFF] {
             let token = fd_token(idx, epoch);
             assert_eq!(fd_token_idx(token), idx);
             assert_eq!(fd_token_epoch(token), epoch);
@@ -85,5 +85,5 @@ fn test_vfs_max_fds() {
 
 #[test]
 fn test_max_mounts() {
-    assert_eq!(MAX_MOUNTS, 6);
+    assert_eq!(MAX_MOUNTS, 8);
 }

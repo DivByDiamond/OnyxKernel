@@ -1,59 +1,57 @@
 use crate::fs::onyxfs;
-use crate::fs::vfs::{FdToken, Fs, fd_check, fd_get, is_kernel_boot, resolve_mount};
+use crate::fs::vfs::{FdToken, Fs, fd_check, fd_get, is_kernel_boot, stat_target, with_mount};
 use onyx_core::errno::{Errno, KResult};
 
 /// # Safety
 ///
 /// Caller contract: path comes from the syscall layer's parse_user_path
 /// (kernel-side NUL-free slice); ownership check is performed inside.
+/// stat_target/with_mount serialize access and activate the target mount's
+/// context via FS_LOCK (supersedes the old "not serialized" note).
 pub unsafe fn chmod(path: &[u8], mode: u32) -> KResult<()> {
-    // SAFETY: path slice is kernel-side; mount/owner checks run before
-    // onyxfs::set_mode. onyxfs takes no cross-hart lock (journal = crash
-    // recovery only); concurrent chmod calls are not serialized — caller
-    // contract: do not race metadata updates across harts.
+    // SAFETY: stat_target validates the absolute path and rejects non-Onyx
+    // filesystems with ENOSYS; the ownership check reads only this hart's
+    // current process; set_mode runs in the resolved mount's context.
     unsafe {
-        if path.is_empty() || path[0] != b'/' {
-            return Err(Errno::Inval);
-        }
-        let name = &path[1..];
-        let (fs, _) = resolve_mount(name);
-        if fs != Fs::Onyx {
-            return Err(Errno::NoSys);
-        }
-        let mut st = onyxfs::OnyfsStat::default();
-        let ino = onyxfs::lookup(name, &mut st)?;
+        let (st, slot) = stat_target(path)?;
         if !is_kernel_boot() {
             let cur = crate::proc::current();
             if cur.uid != 0 && cur.uid != st.uid {
                 return Err(Errno::Perm);
             }
         }
-        onyxfs::set_mode(ino, mode)
+        with_mount(slot, || onyxfs::set_mode(st.ino, mode))
     }
 }
 
 /// # Safety
 ///
 /// Caller contract: token must be a live fd token of the calling context;
-/// ownership check is performed inside.
+/// ownership check is performed inside. with_mount activates the fd's mount
+/// context under FS_LOCK.
 pub unsafe fn fchmod(token: FdToken, mode: u32) -> KResult<()> {
-    // SAFETY: fd_check validates idx and epoch. onyxfs::stat/set_mode take
-    // no cross-hart lock — concurrent fchmod calls are not serialized
-    // (journal is crash recovery only); caller must not race across harts.
+    // SAFETY: fd_check validates idx and epoch; the stat + set_mode pair
+    // runs in the fd's mount context (best-effort ownership check mirrors
+    // the historical behavior: a failed stat keeps uid 0, which only a
+    // root caller can override).
     unsafe {
         let idx = fd_check(token)?;
         let fd = fd_get(idx);
         if fd.fs != Fs::Onyx {
             return Err(Errno::NoSys);
         }
+        let mnt = fd.mnt as usize;
         if !is_kernel_boot() {
-            let mut st = onyxfs::OnyfsStat::default();
-            let _ = onyxfs::stat(fd.ino, &mut st);
+            let owner = with_mount(mnt, || {
+                let mut st = onyxfs::OnyfsStat::default();
+                let _ = onyxfs::stat(fd.ino, &mut st);
+                st.uid
+            });
             let cur = crate::proc::current();
-            if cur.uid != 0 && cur.uid != st.uid {
+            if cur.uid != 0 && cur.uid != owner {
                 return Err(Errno::Perm);
             }
         }
-        onyxfs::set_mode(fd.ino, mode)
+        with_mount(mnt, || onyxfs::set_mode(fd.ino, mode))
     }
 }

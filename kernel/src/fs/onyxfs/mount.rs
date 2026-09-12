@@ -53,25 +53,13 @@ pub unsafe fn mount(dev: usize, lba_offset: u32) -> KResult<()> {
     }
 }
 
-/// Read the virtio-blk device capacity in 512-byte sectors from its MMIO
-/// config space (read-only u64 at offset 0x100). Returns 0 for an invalid
-/// device index, which disables grow-on-mount.
+/// Read the virtio-blk device capacity in 512-byte sectors (driver helper;
+/// handles legacy vs modern config layout and non-512 block sizes).
+/// Returns 0 for an invalid device index, which disables grow-on-mount.
 unsafe fn blk_capacity_sectors(dev_idx: usize) -> u64 {
-    // SAFETY: dev_idx validated below via the null check; the one unsafe block
-    // dereferences `pd` only after `virtio::dev` returned a non-null pointer and
-    // is already covered by the inner SAFETY comment.
-    unsafe {
-        let pd = virtio::dev(dev_idx);
-        if pd.is_null() {
-            return 0;
-        }
-        // SAFETY: `dev` returned a valid registered device and `base` is its
-        // mapped MMIO region; config reads are side-effect-free.
-        let base = (*pd).base;
-        let lo = virtio::reg_r(base, 0x100) as u64;
-        let hi = virtio::reg_r(base, 0x104) as u64;
-        lo | (hi << 32)
-    }
+    // SAFETY: virtio::blk_capacity documents kernel-context-only MMIO reads
+    // and a null-safe device lookup; called from mount()/boot paths (SIE=0).
+    unsafe { virtio::blk_capacity(dev_idx) }
 }
 
 /// Grow-on-mount: if the backing block device reports more sectors than the

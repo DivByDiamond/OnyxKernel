@@ -1,5 +1,5 @@
 use crate::fs::onyxfs;
-use crate::fs::vfs::{FdToken, Fs, fd_check, fd_get, is_kernel_boot, resolve_mount};
+use crate::fs::vfs::{FdToken, Fs, fd_check, fd_get, is_kernel_boot, stat_target, with_mount};
 use crate::proc::PROC_RING_ROOT;
 use onyx_core::errno::{Errno, KResult};
 
@@ -24,20 +24,11 @@ fn chown_allowed(caller_uid: u32, caller_ring: u8, inode_uid: u32) -> bool {
 /// (kernel-side slice). Ownership check is performed inside (security fix,
 /// todo P1 #6 — previously ANY process could chown ANY file).
 pub unsafe fn chown(path: &[u8], uid: u32, gid: u32) -> KResult<()> {
-    // SAFETY: path slice is kernel-side; onyxfs::lookup/set_uid_gid take
-    // no cross-hart lock — concurrent chown calls are not serialized
-    // (journal is crash recovery only); caller must not race across harts.
+    // SAFETY: stat_target validates the path and filters non-Onyx to ENOSYS;
+    // set_uid_gid runs in the resolved mount's singleton context under
+    // FS_LOCK (serialization supersedes the old "caller must not race" note).
     unsafe {
-        if path.is_empty() || path[0] != b'/' {
-            return Err(Errno::Inval);
-        }
-        let name = &path[1..];
-        let (fs, _) = resolve_mount(name);
-        if fs != Fs::Onyx {
-            return Err(Errno::NoSys);
-        }
-        let mut st = onyxfs::OnyfsStat::default();
-        let ino = onyxfs::lookup(name, &mut st)?;
+        let (st, slot) = stat_target(path)?;
         // Security fix (todo P1 #6): ownership/privilege check, mirroring
         // chmod. Boot-time callers (no current process) bypass, same as
         // chmod, so first-boot filesystem population keeps working.
@@ -47,7 +38,7 @@ pub unsafe fn chown(path: &[u8], uid: u32, gid: u32) -> KResult<()> {
                 return Err(Errno::Perm);
             }
         }
-        onyxfs::set_uid_gid(ino, uid, gid)
+        with_mount(slot, || onyxfs::set_uid_gid(st.ino, uid, gid))
     }
 }
 
@@ -56,9 +47,11 @@ pub unsafe fn chown(path: &[u8], uid: u32, gid: u32) -> KResult<()> {
 /// Caller contract: token must be a live fd token of the calling context.
 /// Ownership check is performed inside (security fix, todo P1 #6).
 pub unsafe fn fchown(token: FdToken, uid: u32, gid: u32) -> KResult<()> {
-    // SAFETY: fd_check validates idx and epoch. onyxfs::stat/set_uid_gid take
-    // no cross-hart lock — concurrent fchown calls are not serialized;
-    // caller must not race metadata updates across harts.
+    // SAFETY: fd_check validates idx and epoch; the stat/set pair runs in
+    // the fd's mount context under FS_LOCK. Errors from stat are swallowed
+    // to keep the previous best-effort behavior of the boot path, but a
+    // FAILED stat cannot grant permission: st stays default (uid 0 =
+    // root-owned), so a non-root caller is still rejected by chown_allowed.
     unsafe {
         let idx = fd_check(token)?;
         let fd = fd_get(idx);
@@ -66,19 +59,20 @@ pub unsafe fn fchown(token: FdToken, uid: u32, gid: u32) -> KResult<()> {
             return Err(Errno::NoSys);
         }
         // Security fix (todo P1 #6): same policy as chown, resolved via the
-        // fd's inode number. stat() errors are swallowed to keep the
-        // previous best-effort behavior of the boot path, but a FAILED stat
-        // cannot grant permission: st stays default (uid 0 = root-owned),
-        // so a non-root caller is still rejected by chown_allowed.
+        // fd's inode number in the fd's mount context.
+        let mnt = fd.mnt as usize;
         if !is_kernel_boot() {
-            let mut st = onyxfs::OnyfsStat::default();
-            let _ = onyxfs::stat(fd.ino, &mut st);
+            let owner = with_mount(mnt, || {
+                let mut st = onyxfs::OnyfsStat::default();
+                let _ = onyxfs::stat(fd.ino, &mut st);
+                st.uid
+            });
             let cur = crate::proc::current();
-            if !chown_allowed(cur.uid, cur.ring, st.uid) {
+            if !chown_allowed(cur.uid, cur.ring, owner) {
                 return Err(Errno::Perm);
             }
         }
-        onyxfs::set_uid_gid(fd.ino, uid, gid)
+        with_mount(mnt, || onyxfs::set_uid_gid(fd.ino, uid, gid))
     }
 }
 
