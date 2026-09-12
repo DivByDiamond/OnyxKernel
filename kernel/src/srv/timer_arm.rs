@@ -13,6 +13,7 @@
 //! CSRs/firmware to ecall into.
 #[cfg(not(feature = "smode"))]
 use crate::arch::mmio::Mmio;
+#[cfg(not(feature = "smode"))]
 use crate::arch::regs::CLINT_BASE;
 
 #[cfg(not(feature = "smode"))]
@@ -25,10 +26,10 @@ pub(super) static mut G_MTIMECMP: usize = 0;
 /// Boot-time only, before any `read_mtime`/`arm_timer` call: sets the
 /// CLINT MMIO base addresses used by the non-`smode` builds.
 pub(super) unsafe fn init_mmio_bases() {
-    // SAFETY: single boot-hart call, before any reader; not(smode)-only statics.
-    unsafe {
-        #[cfg(not(feature = "smode"))]
-        {
+    #[cfg(not(feature = "smode"))]
+    {
+        // SAFETY: single boot-hart call, before any reader; not(smode)-only statics.
+        unsafe {
             G_MTIME = (CLINT_BASE + 0xBFF8) as usize;
             G_MTIMECMP = (CLINT_BASE + 0x4000) as usize;
         }

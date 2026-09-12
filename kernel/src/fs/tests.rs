@@ -13,5 +13,5 @@ fn test_fs_enum_from_u32() {
 #[test]
 fn test_vfs_limits() {
     assert_eq!(VFS_MAX_FDS, 16);
-    assert_eq!(MAX_MOUNTS, 6);
+    assert_eq!(MAX_MOUNTS, 8);
 }

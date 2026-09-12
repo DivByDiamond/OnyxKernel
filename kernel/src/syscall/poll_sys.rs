@@ -93,7 +93,7 @@ fn revents_console(fd: i64, events: i32) -> i32 {
     match fd {
         0 => {
             let mut rv = 0;
-            if events & POLLIN != 0 && crate::drivers::uart::rx_ready() {
+            if events & POLLIN != 0 && crate::syscall::tty::console_ready() {
                 rv |= POLLIN;
             }
             rv

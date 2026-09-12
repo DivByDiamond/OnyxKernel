@@ -52,7 +52,10 @@ pub struct Function {
 /// the startup demo exercises are constructed by the input-driven REPL
 /// (v0.6 plan, see todo.md); the interpreter matches them all today.
 #[derive(Clone, Debug)]
-#[allow(dead_code)]
+#[allow(
+    dead_code,
+    reason = "TODO(2026-09-12): full VM opcode surface; not all variants constructed by current demo/REPL, but interpreter matches them all for v0.6 REPL-driven execution"
+)]
 pub enum Instruction {
     // Stack operations
     Push(Value),

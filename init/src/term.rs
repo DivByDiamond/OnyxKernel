@@ -1,4 +1,4 @@
-// TODO(2026-08-27): shared termios helper module, compiled per onyx_init bin
+// TODO(2026-09-12): shared termios helper module, compiled per onyx_init bin
 // via `#[path]` includes — same pattern as `auth`/`syscalls` — because
 // onyx_init has no lib target yet.
 //
@@ -12,7 +12,14 @@
 // reads byte-wise until Enter, mirrors each accepted char as '*' (raw mode
 // has no kernel-side echo, so previously typing was completely invisible),
 // supports backspace with on-screen erase, and restores cooked mode after.
-#![allow(dead_code, unused_imports)]
+#![allow(
+    dead_code,
+    reason = "TODO(2026-09-12): shared auth/syscalls/term module compiled per onyx_init bin; per-bin unused items are live in other bins"
+)]
+#![allow(
+    unused_imports,
+    reason = "TODO(2026-09-12): same shared-module per-bin import set"
+)]
 
 use crate::syscalls;
 

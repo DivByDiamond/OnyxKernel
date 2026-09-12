@@ -98,7 +98,7 @@ unsafe fn generate_content(ino: u32) -> KResult<&'static [u8]> {
                 pos += fmt::format_line(b"MemTotal\t: ", total_kb, b" kB\n", buf, pos);
                 pos += fmt::format_line(b"MemFree\t\t: ", free_kb, b" kB\n", buf, pos);
                 pos += fmt::format_line(b"MemUsed\t\t: ", used_kb, b" kB\n", buf, pos);
-                pos += fmt::format_line(b"HeapTotal\t: 4096 kB\n", 0, b"", buf, pos);
+                pos += fmt::format_line(b"HeapTotal\t: ", 4096, b" kB\n", buf, pos);
                 pos += fmt::format_line(
                     b"HeapUsed\t: ",
                     (heap_used / 1024) as u64,
@@ -117,7 +117,10 @@ unsafe fn generate_content(ino: u32) -> KResult<&'static [u8]> {
                 let secs = us / 1_000_000;
                 let frac = (us % 1_000_000) / 10_000;
                 pos += fmt::format_dec(secs, buf, pos);
-                pos += b".".len();
+                if pos < buf.len() {
+                    buf[pos] = b'.';
+                    pos += 1;
+                }
                 if pos + 2 <= buf.len() {
                     buf[pos] = b'0' + (frac / 10) as u8;
                     buf[pos + 1] = b'0' + (frac % 10) as u8;
@@ -133,7 +136,7 @@ unsafe fn generate_content(ino: u32) -> KResult<&'static [u8]> {
                 pos += fmt::format_line(b"processes\t: ", procs as u64, b"\n", buf, pos);
                 let running = 1u64;
                 pos += fmt::format_line(b"procs_running\t: ", running, b"\n", buf, pos);
-                pos += fmt::format_line(b"procs_blocked\t: 0\n", 0, b"", buf, pos);
+                pos += fmt::format_line(b"procs_blocked\t: ", 0, b"\n", buf, pos);
                 core::str::from_utf8_unchecked(&buf[..pos.min(buf.len())])
             }
             PROCFS_STAT_INO => {
@@ -144,10 +147,10 @@ unsafe fn generate_content(ino: u32) -> KResult<&'static [u8]> {
                 let _harts = crate::arch::smp::online_harts();
                 let procs = proc::count();
                 pos += fmt::format_line(b"btime ", secs, b"\n", buf, pos);
-                pos += fmt::format_line(b"cpu 0 0 0 0 0 0 0 0 0 0\n", 0, b"", buf, pos);
+                pos += fmt::format_line_raw(b"cpu 0 0 0 0 0 0 0 0 0 0\n", buf, pos);
                 pos += fmt::format_line(b"processes ", procs as u64, b"\n", buf, pos);
-                pos += fmt::format_line(b"procs_running 1\n", 0, b"", buf, pos);
-                pos += fmt::format_line(b"procs_blocked 0\n", 0, b"", buf, pos);
+                pos += fmt::format_line(b"procs_running ", 1, b"\n", buf, pos);
+                pos += fmt::format_line(b"procs_blocked ", 0, b"\n", buf, pos);
                 core::str::from_utf8_unchecked(&buf[..pos.min(buf.len())])
             }
             PROCFS_MODULES_INO => {

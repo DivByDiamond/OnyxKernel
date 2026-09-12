@@ -2,6 +2,7 @@
 //! subsystem. The ACL layer in `handler::syscall_allowed` already enforces
 //! that only ring ≤ PROC_RING_ROOT may invoke them.
 use crate::fs::onyxfs;
+use crate::fs::vfs::{MNT_ROOT, with_mount};
 use onyx_core::errno::Errno;
 
 use super::handler::user_ptr_ok;
@@ -29,7 +30,10 @@ pub(super) unsafe fn sys_snapshot_create(name: u64) -> i64 {
             len += 1;
         }
         let name_bytes = core::slice::from_raw_parts(p, len);
-        match onyxfs::snapshot_create(name_bytes) {
+        // Snapshots always address the ROOT volume: with_mount(MNT_ROOT)
+        // holds FS_LOCK and refuses to swap the singletons to a secondary
+        // mount, serializing against all other filesystem operations.
+        match with_mount(MNT_ROOT, || onyxfs::snapshot_create(name_bytes)) {
             Ok(id) => id as i64,
             Err(e) => e.as_i64(),
         }
@@ -42,10 +46,10 @@ pub(super) unsafe fn sys_snapshot_create(name: u64) -> i64 {
 /// Call only from the syscall path (ACL already restricts this to ring <=
 /// PROC_RING_ROOT); no user memory is touched.
 pub(super) unsafe fn sys_snapshot_rollback(id: u32) -> i64 {
-    // SAFETY: body performs no unsafe operations; the block only wraps the
-    // call to onyxfs::snapshot_rollback for the unsafe-fn dispatch convention.
+    // SAFETY: with_mount takes FS_LOCK in kernel (SIE=0) context and runs
+    // the rollback on the root volume's singleton state.
     unsafe {
-        match onyxfs::snapshot_rollback(id) {
+        match with_mount(MNT_ROOT, || onyxfs::snapshot_rollback(id)) {
             Ok(()) => 0,
             Err(e) => e.as_i64(),
         }
@@ -75,7 +79,9 @@ pub(super) unsafe fn sys_snapshot_list(buf: u64, len: u64) -> i64 {
         {
             return Errno::Fault.as_i64();
         }
-        match onyxfs::snapshot_list(buf as *mut u8, len as usize) {
+        match with_mount(MNT_ROOT, || {
+            onyxfs::snapshot_list(buf as *mut u8, len as usize)
+        }) {
             Ok(count) => count as i64,
             Err(e) => e.as_i64(),
         }

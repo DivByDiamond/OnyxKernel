@@ -1,33 +1,19 @@
-//! Parser state machine for the ANSI console: byte feeding, CSI/ESC
-//! sequence interpretation and SGR attribute handling.
-//!
-//! Terminal state ([`AnsiTerm`](super::state::AnsiTerm)) and pixel-level
-//! rendering ([`render`](super::render)) live in sibling modules.
+//! ANSI parser: byte feed, CSI dispatch and SGR.
+mod sgr;
 
 use super::state::{AnsiTerm, ParseState};
-use crate::drivers::fb;
 
 impl AnsiTerm {
-    /// Feed one byte from a console write. Bytes are drawn through the
-    /// fb_term writer; escape sequences update the parser and the grid.
     pub fn putc(&mut self, c: u8) {
         self.sync_size();
-
         match self.state {
             ParseState::Ground => match c {
                 0x1b => self.state = ParseState::Esc,
                 b'\n' => self.newline(),
                 b'\r' => self.cur_col = 0,
-                b'\t' => {
-                    let next = (self.cur_col + 8) & !7;
-                    self.cur_col = next.min(self.cols - 1);
-                }
-                0x08 => {
-                    if self.cur_col > 0 {
-                        self.cur_col -= 1;
-                    }
-                }
-                0x07 => { /* BEL: ignore (no audio) */ }
+                b'\t' => self.cur_col = ((self.cur_col + 8) & !7).min(self.cols - 1),
+                0x08 => self.cur_col = self.cur_col.saturating_sub(1),
+                0x07 => {}
                 _ => self.print_char(c),
             },
             ParseState::Esc => match c {
@@ -58,14 +44,8 @@ impl AnsiTerm {
                     self.index();
                     self.state = ParseState::Ground;
                 }
-                b'(' | b')' => {
-                    // Charset designation — swallow next byte.
-                    self.state = ParseState::Ground;
-                }
-                b']' => {
-                    // OSC — ignore until BEL/ST (simplified: swallow).
-                    self.state = ParseState::Ground;
-                }
+                b'(' | b')' => self.state = ParseState::Ground,
+                b']' => self.state = ParseState::Ground,
                 _ => self.state = ParseState::Ground,
             },
             ParseState::Csi => self.csi_byte(c),
@@ -86,11 +66,10 @@ impl AnsiTerm {
             self.dispatch_csi(c);
             self.state = ParseState::Ground;
         }
-        // Other intermediates (0x20-0x2f) ignored.
     }
 
     fn p(&self, idx: usize, default: u32) -> u32 {
-        if idx < self.nparams && self.params[idx] != 0 {
+        if idx <= self.nparams && idx < 16 && self.params[idx] != 0 {
             self.params[idx]
         } else {
             default
@@ -117,41 +96,32 @@ impl AnsiTerm {
             }
             b'G' | b'`' => {
                 let col = self.p(0, 1) as usize;
-                self.cur_col = (col.saturating_sub(1)).min(self.cols - 1);
+                self.cur_col = col.saturating_sub(1).min(self.cols - 1);
             }
             b'd' => {
                 let row = self.p(0, 1) as usize;
-                let row = (row.saturating_sub(1)).min(self.rows - 1);
+                let row = row.saturating_sub(1).min(self.rows - 1);
                 self.cur_row = row.clamp(self.top, self.bot);
             }
             b'H' | b'f' => {
                 let row = self.p(0, 1) as usize;
                 let col = self.p(1, 1) as usize;
-                let row = (row.saturating_sub(1)).min(self.rows - 1);
-                let col = (col.saturating_sub(1)).min(self.cols - 1);
+                let row = row.saturating_sub(1).min(self.rows - 1);
+                let col = col.saturating_sub(1).min(self.cols - 1);
                 self.cur_row = row.clamp(self.top, self.bot);
                 self.cur_col = col;
             }
             b'J' => {
-                let mode = if self.nparams > 0 { self.params[0] } else { 0 };
+                let mode = self.params[0];
                 self.erase_display(mode);
             }
             b'K' => {
-                let mode = if self.nparams > 0 { self.params[0] } else { 0 };
+                let mode = self.params[0];
                 self.erase_line(mode);
             }
             b's' => self.save_cursor(),
             b'u' => self.restore_cursor(),
             b'h' | b'l' => {
-                // DEC private modes (ESC[?25l, ESC[?1049h ...). The guard used
-                // to require nparams >= 1, but nparams only counts ';'
-                // separators: the canonical single-param form "?25l" arrives
-                // with nparams == 0 and the mode sitting in params[0], so
-                // cursor hide/show was silently ignored (TUIs hide the
-                // cursor via ?25l during redraw — exactly the flash window).
-                // params[0] holds the first parameter in both encodings;
-                // a parameterless form leaves params[0] == 0, which no
-                // private mode uses (no-op in set_private_mode).
                 if self.private {
                     self.set_private_mode(self.params[0], cmd == b'h');
                 }
@@ -160,8 +130,8 @@ impl AnsiTerm {
             b'r' => {
                 let top = self.p(0, 1) as usize;
                 let bot = self.p(1, self.rows as u32) as usize;
-                let top = (top.saturating_sub(1)).min(self.rows - 1);
-                let bot = (bot.saturating_sub(1)).min(self.rows - 1);
+                let top = top.saturating_sub(1).min(self.rows - 1);
+                let bot = bot.saturating_sub(1).min(self.rows - 1);
                 if top < bot {
                     self.top = top;
                     self.bot = bot;
@@ -181,40 +151,10 @@ impl AnsiTerm {
                     self.reverse_index();
                 }
             }
-            _ => { /* unsupported: ignore */ }
+            _ => {}
         }
     }
 
-    fn sgr(&mut self) {
-        if self.nparams == 0 {
-            self.params[0] = 0;
-            self.nparams = 1;
-        }
-        let mut i = 0;
-        while i < self.nparams.max(1) {
-            let p = self.params[i.min(15)];
-            match p {
-                0 => {
-                    self.fg = fb::COL_GREEN;
-                    self.bg = fb::COL_BLACK;
-                    self.reverse = false;
-                }
-                7 => self.reverse = true,
-                27 => self.reverse = false,
-                30..=37 => self.fg = sgr_color(p - 30, false),
-                90..=97 => self.fg = sgr_color(p - 90, true),
-                40..=47 => self.bg = sgr_color(p - 40, false),
-                100..=107 => self.bg = sgr_color(p - 100, true),
-                39 => self.fg = fb::COL_GREEN,
-                49 => self.bg = fb::COL_BLACK,
-                _ => {}
-            }
-            i += 1;
-        }
-    }
-
-    /// Move the cursor down one line, scrolling the region up when at its
-    /// bottom edge.
     pub(super) fn index(&mut self) {
         if self.cur_row == self.bot {
             self.scroll_up();
@@ -222,9 +162,6 @@ impl AnsiTerm {
             self.cur_row += 1;
         }
     }
-
-    /// Move the cursor up one line, scrolling the region down when at its
-    /// top edge.
     pub(super) fn reverse_index(&mut self) {
         if self.cur_row == self.top {
             self.scroll_down();
@@ -232,33 +169,8 @@ impl AnsiTerm {
             self.cur_row -= 1;
         }
     }
-
-    /// Move down one row AND return to column 0 (POSIX ONLCR convention:
-    /// a real tty translates outgoing `\n` to `\r\n` before it reaches the
-    /// terminal, so userspace code — kinf!/login/osh here — writes bare
-    /// `\n` and relies on that translation). Found while verifying the
-    /// blank-console fix (2026-09-12): the UART path looked fine only
-    /// because the HOST terminal's own tty layer supplies the missing
-    /// carriage return; the pixel console has no such layer of its own, so
-    /// every line "staircased" further right than the last. `index()`
-    /// alone is still exposed separately for ESC D (plain IND, which must
-    /// NOT touch the column per the real VT100 spec).
     fn newline(&mut self) {
         self.index();
         self.cur_col = 0;
-    }
-}
-
-fn sgr_color(idx: u32, bright: bool) -> u32 {
-    let base = if bright { 8 } else { 0 };
-    match idx + base {
-        0 => fb::COL_BLACK,
-        1 => fb::COL_RED,
-        2 => fb::COL_GREEN,
-        3 => fb::COL_YELLOW,
-        4 => fb::COL_BLUE,
-        5 => fb::COL_MAGENTA,
-        6 => fb::COL_CYAN,
-        _ => fb::COL_WHITE,
     }
 }

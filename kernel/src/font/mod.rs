@@ -25,7 +25,8 @@ pub unsafe fn init(data: &[u8]) -> KResult<()> {
         if data.len() < 4 {
             return Err(Errno::Io);
         }
-        let magic = u32::from_le_bytes(data[..4].try_into().unwrap());
+        let magic_bytes: [u8; 4] = data[..4].try_into().map_err(|_| Errno::Io)?;
+        let magic = u32::from_le_bytes(magic_bytes);
         if magic == 0x0436 || (magic & 0xFFFF) == 0x0436 {
             psf1::init_psf1(data)
         } else if magic == 0x864ab572 {

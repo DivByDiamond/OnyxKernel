@@ -216,7 +216,11 @@ pub unsafe fn sys_ioctl(fd: u64, request: u64, arg: u64) -> i64 {
                     return 0;
                 }
                 let count: u32 = if fd == 0 {
-                    if uart::rx_ready() { 1 } else { 0 }
+                    let mut pending = crate::drivers::input::tty::pending();
+                    if uart::rx_ready() {
+                        pending = pending.saturating_add(1);
+                    }
+                    pending.min(u32::MAX as usize) as u32
                 } else if fd <= 2 {
                     0
                 } else {

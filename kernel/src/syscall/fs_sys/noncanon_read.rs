@@ -6,13 +6,13 @@
 
 use crate::arch::trap_frame::TrapFrame;
 use crate::proc;
+use crate::syscall::tty::console_next_byte;
 use onyx_core::errno::Errno;
 
-/// Next line-disciplined byte from the UART (Ctrl+C consumed by
-/// filter_input). Shared with console_read via a small closure-free call.
+/// Next line-disciplined console byte. Shared with console_read.
 #[inline]
 fn next_byte() -> Option<u8> {
-    crate::drivers::uart::getc().and_then(crate::syscall::tty::filter_input)
+    console_next_byte()
 }
 
 #[inline]

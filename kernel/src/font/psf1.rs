@@ -12,7 +12,8 @@ pub(super) unsafe fn init_psf1(data: &[u8]) -> KResult<()> {
         if data.len() < 4 {
             return Err(Errno::Io);
         }
-        let magic = u16::from_le_bytes(data[..2].try_into().unwrap());
+        let magic_bytes: [u8; 2] = data[..2].try_into().map_err(|_| Errno::Io)?;
+        let magic = u16::from_le_bytes(magic_bytes);
         if magic != 0x0436 {
             return Err(Errno::NoEnt);
         }

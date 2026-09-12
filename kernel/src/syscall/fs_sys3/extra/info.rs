@@ -36,7 +36,8 @@ pub unsafe fn sys_getdents64(fd: u64, buf: u64, count: u64) -> i64 {
 
         loop {
             let mut entry_buf = [0u8; 256];
-            match vfs::readdir_entry_by_ino(f.fs, f.ino, cursor, entry_buf.as_mut_ptr(), 256) {
+            match vfs::readdir_entry_by_ino(f.fs, f.ino, cursor, entry_buf.as_mut_ptr(), 256, f.mnt)
+            {
                 Ok(Some(d_ino)) => {
                     let name_len = entry_buf.iter().position(|&b| b == 0).unwrap_or(0);
                     let reclen = 19 + name_len as u16;

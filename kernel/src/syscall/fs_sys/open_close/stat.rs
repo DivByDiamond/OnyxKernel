@@ -132,10 +132,12 @@ pub unsafe fn sys_stat(path: u64, st_buf: u64) -> i64 {
         let _ = vfs::close(token);
         match res_stat {
             Ok(()) => {
-                let mut st = crate::fs::onyxfs::OnyfsStat::default();
+                // stat_target runs the lookup in the path's mount context
+                // (root or secondary OnyxFS); non-Onyx targets fall back to
+                // the synthetic defaults, as before.
                 let (mtime, atime, ctime, ino, mode, uid, gid) =
-                    match crate::fs::onyxfs::lookup(path_bytes, &mut st) {
-                        Ok(_) => (
+                    match crate::fs::vfs::stat_target(path_bytes) {
+                        Ok((st, _slot)) => (
                             st.mtime, st.atime, st.ctime, st.ino, st.mode, st.uid, st.gid,
                         ),
                         Err(_) => {

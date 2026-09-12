@@ -58,8 +58,11 @@ pub unsafe fn sys_open(path: u64, flags: u64, mode: u64) -> i64 {
                 );
                 return Errno::Perm.as_i64();
             }
-            let mut st = crate::fs::onyxfs::OnyfsStat::default();
-            if crate::fs::onyxfs::lookup(path_bytes, &mut st).is_ok() {
+            // stat_target resolves the mount (root or secondary) under
+            // FS_LOCK; non-Onyx paths return Err and skip this pre-check,
+            // matching the historical behavior of the plain lookup.
+            let existing = crate::fs::vfs::stat_target(path_bytes);
+            if let Ok((st, _slot)) = existing {
                 let flags32 = flags as u32;
                 let acc_mode = flags32 & O_ACCMODE;
                 let want_read =

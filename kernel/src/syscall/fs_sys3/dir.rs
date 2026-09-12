@@ -1,4 +1,4 @@
-use crate::fs::onyxfs;
+use crate::fs::vfs;
 use crate::proc;
 
 use super::super::handler::{parse_user_path, user_ptr_ok};
@@ -11,7 +11,8 @@ use super::super::handler::{parse_user_path, user_ptr_ok};
 pub unsafe fn sys_chdir(path: u64) -> i64 {
     // SAFETY: parse_user_path validates the user path internally and copies
     // it into a kernel stack buffer; set_cwd writes this hart's current
-    // process cwd field with that kernel copy.
+    // process cwd field with that kernel copy. is_dir_target resolves the
+    // mount and checks the directory under FS_LOCK in that mount's context.
     unsafe {
         let mut path_buf = [0u8; 256];
         let path_len = match parse_user_path(path, &mut path_buf) {
@@ -19,7 +20,7 @@ pub unsafe fn sys_chdir(path: u64) -> i64 {
             None => return onyx_core::errno::Errno::Inval.as_i64(),
         };
         let path_bytes = &path_buf[..path_len];
-        match onyxfs::resolve_dir(path_bytes) {
+        match vfs::is_dir_target(path_bytes) {
             Ok(_ino) => {
                 proc::set_cwd(path_bytes);
                 0

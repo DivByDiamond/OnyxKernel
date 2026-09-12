@@ -25,14 +25,9 @@ const FW_CFG_FILE_DIR: u16 = 0x0019;
 const FW_CFG_DMA_CTL_SELECT: u32 = 0x08;
 const FW_CFG_DMA_CTL_WRITE: u32 = 0x10;
 
-#[allow(dead_code)]
-#[repr(C, packed)]
-struct FwCfgFile {
-    size: u32,
-    select: u16,
-    reserved: u16,
-    name: [u8; 56],
-}
+// FwCfgFile layout kept as comment for spec reference (QEMU fw_cfg file dir entry):
+// { size:u32, select:u16, reserved:u16, name:[u8;56] } — parsed manually via
+// Mmio reads in find_ramfb_selector to avoid packing/endianness pitfalls.
 
 /// Layout QEMU's fw_cfg DMA engine expects at the address written to
 /// `FW_CFG_DMA`: control, then length, then the target buffer address —
@@ -88,9 +83,8 @@ unsafe fn find_ramfb_selector() -> Option<u16> {
                 let _ = Mmio::<u8>::at(FW_CFG_DATA).read();
             }
             let mut name = [0u8; 56];
-            #[allow(clippy::needless_range_loop)]
-            for j in 0..56 {
-                name[j] = Mmio::<u8>::at(FW_CFG_DATA).read();
+            for slot in &mut name {
+                *slot = Mmio::<u8>::at(FW_CFG_DATA).read();
             }
             // Compare name with "etc/ramfb".
             if size as usize == core::mem::size_of::<RamfbCfg>() {

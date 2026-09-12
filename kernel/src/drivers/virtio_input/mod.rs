@@ -159,4 +159,4 @@ unsafe fn push(idx: usize) {
 }
 
 pub mod decode;
-pub use decode::{EventType, poll, poll_unified};
+pub use decode::{EventType, event_type, poll, poll_unified};

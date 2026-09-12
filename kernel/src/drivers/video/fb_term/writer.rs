@@ -19,7 +19,7 @@ impl FbWriter {
         Self {
             col: 0,
             row: 0,
-            fg: fb::COL_GREEN,
+            fg: fb::COL_WHITE,
             bg: fb::COL_BLACK,
         }
     }

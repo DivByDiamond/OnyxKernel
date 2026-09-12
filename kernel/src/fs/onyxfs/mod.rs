@@ -11,6 +11,7 @@
 //! `G_VERSION` and the per-version inode/dirent sizes are used throughout.
 pub mod alloc;
 pub mod compress;
+pub mod context;
 pub mod inode;
 pub mod journal;
 pub mod lookup;
@@ -25,6 +26,7 @@ pub mod symlink;
 pub mod unlink;
 pub mod write;
 
+pub use context::*;
 pub use inode::*;
 pub use journal::*;
 pub use lookup::*;
