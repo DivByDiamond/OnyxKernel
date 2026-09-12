@@ -67,10 +67,10 @@ pub unsafe fn init() -> KResult<u64> {
     unsafe {
         let root_pa = new_root()?;
         crate::arch::smp::G_KERNEL_ROOT_PA = root_pa;
-        let root = root_pa as *mut u64;
         let leaf_flags = PTE_V | PTE_R | PTE_W | PTE_X | PTE_A | PTE_D;
         #[cfg(target_pointer_width = "64")]
         {
+            let root = root_pa as *mut u64;
             for i in 0..3u64 {
                 let pa = i << 30;
                 ptr::write_volatile(
@@ -81,10 +81,61 @@ pub unsafe fn init() -> KResult<u64> {
         }
         #[cfg(target_pointer_width = "32")]
         {
-            ptr::write_volatile(
-                root.add(0),
-                PTE_V | leaf_flags | (0u64 >> 12 << PTE_PPN_SHIFT),
-            );
+            // Root-cause fix (2026-09-12, found while live-testing the rv32
+            // timer port — todo.md "rv32 mtrap"): this used to write a
+            // SINGLE leaf at index 0, covering only VA/PA 0x0-0x3FFFFF.
+            // QEMU's riscv `virt` machine places DRAM at a fixed
+            // 0x80000000 regardless of XLEN (same physical map as the
+            // rv64 board) — the kernel itself loads at 0x80200000+. Sv32's
+            // top level indexes 4 MiB megapages by VPN[1] = PA >> 22, so
+            // 0x80000000's index is 512, not 0: the very first identity-
+            // mapped instruction fetch after `install_root` (this
+            // kernel's own code) had nothing mapped there and faulted
+            // immediately. rv32 had never actually booted past this
+            // point — the bug was invisible because nothing before this
+            // session ever ran an rv32 build in QEMU (compile+clippy only).
+            //
+            // Also note `root` above is typed `*mut u64` for the rv64
+            // branch, but Sv32 PTEs are natively 32-bit words — reusing
+            // that pointer with `.add(index)` for any index > 0 would
+            // stride by 8 bytes instead of 4 and write into the wrong
+            // slot entirely, so this branch uses its own `*mut u32` view.
+            //
+            // Identity-map a generous 512 MiB window starting at the DRAM
+            // base (128 x 4 MiB megapages) — comfortably covers every RAM
+            // size this project boots with (128M/256M in the QEMU launch
+            // scripts) with headroom, mirroring how the rv64 branch above
+            // covers a fixed generous physical window rather than exactly
+            // the FDT-reported size.
+            //
+            // A second bug found alongside the first (same debug session):
+            // this only covered DRAM, but the VERY NEXT instruction after
+            // `install_root` switches SATP is `uart::putc(b'V')` back in
+            // `early_init` — the UART's MMIO base (0x1000_0000 on QEMU
+            // `virt`, well below DRAM) was left unmapped, so paging killed
+            // the console immediately, one call after the DRAM fix "solved"
+            // the boot hang (still silent — no fault handler is live yet
+            // this early). rv64 never hit this because its three 1 GiB
+            // gigapages (indices 0/1/2, covering 0x0-0xC0000000) happen to
+            // sweep CLINT/PLIC/UART/virtio AND DRAM into the same window
+            // for free. Sv32's megapages are too small to do that cheaply
+            // in one range, so this maps a second, separate low window
+            // (0x0-0x2000_0000) comfortably covering every MMIO device
+            // this kernel probes at boot (CLINT @0x0200_0000, PLIC
+            // @0x0C00_0000, UART/virtio @0x1000_0000+).
+            const DRAM_BASE: u64 = 0x8000_0000;
+            const MMIO_BASE: u64 = 0x0000_0000;
+            const MEGAPAGE: u64 = 1 << 22; // Sv32 VPN[1] granularity (4 MiB)
+            const NPAGES: u64 = 128; // 128 x 4 MiB = 512 MiB per window
+            let root32 = root_pa as *mut u32;
+            for base in [MMIO_BASE, DRAM_BASE] {
+                let vpn1_base = (base / MEGAPAGE) as usize;
+                for i in 0..NPAGES {
+                    let pa = base + i * MEGAPAGE;
+                    let pte = (PTE_V | leaf_flags | (pa >> 12 << PTE_PPN_SHIFT)) as u32;
+                    ptr::write_volatile(root32.add(vpn1_base + i as usize), pte);
+                }
+            }
         }
         let p = &raw mut G_KERNEL_ROOT_PA;
         *p = root_pa;
