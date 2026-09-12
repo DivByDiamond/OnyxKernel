@@ -11,7 +11,7 @@
 #![no_main]
 
 mod libtui;
-mod syscalls;
+use onyx_init::{syscalls};
 
 use libtui::{Button, Event, Label, Layout, TextBox, Widget, font};
 

@@ -4,7 +4,7 @@
 use core::arch::asm;
 
 mod auth;
-mod syscalls;
+use onyx_init::syscalls;
 
 #[unsafe(no_mangle)]
 /// # Safety

@@ -1,7 +1,7 @@
 #![no_std]
 #![no_main]
 
-mod syscalls;
+use onyx_init::{syscalls};
 
 const MSG: &[u8] = b"Hello from Onyx!\n";
 

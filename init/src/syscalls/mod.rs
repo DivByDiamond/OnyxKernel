@@ -1,16 +1,3 @@
-// TODO(2026-09-12): shared auth/syscalls module, compiled per onyx_init bin via
-// `mod syscalls;`. Wrapper fns unused by one bin are used by others; per-bin
-// dead_code/unused_imports warnings are unavoidable without a lib target.
-// Verified 2026-08-27: all wrappers are live (each reaches at least one bin,
-// the rest form the init-side syscall library surface for upcoming bins).
-#![allow(
-    dead_code,
-    reason = "TODO(2026-09-12): shared auth/syscalls/term module compiled per onyx_init bin; per-bin unused items are live in other bins"
-)]
-#![allow(
-    unused_imports,
-    reason = "TODO(2026-09-12): same shared-module per-bin import set"
-)]
 pub mod call;
 pub mod consts;
 

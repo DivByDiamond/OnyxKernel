@@ -1,7 +1,7 @@
 #![no_std]
 #![no_main]
 
-mod syscalls;
+use onyx_init::{syscalls};
 
 const FB_IOCTL_GET_INFO: u64 = 0x4600;
 

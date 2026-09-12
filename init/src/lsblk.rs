@@ -1,7 +1,7 @@
 #![no_std]
 #![no_main]
 
-mod syscalls;
+use onyx_init::{syscalls};
 
 #[repr(C)]
 #[derive(Clone, Copy)]

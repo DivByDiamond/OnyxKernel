@@ -6,7 +6,7 @@ use core::arch::asm;
 
 mod boottest;
 mod pid1;
-mod syscalls;
+use onyx_init::{syscalls};
 mod util;
 
 const BANNER: &[u8] = b"[init] OnyxOS init v0.4 (service manager)\n";
