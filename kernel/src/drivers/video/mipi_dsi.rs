@@ -9,13 +9,21 @@
 //! - `dsi_mac` base `0x0A08_A000` (TRM memory map + §16.5.4).
 //! - D-PHY base `0x0A0D_1000` (TRM §16.5.6 "MIPI Tx PHY 寄存器位置").
 //!
-//! Caveat carried forward honestly: the D-PHY bit-clock PLL divider
-//! (`REG_24`, a Q6.26 fixed-point "Frequency Synthesizer" value) is fed
-//! from a shared MIPIMPLL clock tree documented elsewhere in the TRM
-//! (§ around `reg_dsi_ssc_syn_src_en`) that this driver does not fully
-//! resolve — [`pll_divider`] assumes a 24 MHz reference and should be
-//! cross-checked against Sophgo's vendor SDK (`cvi_mipi_tx` driver)
-//! before trusting exact pixel clocks on real silicon. Command TX uses
+//! Caveat verified, not just flagged: the TRM (checked against both the
+//! `zh` and `en` register-description text via `sophgo/sophgo-doc`, and
+//! the source PDF) documents `REG_24`'s format as Q6.26 fixed-point
+//! ("format 6.26") and nothing more — no formula ties `reg_set` to a
+//! reference frequency. The reset value `0x11F5_14F9` decodes to
+//! `~4.489` in Q6.26, and TRM §6.x shows `reg_dsi_ssc_syn_src_en`
+//! gating a *separate* "MIPIMPLL" synthesizer upstream of this
+//! register, so `reg_set` is not simply `lane_mbps / ref_mhz` against
+//! the 24 MHz crystal. Sophgo's actual `cvi_mipi_tx` driver isn't
+//! published (checked GitHub code search across `sophgo/*` — no
+//! source), so [`pll_divider`]'s reference-frequency assumption is a
+//! best-effort placeholder, not a verified value; getting a real one
+//! requires either the vendor SDK binary/headers or a register dump
+//! from a working vendor-Linux boot on the actual board. Command TX
+//! uses
 //! the MAC's escape/LPDT path, which is real hardware but whose exact
 //! DCS-packet byte layout (raw bytes vs. HW-assembled header) is
 //! likewise unverified against the vendor SDK — see [`send_cmd`].
@@ -77,8 +85,11 @@ unsafe fn wr_phy(off: u32, v: u32) {
 }
 
 /// D-PHY bit-clock PLL divider (TRM §16.5.7 `REG_24`, Q6.26 fixed point:
-/// bits[31:26] integer part, bits[25:0] fraction). Assumes a 24 MHz
-/// reference (see the module-level caveat on the MIPIMPLL clock tree).
+/// bits[31:26] integer part, bits[25:0] fraction — confirmed by the TRM
+/// text; the reference frequency and multiply/divide direction are
+/// **not** documented anywhere in the TRM, so `ref_mhz` here is an
+/// unverified placeholder, not a confirmed constant — see the
+/// module-level caveat).
 fn pll_divider(lane_mbps: u32, ref_mhz: u32) -> u32 {
     let target = lane_mbps.max(1) as u64;
     let ratio_q26 = (target << 26) / ref_mhz.max(1) as u64;
