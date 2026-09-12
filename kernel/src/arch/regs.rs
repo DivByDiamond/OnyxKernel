@@ -1,5 +1,3 @@
-#![allow(non_upper_case_globals)]
-
 pub const MSTATUS_MIE: u64 = 1 << 3;
 pub const MSTATUS_SIE: u64 = 1 << 1;
 pub const MSTATUS_MPP_S: u64 = 1 << 11;

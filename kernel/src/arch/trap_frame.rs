@@ -3,8 +3,6 @@
 //! On 64-bit (rv64gc): 288 bytes, 36 u64 fields. Matches trap.S offsets.
 //! On 32-bit (rv32gc): 144 bytes, 36 u32 fields. Matches trap_32.S offsets.
 
-#![allow(non_snake_case)]
-
 #[cfg(target_pointer_width = "64")]
 pub const TRAP_FRAME_SIZE: usize = 288;
 

@@ -1,5 +1,3 @@
-#![allow(non_upper_case_globals)]
-
 //! Architecture-specific constants gated by target_pointer_width.
 //!
 //! OnyxKernel was originally written for RISC-V 64-bit (Sv39 paging,
