@@ -2,7 +2,7 @@ use core::{ptr, sync::atomic::Ordering};
 
 use super::runqueue::{G_RQ, dequeue, enqueue, rq_lock, rq_unlock};
 use crate::{
-    arch::trap_frame::TrapFrame,
+    arch::{csr, regs::SSTATUS_SIE, trap_frame::TrapFrame},
     proc::process::{
         G_HART_IDLE_TF, G_HART_IDLE_TF_VALID, G_NEED_RESCHED, KSTACK_SIZE, MAX_HARTS, Proc,
         ProcState, current_for_hart, hart_id, set_current_for_hart,
@@ -148,6 +148,32 @@ pub unsafe fn sched_yield(tf: &mut TrapFrame) {
             (*next).state = ProcState::Running;
             rq_unlock(hartid);
             G_NEED_RESCHED[hartid].store(false, Ordering::Release);
+            // Root-cause fix (blank-console / dead-100Hz-timer investigation,
+            // 2026-09-12): this is the busy-poll self-yield path — the only
+            // runnable process on this hart yielded back to itself (e.g.
+            // console_read spinning on read(0) with nothing else to run).
+            // Returning straight back into the caller's kernel loop left
+            // sstatus.SIE at 0 (inherited from trap entry) forever: a
+            // pending CLINT tick (sip.STIP) could never be delivered, so
+            // srv::timer::handle() never ran, its SBI_SET_TIMER ecall never
+            // re-armed mie.MTIE (arch/asm/mtrap.rs clears MTIE when
+            // forwarding a tick and only re-arms it from that ecall), and
+            // the 100 Hz tick died forever after the interrupt already in
+            // flight at the moment this path was first hit — taking
+            // preemption, the watchdog, soft timers and the console
+            // presenter (fb_term::ansi::present_tick) down with it.
+            //
+            // No SpinLock is held here (rq_unlock already ran above), so
+            // this mirrors the ONE other audited place that runs with
+            // SIE set (proc::scheduler::idle::sched_enter_idle, see the
+            // interrupt invariant in crate::sync): open a short interrupt
+            // window so a pending tick is taken and serviced, then restore
+            // the kernel's SIE=0 invariant before returning to the caller.
+            // No additional `unsafe` needed: this whole function body already
+            // runs inside the caller's unsafe block (see the fn signature).
+            csr::set_sstatus(SSTATUS_SIE);
+            core::arch::asm!("nop");
+            csr::clear_sstatus(SSTATUS_SIE);
             return;
         }
 
