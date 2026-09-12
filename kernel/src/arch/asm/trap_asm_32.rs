@@ -1,5 +1,28 @@
 //! trap.S (32-bit) — trap entry/return, sched_switch, drop_to_user.
 //! 32-bit version: uses sw/lw instead of sd/ld, half offsets, Sv32 SATP.
+//!
+//! Root-cause fix (2026-09-12, found live-testing the rv32 timer port —
+//! todo.md "rv32 mtrap"): this file used to be a mechanical `sd`->`sw`/
+//! `ld`->`lw` translation of `trap_asm.rs` that kept the RV64 byte offsets
+//! (0, 8, 16, 24, 32, ... stride 8) unchanged instead of halving them to
+//! match the 32-bit `TrapFrame`'s real 4-byte-per-field stride (0, 4, 8,
+//! 12, 16, ... — see `arch::trap_frame::TrapFrame`, `TRAP_FRAME_SIZE=144`
+//! on rv32). Every field past `ra` (offset 0, correct only by accident)
+//! landed in the WRONG slot, and the highest offset used (280) is 136
+//! bytes past the actual 144-byte frame `addi sp, sp, -144` reserved —
+//! every single trap silently smashed whatever the kernel stack held
+//! above the frame. It also dropped the kernel-vs-user discrimination
+//! entirely (rv64's `bnez sp, .Ltrap_from_user` / `.Lret_kernel` SPP
+//! check): with `sscratch == 0` marking "trap from kernel" (see
+//! `srv::trap::init`), `csrrw sp, sscratch, sp` on a kernel-mode trap left
+//! `sp == 0`, and `addi sp, sp, -144` wrapped to `0xFFFFFF70` — a wild
+//! stack pointer used for every subsequent save. This was invisible until
+//! this session because rv32 had never taken a real S-mode trap in a live
+//! boot before (see the vmm/Sv32 fixes in the same commit series — rv32
+//! literally never booted far enough for any of this to run). Both bugs
+//! together produced the exact observed symptom: a "kernel page fault"
+//! with `sepc` pointing INSIDE the stack region, i.e. the CPU executing
+//! whatever garbage the corrupted save routine had just written there.
 use core::arch::global_asm;
 
 global_asm!(
@@ -9,107 +32,128 @@ global_asm!(
 .global trap_entry
 trap_entry:
     csrrw sp, sscratch, sp
+    bnez sp, .Ltrap_from_user
+    csrr sp, sscratch
+.Ltrap_from_user:
     addi sp, sp, -144
-    sw t0, 32(sp)
+    sw t0, 16(sp)
     csrr t0, sscratch
-    sw t0, 8(sp)
+    sw t0, 4(sp)
+    csrw sscratch, zero
     sw ra, 0(sp)
-    sw gp, 16(sp)
-    sw tp, 24(sp)
-    sw t1, 40(sp)
-    sw t2, 48(sp)
-    sw s0, 56(sp)
-    sw s1, 64(sp)
-    sw a0, 72(sp)
-    sw a1, 80(sp)
-    sw a2, 88(sp)
-    sw a3, 96(sp)
-    sw a4, 104(sp)
-    sw a5, 112(sp)
-    sw a6, 120(sp)
-    sw a7, 128(sp)
-    sw s2, 136(sp)
-    sw s3, 144(sp)
-    sw s4, 152(sp)
-    sw s5, 160(sp)
-    sw s6, 168(sp)
-    sw s7, 176(sp)
-    sw s8, 184(sp)
-    sw s9, 192(sp)
-    sw s10, 200(sp)
-    sw s11, 208(sp)
-    sw t3, 216(sp)
-    sw t4, 224(sp)
-    sw t5, 232(sp)
-    sw t6, 240(sp)
+    sw gp, 8(sp)
+    sw tp, 12(sp)
+    sw t1, 20(sp)
+    sw t2, 24(sp)
+    sw s0, 28(sp)
+    sw s1, 32(sp)
+    sw a0, 36(sp)
+    sw a1, 40(sp)
+    sw a2, 44(sp)
+    sw a3, 48(sp)
+    sw a4, 52(sp)
+    sw a5, 56(sp)
+    sw a6, 60(sp)
+    sw a7, 64(sp)
+    sw s2, 68(sp)
+    sw s3, 72(sp)
+    sw s4, 76(sp)
+    sw s5, 80(sp)
+    sw s6, 84(sp)
+    sw s7, 88(sp)
+    sw s8, 92(sp)
+    sw s9, 96(sp)
+    sw s10, 100(sp)
+    sw s11, 104(sp)
+    sw t3, 108(sp)
+    sw t4, 112(sp)
+    sw t5, 116(sp)
+    sw t6, 120(sp)
     li t0, (1 << 18)
     csrs sstatus, t0
     csrr t0, sepc
-    sw t0, 248(sp)
+    sw t0, 124(sp)
     csrr t0, sstatus
-    sw t0, 256(sp)
+    sw t0, 128(sp)
     csrr t0, satp
-    sw t0, 280(sp)
+    sw t0, 140(sp)
     mv a0, sp
     call trap_handler
 
 .global trap_return
 trap_return:
     lw ra, 0(sp)
-    lw gp, 16(sp)
-    // Root-cause fix (SMP crash, OnyxKernel todo.md "Отдельный SMP-краш
-    // под -smp 2"): never restore tp from the trapframe — see the
-    // matching, fully-explained fix in trap_asm.rs (rv64). tp is this
-    // kernel's hart-id register; the live value already held by the
-    // physical hart executing this code is always correct, unlike
-    // whatever a trapframe (possibly from a migrated or freshly-created
-    // process) happened to capture.
-    // Root-cause fix (KDF/hash_password nondeterminism under long-running
-    // user loops, 2026-09-05): see the fully-explained fix in trap_asm.rs
-    // (rv64) — t0/t1 must not be restored to their real values until AFTER
-    // all CSR-scratch use below, or every timer tick silently corrupts
-    // whatever the interrupted user code was keeping in them.
-    lw t2, 48(sp)
-    lw s0, 56(sp)
-    lw s1, 64(sp)
-    lw a0, 72(sp)
-    lw a1, 80(sp)
-    lw a2, 88(sp)
-    lw a3, 96(sp)
-    lw a4, 104(sp)
-    lw a5, 112(sp)
-    lw a6, 120(sp)
-    lw a7, 128(sp)
-    lw s2, 136(sp)
-    lw s3, 144(sp)
-    lw s4, 152(sp)
-    lw s5, 160(sp)
-    lw s6, 168(sp)
-    lw s7, 176(sp)
-    lw s8, 184(sp)
-    lw s9, 192(sp)
-    lw s10, 200(sp)
-    lw s11, 208(sp)
-    lw t3, 216(sp)
-    lw t4, 224(sp)
-    lw t5, 232(sp)
-    lw t6, 240(sp)
-    lw t0, 248(sp)
+    lw gp, 8(sp)
+    // See the matching, fully-explained fix in trap_asm.rs (rv64) for both
+    // of the following: never restore tp from the trapframe (tp is this
+    // kernel's hart-id register — the live value is always correct, a
+    // trapframe's captured value is not); and t0/t1 must not be restored
+    // to their real values until after all CSR-scratch use below, or every
+    // timer tick silently corrupts whatever the interrupted code was
+    // keeping in them.
+    lw t2, 24(sp)
+    lw s0, 28(sp)
+    lw s1, 32(sp)
+    lw a0, 36(sp)
+    lw a1, 40(sp)
+    lw a2, 44(sp)
+    lw a3, 48(sp)
+    lw a4, 52(sp)
+    lw a5, 56(sp)
+    lw a6, 60(sp)
+    lw a7, 64(sp)
+    lw s2, 68(sp)
+    lw s3, 72(sp)
+    lw s4, 76(sp)
+    lw s5, 80(sp)
+    lw s6, 84(sp)
+    lw s7, 88(sp)
+    lw s8, 92(sp)
+    lw s9, 96(sp)
+    lw s10, 100(sp)
+    lw s11, 104(sp)
+    lw t3, 108(sp)
+    lw t4, 112(sp)
+    lw t5, 116(sp)
+    lw t6, 120(sp)
+    // From here to the real t0/t1 restore below, t0/t1 hold only CSR
+    // scratch values — never the interrupted context's real registers.
+    lw t0, 124(sp)
     csrw sepc, t0
-    lw t0, 256(sp)
+    // Restore sstatus with SIE (bit 1) force-cleared — see trap_asm.rs's
+    // fully-explained comment: all trap-handler/scheduler code runs with
+    // interrupts off (crate::sync's SpinLock invariant); SIE only comes
+    // back via sret's SPIE->SIE hardware transition (user) or the idle
+    // loop (kernel), never here.
+    lw t0, 128(sp)
     li t1, ~(1 << 1)
     and t0, t0, t1
     csrw sstatus, t0
+    // SPP (bit 8) tells us which mode we are RETURNING to: 1 = kernel
+    // (this trap's sscratch must go back to 0, matching srv::trap's
+    // "sscratch == 0 means kernel" convention for the entry-side check
+    // above), 0 = user (sscratch must point past this frame so the NEXT
+    // trap-from-user knows where the kernel stack is). Missing this
+    // (unconditionally pointing sscratch past the frame either way) was
+    // the second half of the bug this file used to have: it silently
+    // broke the entry-side kernel/user discrimination on every return.
+    srli t0, t0, 8
+    andi t0, t0, 1
+    bnez t0, .Lret_kernel
     addi t0, sp, 144
     csrw sscratch, t0
-    lw t0, 280(sp)
+    j .Lret_finish
+.Lret_kernel:
+    csrw sscratch, zero
+.Lret_finish:
+    lw t0, 140(sp)
     csrw satp, t0
     sfence.vma zero, zero
     // Real t0/t1 restored last; the final sp swap uses sp itself as
     // scratch (address computed from the OLD sp before the load lands).
-    lw t1, 40(sp)
-    lw t0, 32(sp)
-    lw sp, 8(sp)
+    lw t1, 20(sp)
+    lw t0, 16(sp)
+    lw sp, 4(sp)
     sret
 
 .global sched_switch
