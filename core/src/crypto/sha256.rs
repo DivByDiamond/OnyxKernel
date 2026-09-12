@@ -28,12 +28,18 @@ fn maj(x: u32, y: u32, z: u32) -> u32 {
     (x & y) ^ (x & z) ^ (y & z)
 }
 
-#[allow(non_snake_case, reason = "FIPS 180-4 names these functions Σ0/Σ1; keep the spec spelling")]
+#[allow(
+    non_snake_case,
+    reason = "FIPS 180-4 names these functions Σ0/Σ1; keep the spec spelling"
+)]
 fn SIG0(x: u32) -> u32 {
     rotr(x, 2) ^ rotr(x, 13) ^ rotr(x, 22)
 }
 
-#[allow(non_snake_case, reason = "FIPS 180-4 names these functions Σ0/Σ1; keep the spec spelling")]
+#[allow(
+    non_snake_case,
+    reason = "FIPS 180-4 names these functions Σ0/Σ1; keep the spec spelling"
+)]
 fn SIG1(x: u32) -> u32 {
     rotr(x, 6) ^ rotr(x, 11) ^ rotr(x, 25)
 }

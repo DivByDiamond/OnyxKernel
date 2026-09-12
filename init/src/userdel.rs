@@ -11,96 +11,100 @@ use onyx_init::syscalls;
 ///
 /// Process entry point: called directly by the kernel from the ELF entry
 /// address; the stack is freshly initialized per the RISC-V calling convention.
-pub unsafe extern "C" fn _start() -> ! { unsafe {
-    let ring = syscalls::getring();
-    if ring != 1 {
+pub unsafe extern "C" fn _start() -> ! {
+    unsafe {
+        let ring = syscalls::getring();
+        if ring != 1 {
+            syscalls::write(
+                1,
+                b"userdel: only root can delete users\n".as_ptr(),
+                b"userdel: only root can delete users\n".len(),
+            );
+            syscalls::exit(1);
+        }
+
+        let mut username = [0u8; 32];
+        syscalls::write(1, b"Username: ".as_ptr(), b"Username: ".len());
+        let uname = read_line(&mut username);
+        if uname.is_empty() {
+            syscalls::write(
+                1,
+                b"userdel: no username\n".as_ptr(),
+                b"userdel: no username\n".len(),
+            );
+            syscalls::exit(1);
+        }
+
+        if uname == b"root" {
+            syscalls::write(
+                1,
+                b"userdel: cannot delete root\n".as_ptr(),
+                b"userdel: cannot delete root\n".len(),
+            );
+            syscalls::exit(1);
+        }
+
+        // Check if user exists
+        let mut users = [auth::PasswdEntry {
+            name: [0; 32],
+            uid: 0,
+            gid: 0,
+            home: [0; 64],
+            shell: [0; 32],
+        }; auth::MAX_USERS];
+        let nusers = auth::read_passwd(&mut users).unwrap_or(0);
+
+        if auth::find_user(&users, nusers, uname).is_none() {
+            syscalls::write(
+                1,
+                b"userdel: user not found\n".as_ptr(),
+                b"userdel: user not found\n".len(),
+            );
+            syscalls::exit(1);
+        }
+
+        // Remove from passwd
+        if auth::delete_passwd_entry(uname).is_err() {
+            syscalls::write(
+                1,
+                b"userdel: failed to update /etc/passwd\n".as_ptr(),
+                b"userdel: failed to update /etc/passwd\n".len(),
+            );
+            syscalls::exit(1);
+        }
+
+        // Remove from shadow
+        if auth::delete_shadow_entry(uname).is_err() {
+            syscalls::write(
+                1,
+                b"userdel: failed to update /etc/shadow\n".as_ptr(),
+                b"userdel: failed to update /etc/shadow\n".len(),
+            );
+            syscalls::exit(1);
+        }
+
         syscalls::write(
             1,
-            b"userdel: only root can delete users\n".as_ptr(),
-            b"userdel: only root can delete users\n".len(),
+            b"userdel: user deleted\n".as_ptr(),
+            b"userdel: user deleted\n".len(),
         );
-        syscalls::exit(1);
+        syscalls::exit(0);
     }
+}
 
-    let mut username = [0u8; 32];
-    syscalls::write(1, b"Username: ".as_ptr(), b"Username: ".len());
-    let uname = read_line(&mut username);
-    if uname.is_empty() {
-        syscalls::write(
-            1,
-            b"userdel: no username\n".as_ptr(),
-            b"userdel: no username\n".len(),
-        );
-        syscalls::exit(1);
+unsafe fn read_line(buf: &mut [u8]) -> &[u8] {
+    unsafe {
+        let n = syscalls::read(0, buf.as_mut_ptr(), (buf.len() - 1) as u64);
+        if n <= 0 {
+            return &[];
+        }
+        let mut n = n as usize;
+        while n > 0 && (buf[n - 1] == b'\n' || buf[n - 1] == b'\r' || buf[n - 1] == 0) {
+            n -= 1;
+        }
+        &buf[..n]
     }
-
-    if uname == b"root" {
-        syscalls::write(
-            1,
-            b"userdel: cannot delete root\n".as_ptr(),
-            b"userdel: cannot delete root\n".len(),
-        );
-        syscalls::exit(1);
-    }
-
-    // Check if user exists
-    let mut users = [auth::PasswdEntry {
-        name: [0; 32],
-        uid: 0,
-        gid: 0,
-        home: [0; 64],
-        shell: [0; 32],
-    }; auth::MAX_USERS];
-    let nusers = auth::read_passwd(&mut users).unwrap_or(0);
-
-    if auth::find_user(&users, nusers, uname).is_none() {
-        syscalls::write(
-            1,
-            b"userdel: user not found\n".as_ptr(),
-            b"userdel: user not found\n".len(),
-        );
-        syscalls::exit(1);
-    }
-
-    // Remove from passwd
-    if auth::delete_passwd_entry(uname).is_err() {
-        syscalls::write(
-            1,
-            b"userdel: failed to update /etc/passwd\n".as_ptr(),
-            b"userdel: failed to update /etc/passwd\n".len(),
-        );
-        syscalls::exit(1);
-    }
-
-    // Remove from shadow
-    if auth::delete_shadow_entry(uname).is_err() {
-        syscalls::write(
-            1,
-            b"userdel: failed to update /etc/shadow\n".as_ptr(),
-            b"userdel: failed to update /etc/shadow\n".len(),
-        );
-        syscalls::exit(1);
-    }
-
-    syscalls::write(
-        1,
-        b"userdel: user deleted\n".as_ptr(),
-        b"userdel: user deleted\n".len(),
-    );
-    syscalls::exit(0);
-}}
-
-unsafe fn read_line(buf: &mut [u8]) -> &[u8] { unsafe {
-    let n = syscalls::read(0, buf.as_mut_ptr(), (buf.len() - 1) as u64);
-    if n <= 0 {
-        return &[];
-    }
-    let mut n = n as usize;
-    while n > 0 && (buf[n - 1] == b'\n' || buf[n - 1] == b'\r' || buf[n - 1] == 0) {
-        n -= 1;
-    }
-    &buf[..n]
-}}
+}
 
 #[panic_handler]
 fn panic(_info: &core::panic::PanicInfo) -> ! {

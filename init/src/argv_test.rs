@@ -1,7 +1,7 @@
 #![no_std]
 #![no_main]
 
-use onyx_init::{syscalls};
+use onyx_init::syscalls;
 
 fn write_dec(v: usize) {
     let mut buf = [0u8; 12];
@@ -29,16 +29,18 @@ fn write_dec(v: usize) {
 ///
 /// Process entry point: called directly by the kernel; `a0`/`a1` are the
 /// raw argument registers as passed by the kernel at the ELF entry address.
-pub unsafe extern "C" fn _start(a0: usize, a1: usize) -> ! { unsafe {
-    let msg = b"argv_test: a0=";
-    syscalls::write(1, msg.as_ptr(), msg.len());
-    write_dec(a0);
-    let msg = b" a1=";
-    syscalls::write(1, msg.as_ptr(), msg.len());
-    write_dec(a1);
-    syscalls::write(1, b"\n".as_ptr(), b"\n".len());
-    syscalls::exit(0);
-}}
+pub unsafe extern "C" fn _start(a0: usize, a1: usize) -> ! {
+    unsafe {
+        let msg = b"argv_test: a0=";
+        syscalls::write(1, msg.as_ptr(), msg.len());
+        write_dec(a0);
+        let msg = b" a1=";
+        syscalls::write(1, msg.as_ptr(), msg.len());
+        write_dec(a1);
+        syscalls::write(1, b"\n".as_ptr(), b"\n".len());
+        syscalls::exit(0);
+    }
+}
 
 #[panic_handler]
 fn panic(_info: &core::panic::PanicInfo) -> ! {
