@@ -6,5 +6,6 @@ pub mod otp;
 pub mod plic;
 pub mod power;
 pub mod rtc;
+pub mod sg2000;
 pub mod syscon;
 pub mod watchdog;

@@ -82,5 +82,6 @@ pub unsafe fn init(base: usize, sckdiv: u32, cs: u8) {
     }
 }
 
+pub mod dw;
 pub mod ops;
 pub mod xfer;
