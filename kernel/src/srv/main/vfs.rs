@@ -68,11 +68,22 @@ pub(crate) unsafe fn load_font() {
                 let buf = heap::kmalloc(size as usize)?;
                 vfs::read(token, buf, size).ok();
                 vfs::close(token).ok();
-                crate::font::init(core::slice::from_raw_parts(buf, size as usize)).ok();
                 // Leak `buf` on purpose: font::init kept raw pointers into
                 // the PSF blob (G_FONT.glyphs/unicode). Freeing it would
                 // leave every glyph read dangling (UAF on the console path).
-                crate::kinf!("font", "loaded /font/default.psf");
+                match crate::font::init(core::slice::from_raw_parts(buf, size as usize)) {
+                    Ok(()) => crate::kinf!("font", "loaded /font/default.psf"),
+                    // Root cause (blank-console investigation, 2026-09-12): this
+                    // used to be `.ok()`, so a header that parses but fails the
+                    // glyph-area bounds check (e.g. a psfgen build that wrote a
+                    // truncated glyph section) still logged "loaded" — the
+                    // console then silently painted every glyph blank instead
+                    // of reporting the real cause.
+                    Err(_) => crate::kwrn!(
+                        "font",
+                        "/font/default.psf failed to parse, using blank font"
+                    ),
+                }
             } else {
                 vfs::close(token).ok();
             }
