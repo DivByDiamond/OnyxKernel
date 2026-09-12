@@ -1,82 +1,14 @@
 use core::{ptr, sync::atomic::Ordering};
 
-use super::runqueue::{G_RQ, dequeue, enqueue, rq_lock, rq_unlock};
+use super::steal::steal;
+use super::super::runqueue::{G_RQ, dequeue, enqueue, rq_lock, rq_unlock};
 use crate::{
     arch::{csr, regs::SSTATUS_SIE, trap_frame::TrapFrame},
     proc::process::{
-        G_HART_IDLE_TF, G_HART_IDLE_TF_VALID, G_NEED_RESCHED, KSTACK_SIZE, MAX_HARTS, Proc,
-        ProcState, current_for_hart, hart_id, set_current_for_hart,
+        G_HART_IDLE_TF, G_HART_IDLE_TF_VALID, G_NEED_RESCHED, KSTACK_SIZE, MAX_HARTS, ProcState,
+        current_for_hart, hart_id, set_current_for_hart,
     },
 };
-
-/// # Safety
-///
-/// Caller contract: trap context on this hart (hart_id() valid); merely
-/// sets this hart's G_NEED_RESCHED flag (release store).
-pub unsafe fn sched_tick() {
-    let hartid = hart_id();
-    // SMP (wave 2): idle harts (current == null) must also request
-    // scheduling. The tick trap is what wakes an idle hart out of wfi;
-    // the resulting sched_yield dequeues local work or steals from a
-    // remote runqueue and switches into it. Without this, secondary
-    // harts booted into idle never picked up any work.
-    G_NEED_RESCHED[hartid].store(true, Ordering::Release);
-}
-
-/// # Safety
-///
-/// Caller contract: bounds-checked store of another hart's resched flag;
-/// the flag is per-hart atomics, so cross-hart stores are data-race-free.
-pub unsafe fn set_need_resched(hartid: usize, v: bool) {
-    if hartid < MAX_HARTS {
-        G_NEED_RESCHED[hartid].store(v, Ordering::Release);
-    }
-}
-
-/// # Safety
-///
-/// Caller contract: init() has run (G_RQ initialized); kernel context with
-/// SIE clear. The victim queue lock is held (try_lock) across dequeue and
-/// any re-enqueue; the returned Proc (if any) is owned by the caller.
-pub unsafe fn steal(hartid: usize) -> *mut Proc {
-    // SAFETY: G_RQ was initialized by runqueue::init(); each victim queue
-    // is only dereferenced/mutated while its try_lock() is held below, and
-    // dequeued procs are valid live heap nodes under the rq lock discipline.
-    unsafe {
-        let n = MAX_HARTS;
-        for i in 1..n {
-            let victim = (hartid + i) % n;
-            if victim == hartid {
-                continue;
-            }
-            // Bug #11 fix: hold the victim's rq_lock across dequeue AND any
-            // re-enqueue caused by an affinity mismatch. Previously the lock
-            // was released immediately after dequeue and the subsequent
-            // `enqueue(victim, p)` for an affinity-mismatched process mutated
-            // the victim's runqueue without any lock, racing with the victim
-            // hart's own scheduler and producing orphaned/duplicated entries.
-            if !(*G_RQ.as_mut_ptr())[victim].lock.try_lock() {
-                continue;
-            }
-            let p = dequeue(victim);
-            if !p.is_null() {
-                let affinity = (*p).affinity;
-                if affinity >= 0 && (affinity as usize) != hartid {
-                    // Put it back on the victim's queue (lock still held).
-                    enqueue(victim, p);
-                    (*G_RQ.as_mut_ptr())[victim].lock.unlock();
-                    continue;
-                }
-                // Got a stealable process — release the lock and return it.
-                (*G_RQ.as_mut_ptr())[victim].lock.unlock();
-                return p;
-            }
-            // Nothing to steal from this victim — release the lock.
-            (*G_RQ.as_mut_ptr())[victim].lock.unlock();
-        }
-        core::ptr::null_mut()
-    }
-}
 
 /// # Safety
 ///
@@ -263,7 +195,7 @@ pub unsafe fn sched_yield(tf: &mut TrapFrame) {
                 if !G_HART_IDLE_TF_VALID[hartid].load(Ordering::Acquire)
                     || G_HART_IDLE_TF[hartid].sepc == 0
                 {
-                    super::seed_boot_hart_idle_context(hartid);
+                    super::super::seed_boot_hart_idle_context(hartid);
                 }
                 let dst = (stack_top - core::mem::size_of::<TrapFrame>()) as *mut TrapFrame;
                 ptr::write_volatile(dst, G_HART_IDLE_TF[hartid]);
