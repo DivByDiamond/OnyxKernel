@@ -7,7 +7,7 @@ extern crate alloc;
 
 mod kalloc_lua;
 mod luavm;
-use onyx_init::{syscalls};
+use onyx_init::syscalls;
 
 use luavm::repl;
 

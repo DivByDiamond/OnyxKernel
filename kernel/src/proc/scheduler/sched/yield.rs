@@ -1,7 +1,7 @@
 use core::{ptr, sync::atomic::Ordering};
 
-use super::steal::steal;
 use super::super::runqueue::{G_RQ, dequeue, enqueue, rq_lock, rq_unlock};
+use super::steal::steal;
 use crate::{
     arch::{csr, regs::SSTATUS_SIE, trap_frame::TrapFrame},
     proc::process::{

@@ -56,86 +56,94 @@ unsafe fn ensure_login() {
     }
 }
 
-pub(crate) unsafe fn pid1_main() -> ! { unsafe {
-    let etc_init = b"/etc/init\0";
-    let _ = syscalls::mkdir(etc_init.as_ptr());
+pub(crate) unsafe fn pid1_main() -> ! {
+    unsafe {
+        let etc_init = b"/etc/init\0";
+        let _ = syscalls::mkdir(etc_init.as_ptr());
 
-    let req_chan = syscalls::chan_create_named(REQ_CHANNEL.as_ptr());
-    let resp_chan = syscalls::chan_create_named(RESP_CHANNEL.as_ptr());
-    if req_chan < 0 || resp_chan < 0 {
-        let m = b"[init:WARN] could not create IPC channels - service control disabled\n";
+        let req_chan = syscalls::chan_create_named(REQ_CHANNEL.as_ptr());
+        let resp_chan = syscalls::chan_create_named(RESP_CHANNEL.as_ptr());
+        if req_chan < 0 || resp_chan < 0 {
+            let m = b"[init:WARN] could not create IPC channels - service control disabled\n";
+            syscalls::write(1, m.as_ptr(), m.len());
+        } else {
+            let m = b"[init] IPC channels initd_req / initd_resp ready\n";
+            syscalls::write(1, m.as_ptr(), m.len());
+        }
+
+        exec::scan_and_start_services();
+        boottest::devfs_boot_test();
+
+        let m = b"[init] launching /bin/login\n";
         syscalls::write(1, m.as_ptr(), m.len());
-    } else {
-        let m = b"[init] IPC channels initd_req / initd_resp ready\n";
-        syscalls::write(1, m.as_ptr(), m.len());
-    }
-
-    exec::scan_and_start_services();
-    boottest::devfs_boot_test();
-
-    let m = b"[init] launching /bin/login\n";
-    syscalls::write(1, m.as_ptr(), m.len());
-    ensure_login();
-
-    if req_chan >= 0 && resp_chan >= 0 {
-        service_loop(req_chan as u32, resp_chan as u32);
-    } else {
-        reaper_only_loop();
-    }
-}}
-
-unsafe fn service_loop(req_chan: u32, resp_chan: u32) -> ! { unsafe {
-    let mut req_buf = [0u8; MAX_MSG_LEN];
-    let mut resp_buf = [0u8; MAX_MSG_LEN + 32];
-
-    loop {
-        reap_children();
         ensure_login();
-        let n = syscalls::chan_recv(req_chan, req_buf.as_mut_ptr(), req_buf.len() as u32);
-        if n <= 0 {
+
+        if req_chan >= 0 && resp_chan >= 0 {
+            service_loop(req_chan as u32, resp_chan as u32);
+        } else {
+            reaper_only_loop();
+        }
+    }
+}
+
+unsafe fn service_loop(req_chan: u32, resp_chan: u32) -> ! {
+    unsafe {
+        let mut req_buf = [0u8; MAX_MSG_LEN];
+        let mut resp_buf = [0u8; MAX_MSG_LEN + 32];
+
+        loop {
+            reap_children();
+            ensure_login();
+            let n = syscalls::chan_recv(req_chan, req_buf.as_mut_ptr(), req_buf.len() as u32);
+            if n <= 0 {
+                syscalls::yield_cpu();
+                continue;
+            }
+            let n = n as usize;
+            let resp_len = hdlr::handle_request(&req_buf[..n], &mut resp_buf);
+            let _ = syscalls::chan_send(resp_chan, resp_buf.as_ptr(), resp_len as u32);
+        }
+    }
+}
+
+unsafe fn reaper_only_loop() -> ! {
+    unsafe {
+        loop {
+            reap_children();
+            ensure_login();
             syscalls::yield_cpu();
-            continue;
         }
-        let n = n as usize;
-        let resp_len = hdlr::handle_request(&req_buf[..n], &mut resp_buf);
-        let _ = syscalls::chan_send(resp_chan, resp_buf.as_ptr(), resp_len as u32);
     }
-}}
+}
 
-unsafe fn reaper_only_loop() -> ! { unsafe {
-    loop {
-        reap_children();
-        ensure_login();
-        syscalls::yield_cpu();
-    }
-}}
-
-unsafe fn reap_children() { unsafe {
-    loop {
-        let mut status: i32 = 0;
-        let pid = syscalls::waitpid(u32::MAX as u64, &mut status, WNOHANG);
-        if pid <= 0 {
-            break;
-        }
-        use core::sync::atomic::Ordering;
-        if pid as u32 == LOGIN_PID.load(Ordering::Acquire) {
-            LOGIN_PID.store(0, Ordering::Release);
-            let m = b"[init] login session ended\n";
-            syscalls::write(1, m.as_ptr(), m.len());
-        }
-        if let Some(idx) = exec::find_service_by_pid(pid as u32) {
-            SERVICES[idx].running = false;
-            SERVICES[idx].pid = 0;
-            let name = exec::service_name(idx);
-            exec::write_state_file(name, b"crashed");
-            let m = b"[init] service ";
-            syscalls::write(1, m.as_ptr(), m.len());
-            syscalls::write(1, name.as_ptr(), name.len());
-            let m = b" exited (code=";
-            syscalls::write(1, m.as_ptr(), m.len());
-            write_dec(status as i64);
-            let m = b")\n";
-            syscalls::write(1, m.as_ptr(), m.len());
+unsafe fn reap_children() {
+    unsafe {
+        loop {
+            let mut status: i32 = 0;
+            let pid = syscalls::waitpid(u32::MAX as u64, &mut status, WNOHANG);
+            if pid <= 0 {
+                break;
+            }
+            use core::sync::atomic::Ordering;
+            if pid as u32 == LOGIN_PID.load(Ordering::Acquire) {
+                LOGIN_PID.store(0, Ordering::Release);
+                let m = b"[init] login session ended\n";
+                syscalls::write(1, m.as_ptr(), m.len());
+            }
+            if let Some(idx) = exec::find_service_by_pid(pid as u32) {
+                SERVICES[idx].running = false;
+                SERVICES[idx].pid = 0;
+                let name = exec::service_name(idx);
+                exec::write_state_file(name, b"crashed");
+                let m = b"[init] service ";
+                syscalls::write(1, m.as_ptr(), m.len());
+                syscalls::write(1, name.as_ptr(), name.len());
+                let m = b" exited (code=";
+                syscalls::write(1, m.as_ptr(), m.len());
+                write_dec(status as i64);
+                let m = b")\n";
+                syscalls::write(1, m.as_ptr(), m.len());
+            }
         }
     }
-}}
+}
