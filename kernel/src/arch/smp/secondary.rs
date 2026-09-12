@@ -109,18 +109,33 @@ pub unsafe extern "Rust" fn secondary_continue() -> ! {
             sym crate::arch::asm::mtrap::G_MTRAP_SCRATCH,
             options(noreturn),
         );
+        // Ported 2026-09-12 (todo.md "rv32 mtrap"): mirrors the rv64 branch
+        // above — mtrap_32.rs now exists, so secondary harts get the same
+        // mscratch/mtvec wiring and the same bit-9-not-delegated medeleg as
+        // hart 0 (boot_32.rs), instead of the old "no forwarding at all"
+        // setup. Scratch stride is 16 bytes/hart (4 x u32: t1,t2,a0,a1),
+        // vs. rv64's 24 bytes/hart (3 x u64) — mtrap_32's ecall path needs
+        // both a0 AND a1 as real inputs (the 64-bit stime split across two
+        // 32-bit registers), one more slot than the rv64 scratch.
         #[cfg(all(not(feature = "smode"), target_pointer_width = "32"))]
         core::arch::asm!(
             "li t0, 0x3FFFFFFF",
             "csrw pmpaddr0, t0",
             "li t0, 0x9F",
             "csrw pmpcfg0, t0",
-            "li t0, (1<<0)|(1<<1)|(1<<2)|(1<<3)|(1<<5)|(1<<7)|(1<<8)|(1<<9)|(1<<11)|(1<<12)|(1<<13)|(1<<15)",
+            "li t0, (1<<0)|(1<<1)|(1<<2)|(1<<3)|(1<<5)|(1<<7)|(1<<8)|(1<<11)|(1<<12)|(1<<13)|(1<<15)",
             "csrw medeleg, t0",
             "li t0, (1<<1)|(1<<5)|(1<<9)",
             "csrw mideleg, t0",
             "li t0, (1<<0)|(1<<1)|(1<<2)",
             "csrw mcounteren, t0",
+            "la t1, {3}",
+            "li t2, 16",
+            "mul t2, tp, t2",
+            "add t1, t1, t2",
+            "csrw mscratch, t1",
+            "la t1, mtrap_entry_32",
+            "csrw mtvec, t1",
             "mv sp, {0}",
             "csrw mepc, {1}",
             "li t0, 1 << 11",
@@ -135,6 +150,7 @@ pub unsafe extern "Rust" fn secondary_continue() -> ! {
             in(reg) sp,
             in(reg) entry,
             in(reg) satp,
+            sym crate::arch::asm::mtrap_32::G_MTRAP_SCRATCH_32,
             options(noreturn),
         );
         #[cfg(feature = "smode")]

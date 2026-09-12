@@ -61,13 +61,18 @@ pub fn hart_in_m_mode() -> bool {
     out != 0
 }
 
-/// Arm the S-mode timer. Legacy SBI_SET_TIMER: ecall with a7=0, a0=absolute stime value.
-/// OpenSBI services the underlying MTIP and delivers us an STIP.
+/// Arm the S-mode timer. Legacy SBI_SET_TIMER: ecall with a7=0, absolute
+/// stime value. On rv64 the whole 64-bit value fits in a0; the legacy v0.1
+/// ABI on rv32 splits it across a0 (low 32 bits) and a1 (high 32 bits) —
+/// see the rv32 variant below. OpenSBI services the underlying MTIP and
+/// delivers us an STIP (this kernel's own `mtrap`/`mtrap_32` do the same
+/// when booted without a real firmware beneath it).
 /// # Safety
 ///
 /// Must be called in S-mode under an SBI firmware that implements the
 /// legacy v0.1 SBI_SET_TIMER extension; an `ecall` with no SBI beneath
 /// (e.g. from M-mode booted via OnyxBoot) traps to an unset mtvec.
+#[cfg(target_pointer_width = "64")]
 pub unsafe fn set_timer(stime: u64) {
     // SAFETY: ecall with a7=0 / a0=stime is the legacy SBI_SET_TIMER contract.
     //
@@ -93,6 +98,29 @@ pub unsafe fn set_timer(stime: u64) {
             in("a7") 0usize,
             inlateout("a0") stime as usize => _,
             lateout("a1") _,
+            options(nostack),
+        );
+    }
+}
+
+/// rv32 variant (todo.md "rv32 mtrap", 2026-09-12): registers are 32 bits
+/// wide, so the 64-bit `stime` value cannot fit in a0 alone like the rv64
+/// path above — the legacy v0.1 ABI defines it as two REAL inputs, a0 (low
+/// 32 bits) and a1 (high 32 bits), not just two clobbered outputs. Both
+/// this wrapper and the M-mode handler that services it without real
+/// firmware (`arch::asm::mtrap_32`) must agree on this split.
+#[cfg(target_pointer_width = "32")]
+pub unsafe fn set_timer(stime: u64) {
+    // SAFETY: ecall with a7=0 / a0=low32(stime) / a1=high32(stime) is the
+    // legacy SBI_SET_TIMER contract on rv32; both registers are declared
+    // `inlateout` (real input, clobbered on return) per the same audited
+    // reasoning as the rv64 variant above.
+    unsafe {
+        core::arch::asm!(
+            "ecall",
+            in("a7") 0usize,
+            inlateout("a0") stime as usize => _,
+            inlateout("a1") (stime >> 32) as usize => _,
             options(nostack),
         );
     }
