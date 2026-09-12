@@ -14,6 +14,51 @@ mod term;
 mod backoff;
 mod seed;
 
+// Local copies of the kernel ABI constants this file needs (init binaries
+// are separate no_std crates and don't link kernel::syscall::abi).
+const F_GETFL: u32 = 3;
+const F_SETFL: u32 = 4;
+const O_NONBLOCK: u64 = 1 << 11;
+
+/// Discard any bytes already queued on stdin before the very first "login: "
+/// prompt of this process's life.
+///
+/// Root cause (2026-09-12 bug report): the first login attempt right after
+/// boot intermittently failed with "Login incorrect" WITHOUT ever reaching
+/// the password prompt, while an identical second attempt worked. That
+/// means `find_user` rejected a non-empty username that LOOKED like "root"
+/// to the person typing it — i.e. the actual bytes read() returned differed
+/// from what they typed. A byte (or an escape sequence — e.g. a terminal's
+/// automatic focus-report on window-focus change, or key autorepeat) queued
+/// in the UART FIFO before this process's first ever read() call gets
+/// silently prepended to the real "root" the user then types, since
+/// `cooked_read` has no way to distinguish stale pre-existing input from
+/// fresh keystrokes. The existing bare-`\n`/`\r` case was already handled
+/// (see the `username.is_empty()` comment below), but that only covers a
+/// stray byte that happens to BE a line terminator — any other leftover
+/// byte silently corrupts the username instead. Draining once, right
+/// before the first prompt, discards whatever garbage accumulated during
+/// boot regardless of its content, without touching later retries within
+/// this same session (so a user typing ahead during the backoff sleep
+/// after a genuinely wrong password is never eaten).
+unsafe fn drain_stdin() {
+    unsafe {
+        let flags = syscalls::fcntl(0, F_GETFL, 0);
+        if flags < 0 {
+            return;
+        }
+        let _ = syscalls::fcntl(0, F_SETFL, (flags as u64) | O_NONBLOCK);
+        let mut junk = [0u8; 64];
+        loop {
+            let n = syscalls::read(0, junk.as_mut_ptr(), junk.len() as u64);
+            if n <= 0 {
+                break;
+            }
+        }
+        let _ = syscalls::fcntl(0, F_SETFL, flags as u64);
+    }
+}
+
 /// Write NUL-terminated concatenation of `parts` into `buf`, returning the
 /// length including the terminator. Strings must be NUL-terminated to match
 /// the kernel-side char** copy logic (proc::onx::argv).
@@ -92,6 +137,8 @@ pub unsafe extern "C" fn _start() -> ! {
         // Re-read passwd after seeding so root appears in the user list
         nusers = auth::read_passwd(&mut users).unwrap_or(0);
     }
+
+    drain_stdin();
 
     let mut fails: u32 = 0;
     loop {
