@@ -4,14 +4,14 @@ use crate::util::write_dec;
 const BLK_DEV_MAX: u64 = 8;
 const EMBED_LBA: i64 = 10240;
 
-unsafe fn print_blk(idx: u64, msg: &[u8]) {
+unsafe fn print_blk(idx: u64, msg: &[u8]) { unsafe {
     syscalls::write(1, b"[init] /dev/blk".as_ptr(), b"[init] /dev/blk".len());
     write_dec(idx as i64);
     syscalls::write(1, b": ".as_ptr(), b": ".len());
     syscalls::write(1, msg.as_ptr(), msg.len());
-}
+}}
 
-unsafe fn probe_blk(idx: u64) -> bool {
+unsafe fn probe_blk(idx: u64) -> bool { unsafe {
     let mut path = [0u8; 16];
     path[..8].copy_from_slice(b"/dev/blk");
     path[8] = b'0' + idx as u8;
@@ -40,9 +40,9 @@ unsafe fn probe_blk(idx: u64) -> bool {
 
     syscalls::close(fd as u64);
     true
-}
+}}
 
-pub(crate) unsafe fn devfs_boot_test() {
+pub(crate) unsafe fn devfs_boot_test() { unsafe {
     let m = b"[init] devfs boot test start\n";
     syscalls::write(1, m.as_ptr(), m.len());
 
@@ -83,4 +83,4 @@ pub(crate) unsafe fn devfs_boot_test() {
 
     let m = b"[init] devfs boot test done\n";
     syscalls::write(1, m.as_ptr(), m.len());
-}
+}}

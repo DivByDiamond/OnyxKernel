@@ -56,7 +56,7 @@ unsafe fn ensure_login() {
     }
 }
 
-pub(crate) unsafe fn pid1_main() -> ! {
+pub(crate) unsafe fn pid1_main() -> ! { unsafe {
     let etc_init = b"/etc/init\0";
     let _ = syscalls::mkdir(etc_init.as_ptr());
 
@@ -82,9 +82,9 @@ pub(crate) unsafe fn pid1_main() -> ! {
     } else {
         reaper_only_loop();
     }
-}
+}}
 
-unsafe fn service_loop(req_chan: u32, resp_chan: u32) -> ! {
+unsafe fn service_loop(req_chan: u32, resp_chan: u32) -> ! { unsafe {
     let mut req_buf = [0u8; MAX_MSG_LEN];
     let mut resp_buf = [0u8; MAX_MSG_LEN + 32];
 
@@ -100,17 +100,17 @@ unsafe fn service_loop(req_chan: u32, resp_chan: u32) -> ! {
         let resp_len = hdlr::handle_request(&req_buf[..n], &mut resp_buf);
         let _ = syscalls::chan_send(resp_chan, resp_buf.as_ptr(), resp_len as u32);
     }
-}
+}}
 
-unsafe fn reaper_only_loop() -> ! {
+unsafe fn reaper_only_loop() -> ! { unsafe {
     loop {
         reap_children();
         ensure_login();
         syscalls::yield_cpu();
     }
-}
+}}
 
-unsafe fn reap_children() {
+unsafe fn reap_children() { unsafe {
     loop {
         let mut status: i32 = 0;
         let pid = syscalls::waitpid(u32::MAX as u64, &mut status, WNOHANG);
@@ -138,4 +138,4 @@ unsafe fn reap_children() {
             syscalls::write(1, m.as_ptr(), m.len());
         }
     }
-}
+}}

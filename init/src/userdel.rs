@@ -1,9 +1,5 @@
 #![no_std]
 #![no_main]
-#![allow(
-    unsafe_op_in_unsafe_fn,
-    reason = "TODO(2026-09-13): syscalls::call::* asm! sites are now explicitly unsafe{}-wrapped (real fix); remaining warnings are this bin's own ~300 call sites into those wrappers, not yet individually wrapped"
-)]
 
 use core::arch::asm;
 
@@ -15,7 +11,7 @@ mod syscalls;
 ///
 /// Process entry point: called directly by the kernel from the ELF entry
 /// address; the stack is freshly initialized per the RISC-V calling convention.
-pub unsafe extern "C" fn _start() -> ! {
+pub unsafe extern "C" fn _start() -> ! { unsafe {
     let ring = syscalls::getring();
     if ring != 1 {
         syscalls::write(
@@ -92,9 +88,9 @@ pub unsafe extern "C" fn _start() -> ! {
         b"userdel: user deleted\n".len(),
     );
     syscalls::exit(0);
-}
+}}
 
-unsafe fn read_line(buf: &mut [u8]) -> &[u8] {
+unsafe fn read_line(buf: &mut [u8]) -> &[u8] { unsafe {
     let n = syscalls::read(0, buf.as_mut_ptr(), (buf.len() - 1) as u64);
     if n <= 0 {
         return &[];
@@ -104,7 +100,7 @@ unsafe fn read_line(buf: &mut [u8]) -> &[u8] {
         n -= 1;
     }
     &buf[..n]
-}
+}}
 
 #[panic_handler]
 fn panic(_info: &core::panic::PanicInfo) -> ! {

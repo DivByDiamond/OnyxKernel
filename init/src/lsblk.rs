@@ -1,9 +1,5 @@
 #![no_std]
 #![no_main]
-#![allow(
-    unsafe_op_in_unsafe_fn,
-    reason = "TODO(2026-09-13): syscalls::call::* asm! sites are now explicitly unsafe{}-wrapped (real fix); remaining warnings are this bin's own ~300 call sites into those wrappers, not yet individually wrapped"
-)]
 
 mod syscalls;
 
@@ -66,7 +62,7 @@ fn dec_u64(val: u64, out: &mut [u8; 21]) -> usize {
 ///
 /// Process entry point: called directly by the kernel from the ELF entry
 /// address; the stack is freshly initialized per the RISC-V calling convention.
-pub unsafe extern "C" fn _start() -> ! {
+pub unsafe extern "C" fn _start() -> ! { unsafe {
     let blk_path = b"/dev/blk0\0";
     let fd = syscalls::open(blk_path.as_ptr(), 0, 0);
     if fd < 0 {
@@ -198,7 +194,7 @@ pub unsafe extern "C" fn _start() -> ! {
 
     syscalls::close(fd as u64);
     syscalls::exit(0);
-}
+}}
 
 #[panic_handler]
 fn panic(_info: &core::panic::PanicInfo) -> ! {

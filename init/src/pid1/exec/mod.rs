@@ -4,7 +4,7 @@ use super::{MAX_NAME_LEN, MAX_PATH_LEN, MAX_SERVICES, NUM_SERVICES, SERVICES, WN
 use crate::syscalls;
 use crate::util::{cstr_len, is_dot_or_dotdot, write_dec};
 
-pub(super) unsafe fn scan_and_start_services() {
+pub(super) unsafe fn scan_and_start_services() { unsafe {
     let dir = b"/service\0";
     let mut name_buf = [0u8; 64];
 
@@ -58,9 +58,9 @@ pub(super) unsafe fn scan_and_start_services() {
     write_dec(NUM_SERVICES as i64);
     let m = b" services discovered\n";
     syscalls::write(1, m.as_ptr(), m.len());
-}
+}}
 
-pub(super) unsafe fn try_spawn_service(idx: usize) -> bool {
+pub(super) unsafe fn try_spawn_service(idx: usize) -> bool { unsafe {
     let name = service_name(idx);
     let mut path = [0u8; MAX_PATH_LEN];
     let _ = build_service_path(name, &mut path);
@@ -87,9 +87,9 @@ pub(super) unsafe fn try_spawn_service(idx: usize) -> bool {
         syscalls::write(1, b"\n".as_ptr(), b"\n".len());
         false
     }
-}
+}}
 
-pub(super) unsafe fn refresh_service(idx: usize) {
+pub(super) unsafe fn refresh_service(idx: usize) { unsafe {
     if !SERVICES[idx].running || SERVICES[idx].pid == 0 {
         return;
     }
@@ -101,28 +101,28 @@ pub(super) unsafe fn refresh_service(idx: usize) {
         let name = service_name(idx);
         write_state_file(name, b"crashed");
     }
-}
+}}
 
-pub(super) unsafe fn find_service_by_name(name: &[u8]) -> Option<usize> {
+pub(super) unsafe fn find_service_by_name(name: &[u8]) -> Option<usize> { unsafe {
     (0..NUM_SERVICES).find(|&i| service_name(i) == name)
-}
+}}
 
-pub(super) unsafe fn find_service_by_pid(pid: u32) -> Option<usize> {
+pub(super) unsafe fn find_service_by_pid(pid: u32) -> Option<usize> { unsafe {
     SERVICES[..NUM_SERVICES]
         .iter()
         .position(|svc| svc.pid == pid && pid != 0)
-}
+}}
 
-pub(super) unsafe fn service_name(idx: usize) -> &'static [u8] {
+pub(super) unsafe fn service_name(idx: usize) -> &'static [u8] { unsafe {
     &SERVICES[idx].name[..SERVICES[idx].name_len]
-}
+}}
 
-pub(super) unsafe fn is_service_enabled(name: &[u8]) -> bool {
+pub(super) unsafe fn is_service_enabled(name: &[u8]) -> bool { unsafe {
     let mut path = [0u8; MAX_PATH_LEN];
     let _ = build_enabled_path(name, &mut path);
     let r = syscalls::access(path.as_ptr(), 0);
     r == 0
-}
+}}
 
 pub(super) fn build_service_path(name: &[u8], out: &mut [u8]) -> usize {
     if out.len() < 2 {
@@ -171,7 +171,7 @@ pub(super) fn build_state_path(name: &[u8], out: &mut [u8]) -> usize {
     total + sl
 }
 
-pub(super) unsafe fn write_state_file(name: &[u8], state: &[u8]) {
+pub(super) unsafe fn write_state_file(name: &[u8], state: &[u8]) { unsafe {
     let mut path = [0u8; MAX_PATH_LEN];
     let _ = build_state_path(name, &mut path);
     let fd = syscalls::create(path.as_ptr(), 0, 0);
@@ -180,4 +180,4 @@ pub(super) unsafe fn write_state_file(name: &[u8], state: &[u8]) {
     }
     let _ = syscalls::write_fd(fd as u64, state.as_ptr(), state.len());
     let _ = syscalls::close(fd as u64);
-}
+}}

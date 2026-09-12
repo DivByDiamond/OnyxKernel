@@ -1,9 +1,5 @@
 #![no_std]
 #![no_main]
-#![allow(
-    unsafe_op_in_unsafe_fn,
-    reason = "TODO(2026-09-13): syscalls::call::* asm! sites are now explicitly unsafe{}-wrapped (real fix); remaining warnings are this bin's own ~300 call sites into those wrappers, not yet individually wrapped"
-)]
 
 mod syscalls;
 
@@ -44,33 +40,29 @@ fn puts(s: &[u8]) {
 /// Process entry point: called directly by the kernel with `a0`/`a1` as the
 /// raw argument registers; unused here.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn _start(_a0: usize, _a1: usize) -> ! {
+pub unsafe extern "C" fn _start(_a0: usize, _a1: usize) -> ! { unsafe {
     let mut ts: [u64; 2] = [0, 0];
-    unsafe {
-        syscalls::clock_gettime(0, ts.as_mut_ptr());
-    }
+    syscalls::clock_gettime(0, ts.as_mut_ptr());
     puts(b"sleep_test: before uptime_us=");
     write_dec(ts[0] * 1_000_000 + ts[1] / 1000);
     puts(b"\n");
 
     puts(b"sleep_test: about to nanosleep\n");
     let req: [u64; 2] = [0, 500_000_000]; // 500ms
-    let r = unsafe { syscalls::nanosleep(req.as_ptr(), core::ptr::null_mut()) };
+    let r = syscalls::nanosleep(req.as_ptr(), core::ptr::null_mut());
     puts(b"sleep_test: nanosleep call returned to userspace\n");
     puts(b"sleep_test: nanosleep returned ");
     write_dec(if r < 0 { (-r) as u64 } else { r as u64 });
     puts(b"\n");
 
-    unsafe {
-        syscalls::clock_gettime(0, ts.as_mut_ptr());
-    }
+    syscalls::clock_gettime(0, ts.as_mut_ptr());
     puts(b"sleep_test: after uptime_us=");
     write_dec(ts[0] * 1_000_000 + ts[1] / 1000);
     puts(b"\n");
     puts(b"sleep_test: DONE\n");
 
     syscalls::exit(0);
-}
+}}
 
 #[panic_handler]
 fn panic(_info: &core::panic::PanicInfo) -> ! {
