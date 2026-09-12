@@ -101,40 +101,37 @@ pub unsafe fn init() -> KResult<u64> {
             // stride by 8 bytes instead of 4 and write into the wrong
             // slot entirely, so this branch uses its own `*mut u32` view.
             //
-            // Identity-map a generous 512 MiB window starting at the DRAM
-            // base (128 x 4 MiB megapages) — comfortably covers every RAM
-            // size this project boots with (128M/256M in the QEMU launch
-            // scripts) with headroom, mirroring how the rv64 branch above
-            // covers a fixed generous physical window rather than exactly
-            // the FDT-reported size.
-            //
             // A second bug found alongside the first (same debug session):
-            // this only covered DRAM, but the VERY NEXT instruction after
+            // an early version of this fix only covered a 512 MiB window
+            // at the DRAM base, but the VERY NEXT instruction after
             // `install_root` switches SATP is `uart::putc(b'V')` back in
             // `early_init` — the UART's MMIO base (0x1000_0000 on QEMU
             // `virt`, well below DRAM) was left unmapped, so paging killed
-            // the console immediately, one call after the DRAM fix "solved"
-            // the boot hang (still silent — no fault handler is live yet
-            // this early). rv64 never hit this because its three 1 GiB
-            // gigapages (indices 0/1/2, covering 0x0-0xC0000000) happen to
-            // sweep CLINT/PLIC/UART/virtio AND DRAM into the same window
-            // for free. Sv32's megapages are too small to do that cheaply
-            // in one range, so this maps a second, separate low window
-            // (0x0-0x2000_0000) comfortably covering every MMIO device
-            // this kernel probes at boot (CLINT @0x0200_0000, PLIC
-            // @0x0C00_0000, UART/virtio @0x1000_0000+).
-            const DRAM_BASE: u64 = 0x8000_0000;
-            const MMIO_BASE: u64 = 0x0000_0000;
+            // the console immediately. A THIRD unmapped-address fault
+            // turned up later still, once boot reached fw_cfg/ramfb probing
+            // (stval=0x3000_0000, PCIe ECAM territory) — every additional
+            // device probed was liable to touch yet another address outside
+            // whatever ad-hoc window had been mapped so far.
+            //
+            // Rather than keep chasing individual addresses, this now maps
+            // the EXACT SAME physical range as the rv64 branch above:
+            // 0x0-0xC000_0000 (3 GiB, indices 0/1/2 there as 1 GiB
+            // gigapages). Sv32 has no page size that large — its top-level
+            // granularity is a 4 MiB megapage (VPN[1] = PA >> 22) — so the
+            // equivalent coverage takes 768 consecutive megapages (768 x
+            // 4 MiB = 3 GiB) instead of 3 gigapages, but the SET OF
+            // PHYSICAL ADDRESSES made accessible is identical: every low
+            // MMIO device this kernel probes at boot (CLINT @0x0200_0000,
+            // PLIC @0x0C00_0000, UART/virtio @0x1000_0000+, PCIe ECAM
+            // @0x3000_0000+) and all of DRAM (@0x8000_0000+) in one sweep,
+            // with no further address-by-address guessing.
             const MEGAPAGE: u64 = 1 << 22; // Sv32 VPN[1] granularity (4 MiB)
-            const NPAGES: u64 = 128; // 128 x 4 MiB = 512 MiB per window
+            const NPAGES: u64 = 768; // 768 x 4 MiB = 3 GiB (matches rv64's 3 x 1 GiB)
             let root32 = root_pa as *mut u32;
-            for base in [MMIO_BASE, DRAM_BASE] {
-                let vpn1_base = (base / MEGAPAGE) as usize;
-                for i in 0..NPAGES {
-                    let pa = base + i * MEGAPAGE;
-                    let pte = (PTE_V | leaf_flags | (pa >> 12 << PTE_PPN_SHIFT)) as u32;
-                    ptr::write_volatile(root32.add(vpn1_base + i as usize), pte);
-                }
+            for i in 0..NPAGES {
+                let pa = i * MEGAPAGE;
+                let pte = (PTE_V | leaf_flags | (pa >> 12 << PTE_PPN_SHIFT)) as u32;
+                ptr::write_volatile(root32.add(i as usize), pte);
             }
         }
         let p = &raw mut G_KERNEL_ROOT_PA;
