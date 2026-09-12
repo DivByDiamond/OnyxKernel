@@ -4,9 +4,7 @@
 use core::arch::asm;
 
 mod auth;
-mod syscalls;
-#[path = "term.rs"]
-mod term;
+use onyx_init::{syscalls, term};
 
 // Re-exported for readability at the call site below.
 use term::read_secret_line;

@@ -1,7 +1,7 @@
 #![no_std]
 #![no_main]
 
-mod syscalls;
+use onyx_init::{syscalls};
 
 fn write_dec(v: usize) {
     let mut buf = [0u8; 12];

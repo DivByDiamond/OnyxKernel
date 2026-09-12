@@ -7,6 +7,10 @@ license.workspace = true
 [dependencies]
 onyx_core = { path = "../core" }
 
+[lib]
+name = "onyx_init"
+path = "src/lib.rs"
+
 [[bin]]
 name = "onyx-init"
 path = "src/main.rs"

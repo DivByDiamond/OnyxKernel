@@ -3,10 +3,7 @@
 
 #[path = "../auth/mod.rs"]
 mod auth;
-#[path = "../syscalls/mod.rs"]
-mod syscalls;
-#[path = "../term.rs"]
-mod term;
+use onyx_init::{syscalls, term};
 
 mod backoff;
 mod seed;

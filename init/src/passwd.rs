@@ -4,8 +4,7 @@
 use core::arch::asm;
 
 mod auth;
-mod syscalls;
-mod term;
+use onyx_init::{syscalls, term};
 
 // Re-exported for readability at the call sites below.
 use term::read_secret_line;
