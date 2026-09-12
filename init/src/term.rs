@@ -1,4 +1,3 @@
-
 use crate::syscalls;
 
 /// ioctl numbers — match the kernel's `fs_sys3/extra.rs` definitions.
@@ -36,65 +35,69 @@ const ERASE_SEQ: [u8; 3] = [0x08, b' ', 0x08];
 /// swallows a genuine stray trailing `\n` completing a `\r\n` pair left
 /// over from the previous field's Enter, and never blocks or discards
 /// anything else.
-pub unsafe fn read_secret_line(buf: &mut [u8]) -> &[u8] { unsafe {
-    let _ = syscalls::ioctl(0, TIOCSRAW, 0);
+pub unsafe fn read_secret_line(buf: &mut [u8]) -> &[u8] {
+    unsafe {
+        let _ = syscalls::ioctl(0, TIOCSRAW, 0);
 
-    // Non-blocking: if the previous field's Enter arrived as "\r\n" and
-    // raw_read stopped at the '\r', the paired '\n' is still queued. Peek
-    // via FIONREAD (never blocks) and consume it ONLY if it's actually
-    // there and actually a bare '\n' — anything else is left untouched for
-    // the real read loop below.
-    let mut n = 0usize;
-    let mut pending: u32 = 0;
-    if syscalls::ioctl(0, FIONREAD, &mut pending as *mut u32 as u64) >= 0 && pending > 0 {
-        let mut peek = [0u8; 1];
-        if syscalls::read(0, peek.as_mut_ptr(), 1) == 1 && peek[0] != b'\n' {
-            // Not the stray pair byte — it's real input; feed it back in.
-            handle_byte(buf, &mut n, peek[0]);
+        // Non-blocking: if the previous field's Enter arrived as "\r\n" and
+        // raw_read stopped at the '\r', the paired '\n' is still queued. Peek
+        // via FIONREAD (never blocks) and consume it ONLY if it's actually
+        // there and actually a bare '\n' — anything else is left untouched for
+        // the real read loop below.
+        let mut n = 0usize;
+        let mut pending: u32 = 0;
+        if syscalls::ioctl(0, FIONREAD, &mut pending as *mut u32 as u64) >= 0 && pending > 0 {
+            let mut peek = [0u8; 1];
+            if syscalls::read(0, peek.as_mut_ptr(), 1) == 1 && peek[0] != b'\n' {
+                // Not the stray pair byte — it's real input; feed it back in.
+                handle_byte(buf, &mut n, peek[0]);
+            }
         }
-    }
 
-    let mut chunk = [0u8; 32];
-    loop {
-        // Block for the first byte, then drain whatever else the kernel
-        // already queued (pasted input arrives in bursts); repeat until the
-        // user actually presses Enter.
-        let r = syscalls::read(0, chunk.as_mut_ptr(), chunk.len() as u64);
-        if r <= 0 {
-            break;
-        }
-        let bytes = &chunk[..r as usize];
-        let mut done = false;
-        for &b in bytes {
-            if b == b'\n' || b == b'\r' {
-                done = true;
+        let mut chunk = [0u8; 32];
+        loop {
+            // Block for the first byte, then drain whatever else the kernel
+            // already queued (pasted input arrives in bursts); repeat until the
+            // user actually presses Enter.
+            let r = syscalls::read(0, chunk.as_mut_ptr(), chunk.len() as u64);
+            if r <= 0 {
                 break;
             }
-            handle_byte(buf, &mut n, b);
+            let bytes = &chunk[..r as usize];
+            let mut done = false;
+            for &b in bytes {
+                if b == b'\n' || b == b'\r' {
+                    done = true;
+                    break;
+                }
+                handle_byte(buf, &mut n, b);
+            }
+            if done {
+                break;
+            }
         }
-        if done {
-            break;
-        }
-    }
-    let _ = syscalls::ioctl(0, TIOCRRAW, 0);
-    syscalls::write(1, b"\n".as_ptr(), b"\n".len());
+        let _ = syscalls::ioctl(0, TIOCRRAW, 0);
+        syscalls::write(1, b"\n".as_ptr(), b"\n".len());
 
-    &buf[..n]
-}}
+        &buf[..n]
+    }
+}
 
 /// Applies one input byte to the in-progress secret line: backspace erases
 /// the last accepted character (with on-screen erase), printable ASCII
 /// appends and echoes '*', everything else is ignored.
-unsafe fn handle_byte(buf: &mut [u8], n: &mut usize, b: u8) { unsafe {
-    if b == 0x7F || b == 0x08 {
-        if *n > 0 {
-            *n -= 1;
-            syscalls::write(1, ERASE_SEQ.as_ptr(), ERASE_SEQ.len());
+unsafe fn handle_byte(buf: &mut [u8], n: &mut usize, b: u8) {
+    unsafe {
+        if b == 0x7F || b == 0x08 {
+            if *n > 0 {
+                *n -= 1;
+                syscalls::write(1, ERASE_SEQ.as_ptr(), ERASE_SEQ.len());
+            }
+        } else if (0x20..=0x7E).contains(&b) && *n < buf.len() {
+            buf[*n] = b;
+            *n += 1;
+            syscalls::write(1, b"*".as_ptr(), b"*".len());
         }
-    } else if (0x20..=0x7E).contains(&b) && *n < buf.len() {
-        buf[*n] = b;
-        *n += 1;
-        syscalls::write(1, b"*".as_ptr(), b"*".len());
+        // other control bytes are ignored, never stored
     }
-    // other control bytes are ignored, never stored
-}}
+}

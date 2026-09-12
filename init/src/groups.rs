@@ -11,53 +11,55 @@ use onyx_init::syscalls;
 ///
 /// Process entry point: called directly by the kernel from the ELF entry
 /// address; the stack is freshly initialized per the RISC-V calling convention.
-pub unsafe extern "C" fn _start() -> ! { unsafe {
-    let uid = syscalls::getuid() as u32;
-    let gid = syscalls::getgid() as u32;
+pub unsafe extern "C" fn _start() -> ! {
+    unsafe {
+        let uid = syscalls::getuid() as u32;
+        let gid = syscalls::getgid() as u32;
 
-    let mut users = [auth::PasswdEntry {
-        name: [0; 32],
-        uid: 0,
-        gid: 0,
-        home: [0; 64],
-        shell: [0; 32],
-    }; auth::MAX_USERS];
-    let nusers = auth::read_passwd(&mut users).unwrap_or(0);
+        let mut users = [auth::PasswdEntry {
+            name: [0; 32],
+            uid: 0,
+            gid: 0,
+            home: [0; 64],
+            shell: [0; 32],
+        }; auth::MAX_USERS];
+        let nusers = auth::read_passwd(&mut users).unwrap_or(0);
 
-    let mut username = [0u8; 32];
-    if let Some(idx) = auth::find_user_by_uid(&users, nusers, uid) {
-        let ul = users[idx].name.iter().position(|&b| b == 0).unwrap_or(32);
-        username[..ul].copy_from_slice(&users[idx].name[..ul]);
-    }
-
-    let mut groups = [auth::GroupEntry {
-        name: [0; 32],
-        gid: 0,
-        members: [0; 256],
-        members_len: 0,
-    }; auth::MAX_GROUPS];
-    let ngroups = auth::read_groups(&mut groups).unwrap_or(0);
-
-    let mut first = true;
-    for entry in groups.iter().take(ngroups) {
-        let mut show = false;
-        if entry.gid == gid {
-            show = true;
-        } else if !username.iter().all(|&b| b == 0) {
-            show = auth::user_in_group(&username, &entry.members[..entry.members_len]);
+        let mut username = [0u8; 32];
+        if let Some(idx) = auth::find_user_by_uid(&users, nusers, uid) {
+            let ul = users[idx].name.iter().position(|&b| b == 0).unwrap_or(32);
+            username[..ul].copy_from_slice(&users[idx].name[..ul]);
         }
-        if show {
-            let gl = entry.name.iter().position(|&b| b == 0).unwrap_or(32);
-            if !first {
-                syscalls::write(1, b" ".as_ptr(), b" ".len());
+
+        let mut groups = [auth::GroupEntry {
+            name: [0; 32],
+            gid: 0,
+            members: [0; 256],
+            members_len: 0,
+        }; auth::MAX_GROUPS];
+        let ngroups = auth::read_groups(&mut groups).unwrap_or(0);
+
+        let mut first = true;
+        for entry in groups.iter().take(ngroups) {
+            let mut show = false;
+            if entry.gid == gid {
+                show = true;
+            } else if !username.iter().all(|&b| b == 0) {
+                show = auth::user_in_group(&username, &entry.members[..entry.members_len]);
             }
-            syscalls::write(1, entry.name.as_ptr(), gl);
-            first = false;
+            if show {
+                let gl = entry.name.iter().position(|&b| b == 0).unwrap_or(32);
+                if !first {
+                    syscalls::write(1, b" ".as_ptr(), b" ".len());
+                }
+                syscalls::write(1, entry.name.as_ptr(), gl);
+                first = false;
+            }
         }
+        syscalls::write(1, b"\n".as_ptr(), b"\n".len());
+        syscalls::exit(0);
     }
-    syscalls::write(1, b"\n".as_ptr(), b"\n".len());
-    syscalls::exit(0);
-}}
+}
 
 #[panic_handler]
 fn panic(_info: &core::panic::PanicInfo) -> ! {

@@ -14,135 +14,137 @@ use term::read_secret_line;
 ///
 /// Process entry point: called directly by the kernel from the ELF entry
 /// address; the stack is freshly initialized per the RISC-V calling convention.
-pub unsafe extern "C" fn _start(argc: usize, argv: *const u64, _envp: *const u64) -> ! { unsafe {
-    let mut target_user = [0u8; 32];
-    let mut target_len = 0usize;
+pub unsafe extern "C" fn _start(argc: usize, argv: *const u64, _envp: *const u64) -> ! {
+    unsafe {
+        let mut target_user = [0u8; 32];
+        let mut target_len = 0usize;
 
-    // Read username from argv or prompt
-    if argc > 1 {
-        let arg1 = *argv.add(1);
-        if arg1 != 0 {
-            let p = arg1 as *const u8;
-            while *p.add(target_len) != 0 && target_len < 31 {
-                target_user[target_len] = *p.add(target_len);
-                target_len += 1;
+        // Read username from argv or prompt
+        if argc > 1 {
+            let arg1 = *argv.add(1);
+            if arg1 != 0 {
+                let p = arg1 as *const u8;
+                while *p.add(target_len) != 0 && target_len < 31 {
+                    target_user[target_len] = *p.add(target_len);
+                    target_len += 1;
+                }
             }
         }
-    }
 
-    if target_len == 0 {
-        syscalls::write(1, b"su: username: ".as_ptr(), b"su: username: ".len());
-        let mut buf = [0u8; 64];
-        let n = syscalls::read(0, buf.as_mut_ptr(), buf.len() as u64);
-        if n <= 0 {
+        if target_len == 0 {
+            syscalls::write(1, b"su: username: ".as_ptr(), b"su: username: ".len());
+            let mut buf = [0u8; 64];
+            let n = syscalls::read(0, buf.as_mut_ptr(), buf.len() as u64);
+            if n <= 0 {
+                syscalls::exit(1);
+            }
+            let mut n = n as usize;
+            while n > 0 && (buf[n - 1] == b'\n' || buf[n - 1] == b'\r') {
+                n -= 1;
+            }
+            target_len = n.min(31);
+            target_user[..target_len].copy_from_slice(&buf[..target_len]);
+        }
+
+        if target_len == 0 {
+            syscalls::write(1, b"su: no username\n".as_ptr(), b"su: no username\n".len());
             syscalls::exit(1);
         }
-        let mut n = n as usize;
-        while n > 0 && (buf[n - 1] == b'\n' || buf[n - 1] == b'\r') {
-            n -= 1;
-        }
-        target_len = n.min(31);
-        target_user[..target_len].copy_from_slice(&buf[..target_len]);
-    }
 
-    if target_len == 0 {
-        syscalls::write(1, b"su: no username\n".as_ptr(), b"su: no username\n".len());
-        syscalls::exit(1);
-    }
+        let username = &target_user[..target_len];
 
-    let username = &target_user[..target_len];
+        // Read /etc/passwd
+        let mut users = [auth::PasswdEntry {
+            name: [0; 32],
+            uid: 0,
+            gid: 0,
+            home: [0; 64],
+            shell: [0; 32],
+        }; auth::MAX_USERS];
+        let nusers = auth::read_passwd(&mut users).unwrap_or(0);
 
-    // Read /etc/passwd
-    let mut users = [auth::PasswdEntry {
-        name: [0; 32],
-        uid: 0,
-        gid: 0,
-        home: [0; 64],
-        shell: [0; 32],
-    }; auth::MAX_USERS];
-    let nusers = auth::read_passwd(&mut users).unwrap_or(0);
+        let user_idx = match auth::find_user(&users, nusers, username) {
+            Some(i) => i,
+            None => {
+                syscalls::write(
+                    1,
+                    b"su: unknown user\n".as_ptr(),
+                    b"su: unknown user\n".len(),
+                );
+                syscalls::exit(1);
+            }
+        };
 
-    let user_idx = match auth::find_user(&users, nusers, username) {
-        Some(i) => i,
-        None => {
+        // Prompt for password. read_secret_line switches the terminal to raw
+        // mode itself (so the cooked-mode echo doesn't leak the password onto
+        // the screen, audit fix 🟡 #2) and loops until Enter — a single raw
+        // read() returns after ANY keypress, which made su submit a one-char
+        // password per key (2026-09-04 bug report).
+        syscalls::write(1, b"Password: ".as_ptr(), b"Password: ".len());
+        let mut pass_buf = [0u8; 64];
+        let password = read_secret_line(&mut pass_buf);
+        if password.is_empty() {
             syscalls::write(
                 1,
-                b"su: unknown user\n".as_ptr(),
-                b"su: unknown user\n".len(),
+                b"su: authentication failed\n".as_ptr(),
+                b"su: authentication failed\n".len(),
             );
             syscalls::exit(1);
         }
-    };
 
-    // Prompt for password. read_secret_line switches the terminal to raw
-    // mode itself (so the cooked-mode echo doesn't leak the password onto
-    // the screen, audit fix 🟡 #2) and loops until Enter — a single raw
-    // read() returns after ANY keypress, which made su submit a one-char
-    // password per key (2026-09-04 bug report).
-    syscalls::write(1, b"Password: ".as_ptr(), b"Password: ".len());
-    let mut pass_buf = [0u8; 64];
-    let password = read_secret_line(&mut pass_buf);
-    if password.is_empty() {
-        syscalls::write(
-            1,
-            b"su: authentication failed\n".as_ptr(),
-            b"su: authentication failed\n".len(),
-        );
+        // Verify password via /etc/shadow
+        if !auth::verify_shadow_password(username, password) {
+            syscalls::write(
+                1,
+                b"\nsu: authentication failed\n".as_ptr(),
+                b"\nsu: authentication failed\n".len(),
+            );
+            // Audit fix (🔴 #11): exponential backoff on failed `su` attempts.
+            // 0.25 s, 0.5 s, 1 s, 2 s, 4 s, 8 s, 16 s, 16 s, … — capped at 16 s.
+            backoff_sleep(2);
+            syscalls::exit(1);
+        }
+
+        // Set uid/gid
+        let target_uid = users[user_idx].uid;
+        let target_gid = users[user_idx].gid;
+        let r1 = syscalls::setuid(target_uid as u64);
+        let r2 = syscalls::setgid(target_gid as u64);
+        if r1 < 0 || r2 < 0 {
+            syscalls::write(
+                1,
+                b"su: setuid/setgid failed\n".as_ptr(),
+                b"su: setuid/setgid failed\n".len(),
+            );
+            syscalls::exit(1);
+        }
+
+        // Drop to ring 2 for non-root
+        if target_uid != 0 {
+            syscalls::dropping(2);
+        }
+
+        // Exec the user's shell
+        let mut shell_path = [0u8; 32];
+        let mut shell_len = 0usize;
+        let stored = &users[user_idx].shell;
+        while shell_len < stored.len() && stored[shell_len] != 0 {
+            shell_path[shell_len] = stored[shell_len];
+            shell_len += 1;
+        }
+        if shell_len == 0 {
+            let fallback = b"/bin/osh";
+            shell_path[..fallback.len()].copy_from_slice(fallback);
+            shell_len = fallback.len();
+        }
+        if shell_len < shell_path.len() {
+            shell_path[shell_len] = 0;
+        }
+        syscalls::exec(shell_path.as_ptr(), core::ptr::null());
+        syscalls::write(1, b"su: exec failed\n".as_ptr(), b"su: exec failed\n".len());
         syscalls::exit(1);
     }
-
-    // Verify password via /etc/shadow
-    if !auth::verify_shadow_password(username, password) {
-        syscalls::write(
-            1,
-            b"\nsu: authentication failed\n".as_ptr(),
-            b"\nsu: authentication failed\n".len(),
-        );
-        // Audit fix (🔴 #11): exponential backoff on failed `su` attempts.
-        // 0.25 s, 0.5 s, 1 s, 2 s, 4 s, 8 s, 16 s, 16 s, … — capped at 16 s.
-        backoff_sleep(2);
-        syscalls::exit(1);
-    }
-
-    // Set uid/gid
-    let target_uid = users[user_idx].uid;
-    let target_gid = users[user_idx].gid;
-    let r1 = syscalls::setuid(target_uid as u64);
-    let r2 = syscalls::setgid(target_gid as u64);
-    if r1 < 0 || r2 < 0 {
-        syscalls::write(
-            1,
-            b"su: setuid/setgid failed\n".as_ptr(),
-            b"su: setuid/setgid failed\n".len(),
-        );
-        syscalls::exit(1);
-    }
-
-    // Drop to ring 2 for non-root
-    if target_uid != 0 {
-        syscalls::dropping(2);
-    }
-
-    // Exec the user's shell
-    let mut shell_path = [0u8; 32];
-    let mut shell_len = 0usize;
-    let stored = &users[user_idx].shell;
-    while shell_len < stored.len() && stored[shell_len] != 0 {
-        shell_path[shell_len] = stored[shell_len];
-        shell_len += 1;
-    }
-    if shell_len == 0 {
-        let fallback = b"/bin/osh";
-        shell_path[..fallback.len()].copy_from_slice(fallback);
-        shell_len = fallback.len();
-    }
-    if shell_len < shell_path.len() {
-        shell_path[shell_len] = 0;
-    }
-    syscalls::exec(shell_path.as_ptr(), core::ptr::null());
-    syscalls::write(1, b"su: exec failed\n".as_ptr(), b"su: exec failed\n".len());
-    syscalls::exit(1);
-}}
+}
 
 /// Audit fix (🔴 #11): exponential backoff. `fails` is the number of
 /// consecutive failed attempts. We delay by `2^min(fails,6) * 250 ms`,

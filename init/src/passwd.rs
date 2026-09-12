@@ -15,17 +15,19 @@ use passwd_flow::user_flow::do_user_passwd;
 ///
 /// Process entry point: called directly by the kernel from the ELF entry
 /// address; the stack is freshly initialized per the RISC-V calling convention.
-pub unsafe extern "C" fn _start() -> ! { unsafe {
-    let ring = syscalls::getring();
+pub unsafe extern "C" fn _start() -> ! {
+    unsafe {
+        let ring = syscalls::getring();
 
-    if ring == 2 {
-        do_user_passwd();
-    } else {
-        do_root_passwd();
+        if ring == 2 {
+            do_user_passwd();
+        } else {
+            do_root_passwd();
+        }
+
+        syscalls::exit(0);
     }
-
-    syscalls::exit(0);
-}}
+}
 
 #[panic_handler]
 fn panic(_info: &core::panic::PanicInfo) -> ! {
