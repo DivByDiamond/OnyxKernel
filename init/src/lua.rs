@@ -2,9 +2,10 @@
 
 #![no_std]
 #![no_main]
-// TODO(2026-08-31): bin-root allow — raw syscall asm runs inside `unsafe fn`
-// wrappers (no_std, per-bin compile); re-evaluate on toolchain/edition bump.
-#![allow(unsafe_op_in_unsafe_fn)]
+#![allow(
+    unsafe_op_in_unsafe_fn,
+    reason = "TODO(2026-09-13): syscalls::call::* asm! sites are now explicitly unsafe{}-wrapped (real fix); remaining warnings are this bin's own ~300 call sites into those wrappers, not yet individually wrapped"
+)]
 
 extern crate alloc;
 

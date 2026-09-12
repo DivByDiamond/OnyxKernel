@@ -13,17 +13,25 @@
 #![warn(clippy::all)]
 #![deny(clippy::correctness)]
 #![warn(clippy::suspicious, clippy::style, clippy::complexity, clippy::perf)]
-// SYS_* constants and G_* globals deliberately mirror the Linux/ABI naming
-// used across syscall tables, ACLs and match dispatch sites.
-#![allow(non_upper_case_globals)]
-// Kernel-wide deliberate exceptions:
-// - static_mut_refs: bare-static register/blocking state is pervasive in no_std kernel code
-// - too_many_arguments / type_complexity: syscall & trap-frame APIs mirror hardware layout
+#![allow(
+    non_upper_case_globals,
+    reason = "SYS_* constants (abi.rs) mirror Linux/kernel ABI syscall-name casing and are matched by that casing across dispatch/ACL sites (e.g. syscall/handler/acl.rs); module-level allows on abi.rs alone don't cover those use sites"
+)]
 #![allow(
     static_mut_refs,
+    reason = "bare-static register/blocking state is pervasive in this no_std kernel; per-site migration to safe wrappers is tracked separately, not a stub"
+)]
+#![allow(
     clippy::too_many_arguments,
+    reason = "syscall dispatch & trap-frame APIs mirror fixed hardware register layouts, not something to refactor away"
+)]
+#![allow(
     clippy::type_complexity,
-    clippy::missing_safety_doc
+    reason = "syscall dispatch & trap-frame APIs mirror fixed hardware register layouts, not something to refactor away"
+)]
+#![allow(
+    clippy::missing_safety_doc,
+    reason = "TODO(2026-09-13): crate-wide backstop for older unsafe fns predating the per-fn `# Safety` convention now enforced on new code; burn down opportunistically"
 )]
 
 extern crate alloc;

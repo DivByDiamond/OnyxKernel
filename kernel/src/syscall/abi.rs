@@ -1,4 +1,7 @@
-#![allow(non_upper_case_globals)]
+#![allow(
+    non_upper_case_globals,
+    reason = "SYS_* constants mirror Linux/kernel ABI syscall-name casing (e.g. SYS_write), deliberately non-upper-case by convention"
+)]
 
 pub const SYS_write: u64 = 1;
 pub const SYS_read: u64 = 2;
