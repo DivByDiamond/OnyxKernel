@@ -1,140 +1,216 @@
-//! MIPI DSI — Duo S display panel controller.
+//! MIPI DSI — Milk-V Duo S (SG2000) display panel controller.
 //!
-//! The Milk-V Duo S exposes a Synopsys DW-MIPI-DSI at 0x0307_0000
-//! paired with a 480x854 panel. Full DSI command sequences for panel
-//! init are board-specific; this driver implements the link layer:
-//! PLL setup, lane configuration, and a `send_cmd`/`send_data` API
-//! for the panel's DCS command set.
+//! SG2000 does **not** use the generic Synopsys DW-MIPI-DSI register map
+//! (an earlier version of this driver assumed it did, with a placeholder
+//! QEMU-style base `0x0307_0000` — both wrong). It has its own `dsi_mac`
+//! controller plus a separate D-PHY block. Registers/addresses below are
+//! taken directly from `SG2000_TRM_V1.0-alpha.pdf` §16.5.4–16.5.7
+//! (`milkv-duo/duo-files` on GitHub, `duo-s/datasheet/`):
+//! - `dsi_mac` base `0x0A08_A000` (TRM memory map + §16.5.4).
+//! - D-PHY base `0x0A0D_1000` (TRM §16.5.6 "MIPI Tx PHY 寄存器位置").
+//!
+//! Caveat carried forward honestly: the D-PHY bit-clock PLL divider
+//! (`REG_24`, a Q6.26 fixed-point "Frequency Synthesizer" value) is fed
+//! from a shared MIPIMPLL clock tree documented elsewhere in the TRM
+//! (§ around `reg_dsi_ssc_syn_src_en`) that this driver does not fully
+//! resolve — [`pll_divider`] assumes a 24 MHz reference and should be
+//! cross-checked against Sophgo's vendor SDK (`cvi_mipi_tx` driver)
+//! before trusting exact pixel clocks on real silicon. Command TX uses
+//! the MAC's escape/LPDT path, which is real hardware but whose exact
+//! DCS-packet byte layout (raw bytes vs. HW-assembled header) is
+//! likewise unverified against the vendor SDK — see [`send_cmd`].
 use crate::arch::mmio::Mmio;
+use crate::drivers::platform::sg2000;
 use onyx_core::errno::{Errno, KResult};
 
-const DSI_BASE: usize = 0x0307_0000;
-const DPHY_BASE: usize = 0x0307_1000;
+// --- dsi_mac registers (TRM §16.5.4/16.5.5) ---
+const R_MAC_CTRL: u32 = 0x000; // DSI_MAC_REG_00
+const R_MAC_CFG: u32 = 0x004; // DSI_MAC_REG_01
+const R_MAC_VID: u32 = 0x008; // DSI_MAC_REG_02
+const R_MAC_ESC: u32 = 0x00C; // DSI_MAC_REG_03
+const R_MAC_TX0: u32 = 0x010; // DSI_MAC_REG_04 (tx_byte 0..3)
 
-const R_DSI_VERSION: u32 = 0x00;
-const R_DSI_PWR_UP: u32 = 0x04;
-const R_DSI_CLKMGR_CFG: u32 = 0x08;
-const R_DSI_DPI_VCID: u32 = 0x0C;
-const R_DSI_DPI_COLOR: u32 = 0x10;
-const R_DSI_PCKHDL_CFG: u32 = 0x18;
-const R_DSI_VID_MODE_CFG: u32 = 0x1C;
-const R_DSI_CMD_MODE_CFG: u32 = 0x20;
-const R_DSI_VID_PKT_SIZE: u32 = 0x24;
-const _R_DSI_VID_NUM_CHUNKS: u32 = 0x28;
-const _R_DSI_VID_NULLSIZE: u32 = 0x2C;
-const R_DSI_VID_HSA: u32 = 0x30;
-const R_DSI_VID_HBP: u32 = 0x34;
-const R_DSI_VID_HLINE: u32 = 0x38;
-const R_DSI_VID_VSA: u32 = 0x3C;
-const R_DSI_VID_VBP: u32 = 0x40;
-const R_DSI_VID_VFP: u32 = 0x44;
-const R_DSI_VID_VACTIVE: u32 = 0x48;
-const R_DSI_CMD_PKT: u32 = 0x80;
-const R_DSI_CMD_PAYLOAD: u32 = 0x84;
+const CTRL_ESC_EN: u32 = 1 << 1;
+const CTRL_VIDEO_MODE: u32 = 1 << 2;
+const CTRL_ESC_DONE: u32 = 1 << 5;
 
-static mut G_DSI: usize = DSI_BASE;
-static mut G_DPHY: usize = DPHY_BASE;
+const CFG_EOTP_EN: u32 = 1 << 26;
+const CFG_HS_C_CONTI: u32 = 1 << 29;
+const CFG_FMT_RGB888: u32 = 0 << 30;
 
-#[inline]
+const ESC_MODE_LPDT: u32 = 1;
+const ESC_TRIG_SHIFT: u32 = 4;
+
+// --- D-PHY registers (TRM §16.5.6/16.5.7) ---
+const R_PHY_LANE_EN: u32 = 0x000; // REG_00
+const R_PHY_CLK_TIMING: u32 = 0x004; // REG_01: prepare/zero/pre/post
+const R_PHY_CLK_TRAIL: u32 = 0x008; // REG_02
+const R_PHY_HS_TIMING: u32 = 0x014; // REG_05: pre_on/prepare/zero/trail
+const R_PHY_PLL_SET: u32 = 0x090; // REG_24: Q6.26 frequency synthesizer
+
+const PHY_CLK_LANE_EN: u32 = 1 << 0;
+
+static mut G_MAC: usize = 0;
+static mut G_PHY: usize = 0;
+
 /// # Safety
-///
-/// `G_DSI` must hold a mapped DW-MIPI-DSI base (the `DSI_BASE` constant or a
-/// base validated by `init`); `off` is a datasheet register offset.
-unsafe fn rd(off: u32) -> u32 {
-    // SAFETY: volatile read at G_DSI + off, a datasheet offset in the controller MMIO window (identity-mapped at boot).
-    unsafe { Mmio::<u32>::at(G_DSI + off as usize).read() }
+/// `G_MAC` must be a mapped `dsi_mac` base set by [`init`]; `off` is a
+/// TRM §16.5.5 register offset.
+unsafe fn rd_mac(off: u32) -> u32 {
+    // SAFETY: volatile read at G_MAC + off, a TRM-documented offset, identity-mapped at boot.
+    unsafe { Mmio::<u32>::at(G_MAC + off as usize).read() }
 }
 
-#[inline]
 /// # Safety
-///
-/// Same contract as [`rd`]: `G_DSI` must be a mapped DSI controller base;
-/// `off` is a datasheet register offset.
-unsafe fn wr(off: u32, v: u32) {
-    // SAFETY: volatile write at G_DSI + off, a datasheet offset in the controller MMIO window.
-    unsafe {
-        Mmio::<u32>::at(G_DSI + off as usize).write(v);
-    }
+/// Same contract as [`rd_mac`].
+unsafe fn wr_mac(off: u32, v: u32) {
+    // SAFETY: same contract as rd_mac(); off is a TRM-documented offset.
+    unsafe { Mmio::<u32>::at(G_MAC + off as usize).write(v) };
 }
 
-/// Initialise the DSI link for a 480x854 24bpp panel running at 60 Hz.
-/// `lane_mbps` selects the per-lane bit rate (typically 500..1000).
+/// # Safety
+/// `G_PHY` must be a mapped D-PHY base set by [`init`]; `off` is a TRM
+/// §16.5.7 register offset.
+unsafe fn wr_phy(off: u32, v: u32) {
+    // SAFETY: volatile write at G_PHY + off, a TRM-documented offset, identity-mapped at boot.
+    unsafe { Mmio::<u32>::at(G_PHY + off as usize).write(v) };
+}
+
+/// D-PHY bit-clock PLL divider (TRM §16.5.7 `REG_24`, Q6.26 fixed point:
+/// bits[31:26] integer part, bits[25:0] fraction). Assumes a 24 MHz
+/// reference (see the module-level caveat on the MIPIMPLL clock tree).
+fn pll_divider(lane_mbps: u32, ref_mhz: u32) -> u32 {
+    let target = lane_mbps.max(1) as u64;
+    let ratio_q26 = (target << 26) / ref_mhz.max(1) as u64;
+    (ratio_q26 & 0xFFFF_FFFF) as u32
+}
+
+/// Initialise the DSI link. `lanes` is the active data-lane count (1, 2,
+/// or 4, TRM §16.5.5 `reg_lane_mode`); `lane_mbps` is the target per-lane
+/// bit rate. Only sets up the link layer (lanes, PLL, escape mode) —
+/// video-mode timing (HSA/HBP/HLINE/VSA/VBP/VFP) and the panel's DCS
+/// init sequence are not part of the `dsi_mac` register set found here
+/// and must be driven by a panel-specific caller via [`send_cmd`]/
+/// [`send_data`] plus the VO/VDP timing generator (separate from this
+/// driver — see `drivers::video::display`).
 ///
 /// # Safety
-///
-/// `base`/`dphy` must be the real DW-MIPI-DSI and D-PHY MMIO bases in the
-/// identity-mapped device window; must run once during single-threaded
-/// panel setup (SIE=0) since it mutates `G_DSI`/`G_DPHY`.
-pub unsafe fn init(base: usize, dphy: usize, lane_mbps: u32) -> KResult<()> {
-    // SAFETY: G_DSI/G_DPHY are written once here during single-threaded init (SIE=0, see crate::sync); all wr() calls hit datasheet offsets in the caller-validated window.
-    unsafe {
-        if base == 0 {
-            return Err(Errno::Inval);
-        }
-        G_DSI = base;
-        G_DPHY = dphy;
-        // Power down before config.
-        wr(R_DSI_PWR_UP, 0);
-        // 1 lane, escape clock division.
-        wr(R_DSI_CLKMGR_CFG, 0x10);
-        wr(R_DSI_DPI_VCID, 0);
-        wr(R_DSI_DPI_COLOR, 0x05); // 24-bit RGB888
-        wr(R_DSI_PCKHDL_CFG, 0x04);
-        // Video mode, burst, HSA/EOT packets enabled.
-        wr(R_DSI_VID_MODE_CFG, 0x1F01);
-        wr(R_DSI_CMD_MODE_CFG, 0);
-        // 480x854 panel timings.
-        wr(R_DSI_VID_PKT_SIZE, 480);
-        wr(R_DSI_VID_HSA, 10);
-        wr(R_DSI_VID_HBP, 40);
-        wr(R_DSI_VID_HLINE, 540);
-        wr(R_DSI_VID_VSA, 4);
-        wr(R_DSI_VID_VBP, 12);
-        wr(R_DSI_VID_VFP, 16);
-        wr(R_DSI_VID_VACTIVE, 854);
-        // D-PHY PLL: lane_mbps / 100 - 1.
-        let _ = lane_mbps;
-        // Power up.
-        wr(R_DSI_PWR_UP, 1);
-        Ok(())
-    }
-}
-
-/// Send a DCS short command (1 byte payload).
-pub fn send_cmd(cmd: u8) -> KResult<()> {
-    // SAFETY: wr() targets G_DSI + datasheet offsets; G_DSI is the constant DSI_BASE or a base validated by init().
-    unsafe {
-        wr(R_DSI_CMD_PKT, (cmd as u32) << 8 | 0x05);
-        // Wait for command to drain (no dedicated status bit in our
-        // subset — small delay).
-        for _ in 0..1000 {
-            core::arch::asm!("nop");
-        }
-        Ok(())
-    }
-}
-
-/// Send a DCS long command (payload up to 32 bytes).
-pub fn send_data(cmd: u8, payload: &[u8]) -> KResult<()> {
-    if payload.is_empty() || payload.len() > 32 {
+/// `mac_base`/`phy_base` must be the real TRM-confirmed MMIO bases,
+/// identity-mapped, with the `clk_dsi_mac_vip` gate already enabled
+/// (see `platform::sg2000::enable_dsi`); must run once during
+/// single-threaded panel setup (SIE=0) since it mutates `G_MAC`/`G_PHY`.
+pub unsafe fn init(mac_base: usize, phy_base: usize, lanes: u8, lane_mbps: u32) -> KResult<()> {
+    if mac_base == 0 || phy_base == 0 || !matches!(lanes, 1 | 2 | 4) {
         return Err(Errno::Inval);
     }
-    // SAFETY: wr() targets G_DSI + datasheet offsets; G_DSI is the constant DSI_BASE or a base validated by init(); payload length was checked above.
+    // SAFETY: G_MAC/G_PHY are written once here during single-threaded init (SIE=0, see crate::sync); all wr_*() calls hit TRM-documented offsets in the caller-validated windows.
     unsafe {
-        wr(R_DSI_CMD_PAYLOAD, payload[0] as u32);
-        for &b in &payload[1..] {
-            wr(R_DSI_CMD_PAYLOAD, b as u32);
-        }
-        wr(R_DSI_CMD_PKT, (cmd as u32) << 8 | 0x39);
-        for _ in 0..payload.len() * 100 {
-            core::arch::asm!("nop");
-        }
+        G_MAC = mac_base;
+        G_PHY = phy_base;
+
+        // Disable video/escape mode while reconfiguring.
+        wr_mac(R_MAC_CTRL, 0);
+
+        // D-PHY: enable clock lane + `lanes` data lanes, program HS/CLK
+        // timing at TRM reset defaults (safe baseline; not bit-rate tuned).
+        let lane_bits = (1u32 << lanes) - 1; // lanes=1→0b1, 2→0b11, 4→0b1111
+        wr_phy(R_PHY_LANE_EN, PHY_CLK_LANE_EN | (lane_bits << 1));
+        wr_phy(R_PHY_CLK_TIMING, 0x0008_2405); // post/pre/zero/prepare TRM reset values
+        wr_phy(R_PHY_CLK_TRAIL, 0x01);
+        wr_phy(R_PHY_HS_TIMING, 0x0120_0601); // trail/zero/prepare/pre_on TRM reset values
+        wr_phy(R_PHY_PLL_SET, pll_divider(lane_mbps, 24));
+
+        // MAC: lane count, RGB888, EoTp + continuous clock lane enabled.
+        let lane_mode = match lanes {
+            1 => 0u32,
+            2 => 1,
+            _ => 2,
+        };
+        wr_mac(
+            R_MAC_CFG,
+            (lane_mode << 24) | CFG_EOTP_EN | CFG_HS_C_CONTI | CFG_FMT_RGB888,
+        );
         Ok(())
     }
 }
 
-/// Read back the controller's version register (sanity check).
-pub fn version() -> u32 {
-    // SAFETY: rd() reads the version register at G_DSI (constant or init()-validated base) + datasheet offset.
-    unsafe { rd(R_DSI_VERSION) }
+/// Bring up the DSI link at the TRM-confirmed SG2000 bases
+/// (`sg2000::DSI_MAC_BASE`/`DSI_PHY_BASE`): gate on `clk_dsi_mac_vip`,
+/// then call [`init`]. `lanes`/`lane_mbps` as in [`init`].
+///
+/// # Safety
+/// Must run once during single-threaded panel setup (SIE=0).
+pub unsafe fn init_sg2000(lanes: u8, lane_mbps: u32) -> KResult<()> {
+    // SAFETY: enable_dsi/init each uphold their own single-threaded-bring-up contract, satisfied by this function's own contract.
+    unsafe {
+        sg2000::enable_dsi();
+        init(sg2000::DSI_MAC_BASE, sg2000::DSI_PHY_BASE, lanes, lane_mbps)
+    }
+}
+
+/// Enable HS video mode after [`init`] and after the panel has been
+/// brought up via [`send_cmd`]/[`send_data`] in escape mode.
+pub fn enable_video(pkt_bytes: u16) {
+    // SAFETY: wr_mac() targets G_MAC + a TRM-documented offset; G_MAC is bound by init().
+    unsafe {
+        wr_mac(R_MAC_VID, pkt_bytes as u32);
+        wr_mac(R_MAC_CTRL, CTRL_VIDEO_MODE);
+    }
+}
+
+/// Send bytes to the panel over the escape-mode low-power data transfer
+/// (LPDT) path (TRM §16.5.5 `DSI_MAC_REG_03`/`04`). `data` is written as
+/// raw DSI packet bytes (`[DataID, Data0, ...]` for a DCS short write,
+/// `[0x39, WC_lo, WC_hi, ...params]` for a long write) — whether the MAC
+/// auto-generates ECC/checksum for this path (as it documents for the
+/// separate HS `reg_sw_spkt` mechanism) is not confirmed by the TRM text
+/// extracted here; verify against Sophgo's vendor SDK before relying on
+/// this for a real panel bring-up.
+fn escape_tx(data: &[u8]) -> KResult<()> {
+    if data.is_empty() || data.len() > 16 {
+        return Err(Errno::Inval);
+    }
+    // SAFETY: wr_mac()/rd_mac() target G_MAC + TRM-documented offsets; G_MAC is bound by init(); data.len() was bounds-checked above against the 4-register/16-byte tx window.
+    unsafe {
+        for (i, chunk) in data.chunks(4).enumerate() {
+            let mut word = 0u32;
+            for (j, &b) in chunk.iter().enumerate() {
+                word |= (b as u32) << (8 * j);
+            }
+            wr_mac(R_MAC_TX0 + (i as u32) * 4, word);
+        }
+        let bc_code = (data.len() - 1) as u32 & 0xF;
+        wr_mac(R_MAC_ESC, ESC_MODE_LPDT | (bc_code << 8));
+        wr_mac(R_MAC_CTRL, CTRL_ESC_EN | (1u32 << ESC_TRIG_SHIFT));
+        let mut t = 100_000u32;
+        while rd_mac(R_MAC_CTRL) & CTRL_ESC_DONE == 0 {
+            t -= 1;
+            if t == 0 {
+                return Err(Errno::Io);
+            }
+        }
+        wr_mac(R_MAC_CTRL, 0);
+        Ok(())
+    }
+}
+
+/// Send a DCS short write with no parameter (DataID `0x05`).
+pub fn send_cmd(cmd: u8) -> KResult<()> {
+    escape_tx(&[0x05, cmd, 0x00])
+}
+
+/// Send a DCS long write (DataID `0x39`); `payload` up to 13 bytes given
+/// the 16-byte escape TX window minus the 3-byte header.
+pub fn send_data(cmd: u8, payload: &[u8]) -> KResult<()> {
+    if payload.is_empty() || payload.len() > 13 {
+        return Err(Errno::Inval);
+    }
+    let wc = (payload.len() + 1) as u16;
+    let mut buf = [0u8; 16];
+    buf[0] = 0x39;
+    buf[1] = (wc & 0xFF) as u8;
+    buf[2] = (wc >> 8) as u8;
+    buf[3] = cmd;
+    buf[4..4 + payload.len()].copy_from_slice(payload);
+    escape_tx(&buf[..4 + payload.len()])
 }
