@@ -245,4 +245,3 @@ pub fn test_uninstall_front() {
         G_FB.base = core::ptr::null_mut();
     }
 }
-

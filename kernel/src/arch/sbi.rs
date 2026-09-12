@@ -139,19 +139,28 @@ pub unsafe fn set_timer(stime: u64) {
 /// Legacy "SBI" probe extension EID (FID 0: sbi_probe_extension).
 #[cfg_attr(
     not(feature = "smode"),
-    allow(dead_code, reason = "only reachable from the smode-feature-gated SBI ecall path below")
+    allow(
+        dead_code,
+        reason = "only reachable from the smode-feature-gated SBI ecall path below"
+    )
 )]
 const SBI_EID_PROBE: usize = 0x0053_4249;
 /// Base extension EID (FID 0: sbi_get_spec_version).
 #[cfg_attr(
     not(feature = "smode"),
-    allow(dead_code, reason = "only reachable from the smode-feature-gated SBI ecall path below")
+    allow(
+        dead_code,
+        reason = "only reachable from the smode-feature-gated SBI ecall path below"
+    )
 )]
 const SBI_EID_BASE: usize = 0x0000_0010;
 /// System Reset extension EID ("SRST"), FID 0: sbi_system_reset.
 #[cfg_attr(
     not(feature = "smode"),
-    allow(dead_code, reason = "only reachable from the smode-feature-gated SBI ecall path below")
+    allow(
+        dead_code,
+        reason = "only reachable from the smode-feature-gated SBI ecall path below"
+    )
 )]
 const SBI_EID_SRST: usize = 0x5352_5354;
 
@@ -169,7 +178,10 @@ pub const SRST_WARM_REBOOT: u64 = 2;
 #[inline]
 #[cfg_attr(
     not(feature = "smode"),
-    allow(dead_code, reason = "only called from the smode-feature-gated SBI callers above")
+    allow(
+        dead_code,
+        reason = "only called from the smode-feature-gated SBI callers above"
+    )
 )]
 unsafe fn sbi_ecall(eid: usize, fid: usize, a0: usize, a1: usize) -> (isize, usize) {
     let err: usize;

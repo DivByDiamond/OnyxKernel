@@ -61,10 +61,12 @@ pub(crate) fn dec_slice(s: &[u8; 12]) -> &[u8] {
     if start < end { &s[start..end] } else { &[] }
 }
 
-pub(crate) unsafe fn write_dec(n: i64) { unsafe {
-    let s = format_dec(n);
-    let slice = dec_slice(&s);
-    if !slice.is_empty() {
-        crate::syscalls::write(1, slice.as_ptr(), slice.len());
+pub(crate) unsafe fn write_dec(n: i64) {
+    unsafe {
+        let s = format_dec(n);
+        let slice = dec_slice(&s);
+        if !slice.is_empty() {
+            crate::syscalls::write(1, slice.as_ptr(), slice.len());
+        }
     }
-}}
+}
