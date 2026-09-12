@@ -233,8 +233,19 @@ impl AnsiTerm {
         }
     }
 
+    /// Move down one row AND return to column 0 (POSIX ONLCR convention:
+    /// a real tty translates outgoing `\n` to `\r\n` before it reaches the
+    /// terminal, so userspace code — kinf!/login/osh here — writes bare
+    /// `\n` and relies on that translation). Found while verifying the
+    /// blank-console fix (2026-09-12): the UART path looked fine only
+    /// because the HOST terminal's own tty layer supplies the missing
+    /// carriage return; the pixel console has no such layer of its own, so
+    /// every line "staircased" further right than the last. `index()`
+    /// alone is still exposed separately for ESC D (plain IND, which must
+    /// NOT touch the column per the real VT100 spec).
     fn newline(&mut self) {
         self.index();
+        self.cur_col = 0;
     }
 }
 
