@@ -9,6 +9,7 @@
 //!     pair for 64-bit values).
 //!
 //! This file is compiled only when target_pointer_width = "32".
+use crate::arch::asm::mtrap_32::G_MTRAP_SCRATCH_32;
 use crate::arch::{__bss_end, __bss_start, __stack_top, SAVED_FDT, SAVED_HARTID};
 use core::arch::global_asm;
 
@@ -36,10 +37,23 @@ _start:
     li t0, 0x9F
     csrw pmpcfg0, t0
     // Delegate the same set of S-mode exceptions as the 64-bit version.
-    li t0, (1<<0)|(1<<1)|(1<<2)|(1<<3)|(1<<5)|(1<<7)|(1<<8)|(1<<9)|(1<<11)|(1<<12)|(1<<13)|(1<<15)
+    // Bit 9 (S-mode ecall) is deliberately NOT delegated — see boot.rs's
+    // medeleg comment: mtrap_entry_32 (arch/asm/mtrap_32.rs) catches it as
+    // the legacy SBI_SET_TIMER call this hart's srv::timer code issues to
+    // arm its own next tick (same MTIP->STIP forwarding fix as rv64,
+    // ported 2026-09-12 — see todo.md).
+    li t0, (1<<0)|(1<<1)|(1<<2)|(1<<3)|(1<<5)|(1<<7)|(1<<8)|(1<<11)|(1<<12)|(1<<13)|(1<<15)
     csrw medeleg, t0
     li t0, (1<<1)|(1<<5)|(1<<9)
     csrw mideleg, t0
+    // mscratch -> this hart's row of G_MTRAP_SCRATCH_32 (hart 0, tp=0, so
+    // the row is at the array's base address — no offset needed); mtvec ->
+    // mtrap_entry_32. Both must be live before mie/MTIE is ever enabled
+    // (the first arch::sbi::set_timer call, from srv::timer::init()).
+    la t0, {mtrap_scratch}
+    csrw mscratch, t0
+    la t0, mtrap_entry_32
+    csrw mtvec, t0
     csrw mie, zero
     li t0, (1<<11)
     csrs mstatus, t0
@@ -62,4 +76,5 @@ park:
     bss_start = sym __bss_start,
     bss_end = sym __bss_end,
     stack_top = sym __stack_top,
+    mtrap_scratch = sym G_MTRAP_SCRATCH_32,
 );

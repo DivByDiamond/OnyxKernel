@@ -5,7 +5,10 @@ pub mod bits;
 pub mod csr;
 pub mod mmio;
 pub mod regs;
-#[cfg(any(feature = "smode", all(not(test), target_pointer_width = "64")))]
+// Needed by every real (non-test) build now that rv32 also arms its timer
+// via the legacy SBI_SET_TIMER ecall (arch::asm::mtrap_32, 2026-09-12) —
+// previously this only mattered for smode and real rv64.
+#[cfg(any(feature = "smode", not(test)))]
 pub mod sbi;
 pub mod smp;
 pub mod trap_frame;

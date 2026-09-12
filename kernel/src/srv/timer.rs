@@ -19,7 +19,7 @@ use core::sync::atomic::AtomicU64 as AtomicTick;
 use core::sync::atomic::Ordering;
 
 use crate::{arch::csr, proc};
-#[cfg(all(not(feature = "smode"), any(test, target_pointer_width = "32")))]
+#[cfg(all(not(feature = "smode"), test))]
 use timer_arm::arm_timer_for_hart;
 use timer_arm::{arm_timer, read_mtime};
 
@@ -95,15 +95,20 @@ pub unsafe fn init_hart(hartid: usize) {
     unsafe {
         let now = read_mtime();
         let next = now + G_TICK_INTERVAL;
-        #[cfg(any(feature = "smode", all(not(test), target_pointer_width = "64")))]
+        #[cfg(any(feature = "smode", not(test)))]
         {
             // arm_timer's SBI ecall is inherently per-hart (each hart's
             // ecall is serviced independently), so no address computation
-            // from hartid is needed here — unlike the rv32 CLINT-MMIO path.
+            // from hartid is needed here. Covers smode/OpenSBI, rv64
+            // non-smode (arch::asm::mtrap) and, since 2026-09-12, rv32
+            // non-smode (arch::asm::mtrap_32) — all real builds now go
+            // through the same ecall path; only cfg(test) (host unit
+            // tests, no real CSRs/firmware to ecall into) still uses the
+            // raw CLINT-MMIO stub below.
             let _ = hartid;
             arm_timer(next);
         }
-        #[cfg(all(not(feature = "smode"), any(test, target_pointer_width = "32")))]
+        #[cfg(all(not(feature = "smode"), test))]
         arm_timer_for_hart(hartid, next);
         csr::set_sie(1 << 5);
     }
@@ -124,13 +129,13 @@ pub unsafe fn handle() {
         let now = read_mtime();
         let next = now + G_TICK_INTERVAL;
         // Re-arm the tick for THIS hart via arm_timer's SBI ecall (OpenSBI
-        // on `smode`, this kernel's own `mtrap_entry` on rv64 non-`smode`).
-        // rv32 non-`smode` still writes the per-hart CLINT mtimecmp MMIO
-        // directly (never hart 0's — that bug caused a timer storm on
-        // harts 1..N) — see timer_arm::arm_timer's doc comments.
-        #[cfg(any(feature = "smode", all(not(test), target_pointer_width = "64")))]
+        // on `smode`, this kernel's own `mtrap`/`mtrap_32` M-mode shim on
+        // non-`smode` rv64/rv32 — both real builds now share this path,
+        // see timer_arm::arm_timer's doc comments). Only cfg(test) still
+        // takes the raw per-hart CLINT-MMIO stub below.
+        #[cfg(any(feature = "smode", not(test)))]
         arm_timer(next);
-        #[cfg(all(not(feature = "smode"), any(test, target_pointer_width = "32")))]
+        #[cfg(all(not(feature = "smode"), test))]
         arm_timer_for_hart(crate::arch::smp::current_hart(), next);
         proc::sched_tick();
         // Heartbeat: ping the watchdog every tick (100 Hz) so the system

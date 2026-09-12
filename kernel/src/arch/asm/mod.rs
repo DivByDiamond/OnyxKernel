@@ -12,6 +12,8 @@ pub mod boot_32;
 pub mod boot_smode;
 #[cfg(all(not(test), target_pointer_width = "64", not(feature = "smode")))]
 pub mod mtrap;
+#[cfg(all(not(test), target_pointer_width = "32", not(feature = "smode")))]
+pub mod mtrap_32;
 #[cfg(all(not(test), target_pointer_width = "64"))]
 pub mod trap_asm;
 #[cfg(all(not(test), target_pointer_width = "32"))]
