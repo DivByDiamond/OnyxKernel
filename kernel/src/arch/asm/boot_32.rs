@@ -46,6 +46,15 @@ _start:
     csrw medeleg, t0
     li t0, (1<<1)|(1<<5)|(1<<9)
     csrw mideleg, t0
+    // Allow S-mode (and via scounteren later U-mode) to read cycle/time/
+    // instret. Without this every `csrr cycle`/rdcycle (e.g.
+    // drivers::entropy::hwrand::next_u32) from S-mode raises an
+    // illegal-instruction trap (mcounteren defaults to 0) — found
+    // 2026-09-12 live-testing the rv32 timer port: boot.rs (rv64) and
+    // BOTH branches of arch/smp/secondary.rs already set this, but
+    // boot_32.rs (hart 0's rv32 entry) never did.
+    li t0, (1<<0)|(1<<1)|(1<<2)
+    csrw mcounteren, t0
     // mscratch -> this hart's row of G_MTRAP_SCRATCH_32 (hart 0, tp=0, so
     // the row is at the array's base address — no offset needed); mtvec ->
     // mtrap_entry_32. Both must be live before mie/MTIE is ever enabled
