@@ -44,8 +44,8 @@ fn reset_all() {
 
 #[test]
 fn test_alloc_and_free_roundtrip() {
-    reset_all();
     let _g = TestGuard::new();
+    reset_all();
     let a = pty::alloc().expect("alloc on fresh table");
     // SAFETY: host test context, idx from alloc above.
     unsafe {
@@ -61,8 +61,8 @@ fn test_alloc_and_free_roundtrip() {
 
 #[test]
 fn test_alloc_exhaustion_returns_again() {
-    reset_all();
     let _g = TestGuard::new();
+    reset_all();
     let mut ids = alloc::vec::Vec::new();
     for _ in 0..PTY_MAX {
         ids.push(pty::alloc().expect("alloc until exhaustion"));
@@ -75,8 +75,8 @@ fn test_alloc_exhaustion_returns_again() {
 
 #[test]
 fn test_master_to_slave_roundtrip() {
-    reset_all();
     let _g = TestGuard::new();
+    reset_all();
     let idx = pty::alloc().expect("alloc");
     // SAFETY: host test, valid idx, kernel-side buffers below.
     unsafe {
@@ -92,8 +92,8 @@ fn test_master_to_slave_roundtrip() {
 
 #[test]
 fn test_slave_to_master_roundtrip() {
-    reset_all();
     let _g = TestGuard::new();
+    reset_all();
     let idx = pty::alloc().expect("alloc");
     // SAFETY: host test, valid idx, kernel-side buffers below.
     unsafe {
@@ -108,8 +108,8 @@ fn test_slave_to_master_roundtrip() {
 
 #[test]
 fn test_partial_write_when_full() {
-    reset_all();
     let _g = TestGuard::new();
+    reset_all();
     let idx = pty::alloc().expect("alloc");
     // SAFETY: host test, valid idx, kernel-side buffers below.
     unsafe {
@@ -131,8 +131,8 @@ fn test_partial_write_when_full() {
 
 #[test]
 fn test_pipe_after_master_free() {
-    reset_all();
     let _g = TestGuard::new();
+    reset_all();
     let idx = pty::alloc().expect("alloc");
     // SAFETY: host test, valid idx, kernel-side buffers below.
     unsafe {
@@ -156,8 +156,8 @@ fn test_pipe_after_master_free() {
 
 #[test]
 fn test_poll_readiness_transitions() {
-    reset_all();
     let _g = TestGuard::new();
+    reset_all();
     let idx = pty::alloc().expect("alloc");
     // SAFETY: host test, valid idx.
     unsafe {
@@ -176,8 +176,8 @@ fn test_poll_readiness_transitions() {
 
 #[test]
 fn test_winsize_default_and_set() {
-    reset_all();
     let _g = TestGuard::new();
+    reset_all();
     let idx = pty::alloc().expect("alloc");
     // SAFETY: host test, valid idx.
     unsafe {
