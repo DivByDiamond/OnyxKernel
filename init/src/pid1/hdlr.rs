@@ -5,7 +5,7 @@ use super::exec::{
 use super::{MAX_NAME_LEN, MAX_PATH_LEN, NUM_SERVICES, SERVICES};
 use crate::syscalls;
 use crate::util::{dec_slice, format_dec, split_first_token, trim_space, write_response};
-pub(super) unsafe fn handle_request(req: &[u8], resp: &mut [u8]) -> usize {
+pub(super) unsafe fn handle_request(req: &[u8], resp: &mut [u8]) -> usize { unsafe {
     let mut req = req;
     while !req.is_empty() && (req[req.len() - 1] == b'\n' || req[req.len() - 1] == b'\r') {
         req = &req[..req.len() - 1];
@@ -24,8 +24,8 @@ pub(super) unsafe fn handle_request(req: &[u8], resp: &mut [u8]) -> usize {
         b"list" => handle_list(resp),
         _ => write_response(resp, b"ERROR unknown_command"),
     }
-}
-unsafe fn handle_status(arg: &[u8], resp: &mut [u8]) -> usize {
+}}
+unsafe fn handle_status(arg: &[u8], resp: &mut [u8]) -> usize { unsafe {
     if arg.is_empty() {
         return write_response(resp, b"ERROR missing_service_name");
     }
@@ -62,8 +62,8 @@ unsafe fn handle_status(arg: &[u8], resp: &mut [u8]) -> usize {
     let copy = pos.min(resp.len());
     resp[..copy].copy_from_slice(&buf[..copy]);
     copy
-}
-unsafe fn handle_start(arg: &[u8], resp: &mut [u8]) -> usize {
+}}
+unsafe fn handle_start(arg: &[u8], resp: &mut [u8]) -> usize { unsafe {
     if arg.is_empty() {
         return write_response(resp, b"ERROR missing_service_name");
     }
@@ -91,8 +91,8 @@ unsafe fn handle_start(arg: &[u8], resp: &mut [u8]) -> usize {
     } else {
         write_response(resp, b"ERROR spawn_failed")
     }
-}
-unsafe fn handle_stop(arg: &[u8], resp: &mut [u8]) -> usize {
+}}
+unsafe fn handle_stop(arg: &[u8], resp: &mut [u8]) -> usize { unsafe {
     if arg.is_empty() {
         return write_response(resp, b"ERROR missing_service_name");
     }
@@ -113,8 +113,8 @@ unsafe fn handle_stop(arg: &[u8], resp: &mut [u8]) -> usize {
     let name = service_name(idx);
     write_state_file(name, b"stopped");
     write_response(resp, b"OK stopped")
-}
-unsafe fn handle_enable(arg: &[u8], resp: &mut [u8]) -> usize {
+}}
+unsafe fn handle_enable(arg: &[u8], resp: &mut [u8]) -> usize { unsafe {
     if arg.is_empty() {
         return write_response(resp, b"ERROR missing_service_name");
     }
@@ -130,8 +130,8 @@ unsafe fn handle_enable(arg: &[u8], resp: &mut [u8]) -> usize {
     }
     SERVICES[idx].enabled = true;
     write_response(resp, b"OK enabled")
-}
-unsafe fn handle_disable(arg: &[u8], resp: &mut [u8]) -> usize {
+}}
+unsafe fn handle_disable(arg: &[u8], resp: &mut [u8]) -> usize { unsafe {
     if arg.is_empty() {
         return write_response(resp, b"ERROR missing_service_name");
     }
@@ -155,8 +155,8 @@ unsafe fn handle_disable(arg: &[u8], resp: &mut [u8]) -> usize {
     let name = service_name(idx);
     write_state_file(name, b"disabled");
     write_response(resp, b"OK disabled")
-}
-unsafe fn handle_list(resp: &mut [u8]) -> usize {
+}}
+unsafe fn handle_list(resp: &mut [u8]) -> usize { unsafe {
     let mut pos = 0;
     let header = b"OK services:\n";
     let copy = header.len().min(resp.len() - pos);
@@ -197,4 +197,4 @@ unsafe fn handle_list(resp: &mut [u8]) -> usize {
         pos += copy;
     }
     pos
-}
+}}

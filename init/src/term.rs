@@ -58,7 +58,7 @@ const ERASE_SEQ: [u8; 3] = [0x08, b' ', 0x08];
 /// swallows a genuine stray trailing `\n` completing a `\r\n` pair left
 /// over from the previous field's Enter, and never blocks or discards
 /// anything else.
-pub unsafe fn read_secret_line(buf: &mut [u8]) -> &[u8] {
+pub unsafe fn read_secret_line(buf: &mut [u8]) -> &[u8] { unsafe {
     let _ = syscalls::ioctl(0, TIOCSRAW, 0);
 
     // Non-blocking: if the previous field's Enter arrived as "\r\n" and
@@ -102,12 +102,12 @@ pub unsafe fn read_secret_line(buf: &mut [u8]) -> &[u8] {
     syscalls::write(1, b"\n".as_ptr(), b"\n".len());
 
     &buf[..n]
-}
+}}
 
 /// Applies one input byte to the in-progress secret line: backspace erases
 /// the last accepted character (with on-screen erase), printable ASCII
 /// appends and echoes '*', everything else is ignored.
-unsafe fn handle_byte(buf: &mut [u8], n: &mut usize, b: u8) {
+unsafe fn handle_byte(buf: &mut [u8], n: &mut usize, b: u8) { unsafe {
     if b == 0x7F || b == 0x08 {
         if *n > 0 {
             *n -= 1;
@@ -119,4 +119,4 @@ unsafe fn handle_byte(buf: &mut [u8], n: &mut usize, b: u8) {
         syscalls::write(1, b"*".as_ptr(), b"*".len());
     }
     // other control bytes are ignored, never stored
-}
+}}

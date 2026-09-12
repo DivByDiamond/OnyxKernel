@@ -1,9 +1,5 @@
 #![no_std]
 #![no_main]
-#![allow(
-    unsafe_op_in_unsafe_fn,
-    reason = "TODO(2026-09-13): syscalls::call::* asm! sites are now explicitly unsafe{}-wrapped (real fix); remaining warnings are this bin's own ~300 call sites into those wrappers, not yet individually wrapped"
-)]
 
 mod syscalls;
 

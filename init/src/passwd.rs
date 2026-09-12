@@ -1,9 +1,5 @@
 #![no_std]
 #![no_main]
-#![allow(
-    unsafe_op_in_unsafe_fn,
-    reason = "TODO(2026-09-13): syscalls::call::* asm! sites are now explicitly unsafe{}-wrapped (real fix); remaining warnings are this bin's own ~300 call sites into those wrappers, not yet individually wrapped"
-)]
 
 use core::arch::asm;
 
@@ -19,7 +15,7 @@ use term::read_secret_line;
 ///
 /// Process entry point: called directly by the kernel from the ELF entry
 /// address; the stack is freshly initialized per the RISC-V calling convention.
-pub unsafe extern "C" fn _start() -> ! {
+pub unsafe extern "C" fn _start() -> ! { unsafe {
     let ring = syscalls::getring();
 
     if ring == 2 {
@@ -29,12 +25,12 @@ pub unsafe extern "C" fn _start() -> ! {
     }
 
     syscalls::exit(0);
-}
+}}
 
 /// Writes a negative kernel errno as a decimal string followed by a
 /// newline, e.g. `-1\n`. Used to surface real syscall failures instead of
 /// silently discarding them as a generic "unknown" condition.
-unsafe fn write_errno(errno: i64) {
+unsafe fn write_errno(errno: i64) { unsafe {
     let mut buf = [0u8; 21];
     let mut i = buf.len();
     let mut n = if errno < 0 { -errno } else { errno } as u64;
@@ -52,9 +48,9 @@ unsafe fn write_errno(errno: i64) {
     }
     syscalls::write(1, buf[i..].as_ptr(), buf.len() - i);
     syscalls::write(1, b"\n".as_ptr(), b"\n".len());
-}
+}}
 
-unsafe fn do_user_passwd() {
+unsafe fn do_user_passwd() { unsafe {
     // Audit fix (🔴 #5): the previous code unconditionally verified
     // and changed the password for the hardcoded user `"root"`, even
     // though this branch runs for ring-2 (non-root) callers. That
@@ -164,9 +160,9 @@ unsafe fn do_user_passwd() {
             write_errno(errno);
         }
     }
-}
+}}
 
-unsafe fn do_root_passwd() {
+unsafe fn do_root_passwd() { unsafe {
     let mut username = [0u8; 32];
     syscalls::write(1, b"Username: ".as_ptr(), b"Username: ".len());
     let uname = read_line(&mut username);
@@ -227,9 +223,9 @@ unsafe fn do_root_passwd() {
             write_errno(errno);
         }
     }
-}
+}}
 
-unsafe fn read_line(buf: &mut [u8]) -> &[u8] {
+unsafe fn read_line(buf: &mut [u8]) -> &[u8] { unsafe {
     let n = syscalls::read(0, buf.as_mut_ptr(), (buf.len() - 1) as u64);
     if n <= 0 {
         return &[];
@@ -239,7 +235,7 @@ unsafe fn read_line(buf: &mut [u8]) -> &[u8] {
         n -= 1;
     }
     &buf[..n]
-}
+}}
 
 // The old local read_password() (single raw read, audit fix 🟡 #2) was
 // removed: in kernel raw mode one read() returns after ANY keypress, so a

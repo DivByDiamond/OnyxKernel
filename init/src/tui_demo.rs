@@ -9,10 +9,6 @@
 
 #![no_std]
 #![no_main]
-#![allow(
-    unsafe_op_in_unsafe_fn,
-    reason = "TODO(2026-09-13): syscalls::call::* asm! sites are now explicitly unsafe{}-wrapped (real fix); remaining warnings are this bin's own ~300 call sites into those wrappers, not yet individually wrapped"
-)]
 
 mod libtui;
 mod syscalls;
@@ -54,7 +50,7 @@ struct PollFd {
 /// # Safety
 ///
 /// Process entry point: called by the kernel with a fresh user stack.
-pub unsafe extern "C" fn _start() -> ! {
+pub unsafe extern "C" fn _start() -> ! { unsafe {
     // Map the framebuffer (fb_draw pattern: open -> ioctl -> mmap).
     let fb_path = b"/dev/fb0\0";
     let fd = syscalls::open(fb_path.as_ptr(), 0, 0);
@@ -194,7 +190,7 @@ pub unsafe extern "C" fn _start() -> ! {
             let _ = textbox.handle_event(&Event::None);
         }
     }
-}
+}}
 
 /// Fill the visible screen area with a solid color.
 fn clear(fb: &mut [u32], color: u32, stride: usize, w: usize, h: usize) {

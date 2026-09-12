@@ -1,9 +1,5 @@
 #![no_std]
 #![no_main]
-#![allow(
-    unsafe_op_in_unsafe_fn,
-    reason = "TODO(2026-09-13): syscalls::call::* asm! sites are now explicitly unsafe{}-wrapped (real fix); remaining warnings are this bin's own ~300 call sites into those wrappers, not yet individually wrapped"
-)]
 
 use core::arch::asm;
 
@@ -20,7 +16,7 @@ use term::read_secret_line;
 ///
 /// Process entry point: called directly by the kernel from the ELF entry
 /// address; the stack is freshly initialized per the RISC-V calling convention.
-pub unsafe extern "C" fn _start(argc: usize, argv: *const u64, _envp: *const u64) -> ! {
+pub unsafe extern "C" fn _start(argc: usize, argv: *const u64, _envp: *const u64) -> ! { unsafe {
     let mut target_user = [0u8; 32];
     let mut target_len = 0usize;
 
@@ -148,7 +144,7 @@ pub unsafe extern "C" fn _start(argc: usize, argv: *const u64, _envp: *const u64
     syscalls::exec(shell_path.as_ptr(), core::ptr::null());
     syscalls::write(1, b"su: exec failed\n".as_ptr(), b"su: exec failed\n".len());
     syscalls::exit(1);
-}
+}}
 
 /// Audit fix (🔴 #11): exponential backoff. `fails` is the number of
 /// consecutive failed attempts. We delay by `2^min(fails,6) * 250 ms`,

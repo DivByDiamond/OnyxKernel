@@ -1,9 +1,5 @@
 #![no_std]
 #![no_main]
-#![allow(
-    unsafe_op_in_unsafe_fn,
-    reason = "TODO(2026-09-13): syscalls::call::* asm! sites are now explicitly unsafe{}-wrapped (real fix); remaining warnings are this bin's own ~300 call sites into those wrappers, not yet individually wrapped"
-)]
 
 use core::arch::asm;
 
@@ -15,7 +11,7 @@ mod syscalls;
 ///
 /// Process entry point: called directly by the kernel from the ELF entry
 /// address; the stack is freshly initialized per the RISC-V calling convention.
-pub unsafe extern "C" fn _start() -> ! {
+pub unsafe extern "C" fn _start() -> ! { unsafe {
     let uid = syscalls::getuid() as u32;
     let gid = syscalls::getgid() as u32;
 
@@ -61,7 +57,7 @@ pub unsafe extern "C" fn _start() -> ! {
     }
     syscalls::write(1, b"\n".as_ptr(), b"\n".len());
     syscalls::exit(0);
-}
+}}
 
 #[panic_handler]
 fn panic(_info: &core::panic::PanicInfo) -> ! {

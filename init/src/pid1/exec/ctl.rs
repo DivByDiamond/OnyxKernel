@@ -1,7 +1,7 @@
 use super::super::{MAX_MSG_LEN, REQ_CHANNEL, RESP_CHANNEL};
 use crate::syscalls;
 
-pub(crate) unsafe fn control_main(argc: usize, argv: *const u64) -> ! {
+pub(crate) unsafe fn control_main(argc: usize, argv: *const u64) -> ! { unsafe {
     if argc < 2 {
         let m = b"Usage: init <status|start|stop|enable|disable|list> [service]\n";
         syscalls::write(1, m.as_ptr(), m.len());
@@ -79,9 +79,9 @@ pub(crate) unsafe fn control_main(argc: usize, argv: *const u64) -> ! {
     }
 
     syscalls::exit(0);
-}
+}}
 
-unsafe fn read_argv(argv: *const u64, i: usize) -> &'static [u8] {
+unsafe fn read_argv(argv: *const u64, i: usize) -> &'static [u8] { unsafe {
     if argv.is_null() {
         return &[];
     }
@@ -95,4 +95,4 @@ unsafe fn read_argv(argv: *const u64, i: usize) -> &'static [u8] {
         len += 1;
     }
     core::slice::from_raw_parts(p, len)
-}
+}}

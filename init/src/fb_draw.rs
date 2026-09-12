@@ -1,9 +1,5 @@
 #![no_std]
 #![no_main]
-#![allow(
-    unsafe_op_in_unsafe_fn,
-    reason = "TODO(2026-09-13): syscalls::call::* asm! sites are now explicitly unsafe{}-wrapped (real fix); remaining warnings are this bin's own ~300 call sites into those wrappers, not yet individually wrapped"
-)]
 
 mod syscalls;
 
@@ -23,7 +19,7 @@ struct FbInfo {
 ///
 /// Process entry point: called directly by the kernel from the ELF entry
 /// address; the stack is freshly initialized per the RISC-V calling convention.
-pub unsafe extern "C" fn _start() -> ! {
+pub unsafe extern "C" fn _start() -> ! { unsafe {
     // Open /dev/fb0
     let fb_path = b"/dev/fb0\0";
     let fd = syscalls::open(fb_path.as_ptr(), 0, 0);
@@ -95,7 +91,7 @@ pub unsafe extern "C" fn _start() -> ! {
         b"fb_draw: gradient drawn (1280x720)\n".len(),
     );
     syscalls::exit(0);
-}
+}}
 
 #[panic_handler]
 fn panic(_info: &core::panic::PanicInfo) -> ! {
