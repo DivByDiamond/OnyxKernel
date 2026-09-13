@@ -1,0 +1,86 @@
+name: OnyxOS Release Image
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-image:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout OnyxKernel
+        uses: actions/checkout@v6
+        with:
+          path: OnyxKernel
+
+      - name: Checkout OnyxBoot
+        uses: actions/checkout@v6
+        with:
+          repository: DivByDiamond/OnyxBoot
+          path: OnyxBoot
+
+      - name: Checkout OnyxShell
+        uses: actions/checkout@v6
+        with:
+          repository: DivByDiamond/OnyxShell
+          path: OnyxShell
+
+      - name: Checkout OnyxCompiller
+        uses: actions/checkout@v6
+        with:
+          repository: DivByDiamond/OnyxCompiller
+          path: OnyxCompiller
+
+      - name: Checkout OnyxApps
+        uses: actions/checkout@v6
+        with:
+          repository: DivByDiamond/OnyxApps
+          path: OnyxApps
+
+      - name: Install Rust (MSRV)
+        uses: dtolnay/rust-toolchain@1.97.1
+        with:
+          targets: riscv64gc-unknown-none-elf
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: OnyxKernel
+
+      - name: Install build tools (riscv64-elf-gcc, parted, mtools)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-riscv64-unknown-elf parted mtools dosfstools
+
+      - name: Symlink riscv64-elf-gcc
+        run: sudo ln -sf "$(command -v riscv64-unknown-elf-gcc)" /usr/local/bin/riscv64-elf-gcc
+
+      - name: Build OnyxOS boot image
+        working-directory: OnyxKernel
+        run: bash scripts/build_image.sh
+
+      - name: Package release artifacts
+        run: |
+          mkdir -p release_out
+          cp OnyxKernel/build/boot.img release_out/onyxos-boot.img
+          cp OnyxBoot/bootloader.bin release_out/bootloader.bin
+          cd release_out
+          zip -r ../onyxos-riscv64.zip onyxos-boot.img bootloader.bin
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: onyxos-riscv64
+          path: onyxos-riscv64.zip
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: onyxos-riscv64.zip
+          generate_release_notes: true
