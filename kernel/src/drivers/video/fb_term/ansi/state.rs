@@ -75,8 +75,18 @@ impl AnsiTerm {
     /// cursor inside the region so later `clamp(top, bot)` calls in the
     /// parser can never panic (e.g. after a hot-swap to a smaller fb).
     pub(super) fn sync_size(&mut self) {
+        let old_rows = self.rows;
         self.cols = (fb::width() / FONT_W).max(1);
         self.rows = (fb::height() / FONT_H).max(1);
+        // If the scroll region previously spanned the whole screen, keep it
+        // spanning the whole screen when the real geometry is taller than
+        // the compile-time default (25 rows): the check below only shrinks
+        // `bot` when it overflows the new row count, never grows it back up,
+        // so a framebuffer taller than 25 rows would otherwise leave the
+        // console stuck scrolling inside rows 0..24 forever.
+        if self.top == 0 && self.bot + 1 == old_rows {
+            self.bot = self.rows - 1;
+        }
         if self.bot >= self.rows {
             self.bot = self.rows - 1;
         }
