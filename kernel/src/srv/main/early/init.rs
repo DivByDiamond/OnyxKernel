@@ -38,7 +38,22 @@ pub(crate) unsafe fn early_init(fdt_addr: usize) {
         pmm::init(mem.base, mem.size);
         uart::putc(b'P');
 
-        let _ = vmm::init();
+        // Bug fix (OC2R issue #41, 2026-09-15): this used to be `let _ = vmm::init();`,
+        // discarding the KResult. vmm::init's first step is new_root() -> pmm::alloc_zero(),
+        // which fails with Errno::NoMem when the PMM is tight on free pages (e.g. a small
+        // guest RAM size, where KERNEL_HEAP_RESERVE alone already eats a large share of
+        // total memory). Silently swallowing that error left G_KERNEL_ROOT_PA at 0 and no
+        // root page table installed, while every later subsystem (heap, scheduler, user
+        // processes) assumed Sv39 paging was already active -- producing exactly the
+        // reported symptom (page fault before reaching login, or a total lockup with no
+        // UART output at all if allocation failed even earlier in the sequence). Fail
+        // loudly and immediately instead of limping into undefined behavior.
+        if vmm::init().is_err() {
+            crate::kpanic!(
+                "vmm",
+                "failed to allocate the kernel root page table (out of memory?) -- cannot install Sv39 paging"
+            );
+        }
         uart::putc(b'V');
         crate::kinf!(
             "vmm",
