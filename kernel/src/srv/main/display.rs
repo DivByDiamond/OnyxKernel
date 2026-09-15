@@ -93,8 +93,23 @@ pub(crate) unsafe fn init_and_draw() {
                     crate::kinf!("display", "ramfb at %p", Arg::from(pa));
                 }
             }
+            // PCI VGA (bochs-display) as third fallback for QEMU virt -- NOT on
+            // OC2R/sedna (`smode`). Bug fix (OC2R issue #41, 2026-09-15): sedna has
+            // no real PCI/ECAM controller, but `pci::find_vga_fb`'s hardcoded
+            // ECAM_BASE=0x3000_0000 window apparently overlaps something that
+            // answers reads instead of faulting immediately, so the scan can walk
+            // into a "device" with garbage-but-plausible BAR bytes. For a decoded
+            // 64-bit BAR (bits[2:1]==0b10) that garbage combines as
+            // `(hi as u64) << 32 | low_bits`, which can land far past the
+            // `vga_pa >= 0x4000_0000` sanity guard (e.g. hi=1 -> 0x1_0000_0000-scale
+            // address) -- `fb::init_device` then genuinely touches that physical
+            // address and the CPU access-faults for real. Same class of bug the
+            // module-level comment above already called out for a different ECAM
+            // scanner; this one just wasn't excluded yet. Gate the whole fallback
+            // out of smode builds instead of trying to make the BAR-decode guard
+            // tighter -- there is no real PCI bus here to scan in the first place.
+            #[cfg(not(feature = "smode"))]
             if !fb::enabled() {
-                // PCI VGA (bochs-display) as third fallback for QEMU virt.
                 if let Ok(vga_pa) = crate::drivers::bus::pci::find_vga_fb()
                     && vga_pa >= 0x4000_0000
                     && fb::init_device(vga_pa, 1280, 720, 1280 * 4, 32).is_ok()
