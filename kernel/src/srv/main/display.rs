@@ -93,8 +93,16 @@ pub(crate) unsafe fn init_and_draw() {
                     crate::kinf!("display", "ramfb at %p", Arg::from(pa));
                 }
             }
+            // PCI VGA (bochs-display) as third fallback for QEMU virt -- NOT on
+            // OC2R/sedna (`smode`). Bug fix (OC2R issue #41), confirmed against two
+            // live crash traces: sedna has no real PCI/ECAM controller, and reading
+            // this ECAM window at all genuinely access-faults the CPU -- rejecting a
+            // garbage 64-bit BAR combine (pci.rs, separate fix) does not help,
+            // because the fault happens during the raw `cfg_rd` MMIO reads
+            // themselves while walking the fake bus, before any BAR value is even
+            // returned. There is no real PCI bus on sedna to scan -- don't scan it.
+            #[cfg(not(feature = "smode"))]
             if !fb::enabled() {
-                // PCI VGA (bochs-display) as third fallback for QEMU virt.
                 if let Ok(vga_pa) = crate::drivers::bus::pci::find_vga_fb()
                     && vga_pa >= 0x4000_0000
                     && fb::init_device(vga_pa, 1280, 720, 1280 * 4, 32).is_ok()
