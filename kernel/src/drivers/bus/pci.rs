@@ -77,6 +77,19 @@ pub unsafe fn find_vga_fb() -> KResult<usize> {
                                 continue;
                             }
                             let hi = cfg_rd(bus, dev, 0, off + 4);
+                            // Bug fix (OC2R issue #41, confirmed against a live crash trace:
+                            // scause=5 load access fault, stval=0x1_0000_1000): sedna has no
+                            // real PCI/ECAM controller, but this ECAM_BASE window apparently
+                            // overlaps something that answers reads with garbage-but-plausible
+                            // bytes instead of faulting immediately or returning all-1s like a
+                            // real unmapped PCI bus would. A nonzero `hi` half on a platform
+                            // with no real >=4 GiB-addressable device memory is exactly that
+                            // garbage -- combining it via `hi << 32` produces a bogus address
+                            // (hi=1 here reproduced the exact 0x1_0000_1000 from the crash) that
+                            // callers then genuinely dereference. Reject rather than trust it.
+                            if hi != 0 {
+                                continue;
+                            }
                             let fb_pa = ((val & 0xFFFF_FFF0) as u64) | ((hi as u64) << 32);
                             crate::kinf!(
                                 "pci",
