@@ -10,3 +10,5 @@ build/
 .cargo/registry/
 
 .claude/
+
+release_out/
