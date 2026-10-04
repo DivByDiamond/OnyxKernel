@@ -35,6 +35,19 @@ pub(crate) unsafe fn init_and_draw() {
             // back to invisible RAM. The virtio-mmio bases are the fixed QEMU
             // virt constants; the GPU is probed synchronously and its framebuffer
             // becomes the visible front buffer if init succeeds.
+            //
+            // Bug fix (OC2R issue #41, 2026-09-15): this loop unconditionally
+            // probed the hardcoded QEMU-virt bases even on OC2R/sedna, which has
+            // no device mapped at 0x1000_1000 -- confirmed by a live crash trace
+            // (scause=5 load access fault, stval=0x10001000, matching the first
+            // entry of `virtio_bases` exactly) with debug marks showing the fault
+            // happens before the PCI VGA fallback even runs. `early::probe_devices`
+            // already gates this same hardcoded-base fallback behind
+            // `!fdt::is_sedna()` (see probe.rs) for its virtio-blk scan; this loop
+            // was the one place that pattern was missed. sedna's virtio devices
+            // are always FDT-discovered (probe_devices already tried them above
+            // via `find_virtio`), so skipping the hardcoded scan here loses
+            // nothing on sedna.
             let virtio_bases = [
                 0x1000_1000usize,
                 0x1000_2000,
@@ -46,7 +59,8 @@ pub(crate) unsafe fn init_and_draw() {
                 0x1000_8000,
             ];
             let mut tried_gpu = false;
-            for &b in &virtio_bases {
+            let sedna = crate::libfdt::fdt::is_sedna();
+            for &b in if sedna { &[][..] } else { &virtio_bases[..] } {
                 if virtio_gpu::probe(b) {
                     tried_gpu = true;
                     crate::kinf!("display", "virtio-gpu probe hit base=%p", Arg::from(b));
@@ -83,23 +97,55 @@ pub(crate) unsafe fn init_and_draw() {
                     break;
                 }
             }
-            if !fb::enabled() {
+            if !fb::enabled() && !sedna {
                 // ramfb (QEMU -device ramfb) as second fallback — no virtio
                 // queue, just a fw_cfg write. Works with -display gtk and
                 // requires no vgabios.
-                if let Ok(pa) = ramfb::init(1280, 720)
+                //
+                // Bug fix (OC2R issue #41, 2026-09-15): confirmed faulting on
+                // sedna by a live crash trace (scause=7 store/AMO access fault,
+                // stval=0x10100008, exactly FW_CFG_SELECTOR = FW_CFG_BASE+8) hit
+                // immediately after the virtio-gpu loop above was fixed to skip
+                // sedna. Same class of bug: fw_cfg @ 0x1010_0000 is a
+                // QEMU-virt-fixed address sedna doesn't back. Gated the same way.
+                crate::drivers::uart::putc(b'(');
+                let r = ramfb::init(1280, 720);
+                crate::drivers::uart::putc(b')');
+                if let Ok(pa) = r
                     && fb::init(pa).is_ok()
                 {
                     crate::kinf!("display", "ramfb at %p", Arg::from(pa));
                 }
             }
-            if !fb::enabled() {
+            if !fb::enabled() && !sedna {
                 // PCI VGA (bochs-display) as third fallback for QEMU virt.
-                if let Ok(vga_pa) = crate::drivers::bus::pci::find_vga_fb()
-                    && vga_pa >= 0x4000_0000
-                    && fb::init_device(vga_pa, 1280, 720, 1280 * 4, 32).is_ok()
-                {
-                    crate::kinf!("display", "pci VGA at %p", Arg::from(vga_pa));
+                // Bug fix (OC2R issue #41, 2026-09-15): same class of bug as the
+                // virtio-gpu and ramfb fallbacks above (now confirmed twice by live
+                // crash traces) -- ECAM_BASE=0x3000_0000 is another QEMU-virt-fixed
+                // address sedna doesn't back. Gated the same runtime way; debug
+                // marks kept below in case a real PCI bus build (non-sedna) still
+                // needs tracing here.
+                crate::drivers::uart::putc(b'{');
+                let scan = crate::drivers::bus::pci::find_vga_fb();
+                crate::drivers::uart::putc(b'}');
+                if let Ok(vga_pa) = scan {
+                    crate::kinf!("display", "pci VGA scan returned %p", Arg::from(vga_pa as u64));
+                    if vga_pa >= 0x4000_0000 {
+                        crate::drivers::uart::putc(b'[');
+                        let ok = fb::init_device(vga_pa, 1280, 720, 1280 * 4, 32).is_ok();
+                        crate::drivers::uart::putc(b']');
+                        if ok {
+                            crate::kinf!("display", "pci VGA at %p", Arg::from(vga_pa));
+                        }
+                    } else {
+                        crate::kwrn!(
+                            "display",
+                            "pci VGA scan returned sub-4GiB addr %p, rejected",
+                            Arg::from(vga_pa as u64)
+                        );
+                    }
+                } else {
+                    crate::kwrn!("display", "pci VGA scan found nothing");
                 }
             }
             if !fb::enabled() {

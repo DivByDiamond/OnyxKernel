@@ -25,7 +25,24 @@ unsafe fn cfg_rd(bus: u8, dev: u8, fun: u8, off: u32) -> u32 {
             + ((dev as usize) << 15)
             + ((fun as usize) << 12)
             + (off as usize);
-        Mmio::<u32>::at(addr).read()
+        // DEBUG (OC2R issue #41 evidence gathering, 2026-09-15): print the exact
+        // ECAM address before touching it. If this address is printed but the
+        // matching post-read mark right below is never printed, THIS read is the
+        // one that access-faults -- gives us the exact (bus,dev,fun,off) instead
+        // of just sepc/stval from the trap dump. Remove once #41 is closed.
+        crate::kdbg!(
+            "pci",
+            "cfg_rd bus=%d dev=%d fun=%d off=%x addr=%p",
+            crate::srv::klog::FmtArg::from(bus as u32),
+            crate::srv::klog::FmtArg::from(dev as u32),
+            crate::srv::klog::FmtArg::from(fun as u32),
+            crate::srv::klog::FmtArg::from(off),
+            crate::srv::klog::FmtArg::from(addr as u64)
+        );
+        crate::drivers::uart::putc(b'<');
+        let v = Mmio::<u32>::at(addr).read();
+        crate::drivers::uart::putc(b'>');
+        v
     }
 }
 
