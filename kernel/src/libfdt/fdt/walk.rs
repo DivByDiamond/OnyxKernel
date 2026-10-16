@@ -52,10 +52,8 @@ pub unsafe fn walk(cb: &mut dyn FnMut(&str, &[(u32, &[u8])]) -> bool) {
                 FDT_BEGIN_NODE => {
                     // A node's properties end before its first child. Emit
                     // them here so parent properties are not discarded.
-                    if prop_count > 0 {
-                        if cb(node_name, &props[..prop_count]) {
-                            return;
-                        }
+                    if prop_count > 0 && cb(node_name, &props[..prop_count]) {
+                        return;
                     }
                     // Bounded NUL scan (fix): the name must terminate within
                     // the block; a malformed unterminated name aborts the
