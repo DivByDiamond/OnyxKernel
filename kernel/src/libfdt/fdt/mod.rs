@@ -17,7 +17,7 @@ pub(crate) use types::{
 };
 
 pub use clint::find_clint;
-pub use framebuffer::find_simple_framebuffer;
+pub use framebuffer::{SimpleFramebuffer, find_simple_framebuffer, find_simple_framebuffers};
 pub use init::init;
 #[cfg(test)]
 pub(crate) use init::init_from;

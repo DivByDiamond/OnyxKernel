@@ -33,7 +33,12 @@ pub(crate) fn filter_input(b: u8) -> Option<u8> {
 
 /// Next console byte from either hardware UART or the virtio-input monitor FIFO.
 pub(crate) fn console_next_byte() -> Option<u8> {
-    uart::getc().or_else(tty::pop).and_then(filter_input)
+    uart::getc().or_else(|| {
+        // Blocking console reads may yield with interrupts disabled. Drain
+        // input here as well as on timer ticks so monitor keys can wake them.
+        crate::drivers::input::event::poll_all();
+        tty::pop()
+    }).and_then(filter_input)
 }
 
 /// True when a console read can make progress without sleeping.

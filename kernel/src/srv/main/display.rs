@@ -16,16 +16,19 @@ pub(crate) unsafe fn init_and_draw() {
         // outside the VM. Fallback: pmm RAM (QEMU without virtio-gpu). The ECAM PCI
         // scan (hardcoded QEMU-virt 0x30000000) is meaningless on OC2R/sedna and has
         // been observed to return a bogus display BAR — never use it here.
-        let fdt_fb = crate::libfdt::fdt::find_simple_framebuffer();
-        if let Some(sfb) = fdt_fb {
-            let stride = if sfb.stride != 0 {
-                sfb.stride as usize
+        let mut displays = [crate::libfdt::fdt::SimpleFramebuffer::default(); fb::devices::MAX_FRAMEBUFFERS];
+        let display_count = crate::libfdt::fdt::find_simple_framebuffers(&mut displays);
+        for display in &displays[..display_count] {
+            let result = if !fb::enabled() {
+                fb::init_device(display.pa, display.width as usize, display.height as usize,
+                    display.stride as usize, display.bpp as usize)
             } else {
-                sfb.width as usize * 2
+                fb::Framebuffer::new(display.pa, display.width as usize, display.height as usize,
+                    display.stride as usize, display.bpp as usize)
+                    .and_then(|surface| fb::devices::register(surface).map(|_| ()))
             };
-            if fb::init_device(sfb.pa, sfb.width as usize, sfb.height as usize, stride, 16).is_ok()
-            {
-                crate::kinf!("fb", "simple-framebuffer at %p", Arg::from(sfb.pa));
+            if result.is_ok() {
+                crate::kinf!("fb", "simple-framebuffer at %p", Arg::from(display.pa));
             } else {
                 crate::kwrn!("fb", "simple-framebuffer init failed");
             }

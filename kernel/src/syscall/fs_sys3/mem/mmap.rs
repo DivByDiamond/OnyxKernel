@@ -8,6 +8,10 @@ use super::brk::page_align_up;
 
 const MMAP_BASE: u64 = 0x2000_0000;
 
+fn mapping_size(length: u64, prefix: u64) -> Option<u64> {
+    length.checked_add(prefix).and_then(|len| page_align_up(len.max(4096)))
+}
+
 /// Pick a virtual address for an anonymous/devfs mapping. The `mmap_brk`
 /// hint is advanced ONLY after validation succeeds and the caller's map
 /// operation returned Ok — otherwise a failed mmap would permanently burn
@@ -22,7 +26,7 @@ unsafe fn resolve_vaddr(
     addr: u64,
     size: u64,
     map_fixed: bool,
-    do_map: impl FnOnce(u64) -> Result<(), Errno>,
+    do_map: impl FnOnce(u64) -> Result<u64, Errno>,
 ) -> i64 {
     // SAFETY: p.root_pa satisfies the vmm translate contract per the
     // caller; unmap and translate_user operate only on that table, and the
@@ -59,11 +63,11 @@ unsafe fn resolve_vaddr(
         }
 
         match do_map(vaddr) {
-            Ok(()) => {
+            Ok(result) => {
                 if advance_hint {
                     p.mmap_brk = vaddr + size;
                 }
-                vaddr as i64
+                result as i64
             }
             Err(e) => e.as_i64(),
         }
@@ -126,13 +130,31 @@ pub unsafe fn sys_mmap(
             if f.fs != vfs::Fs::Devfs {
                 return Errno::NoSys.as_i64();
             }
-            resolve_vaddr(p, addr, size, map_fixed, |vaddr| {
-                crate::fs::devfs::mmap(f.ino, vaddr, size, pte_flags).map(|_| ())
+            let prefix = crate::fs::devfs::mmap_prefix(f.ino);
+            let reserved = match mapping_size(length, prefix) {
+                Some(size) => size,
+                None => return Errno::Range.as_i64(),
+            };
+            resolve_vaddr(p, addr, reserved, map_fixed, |vaddr| {
+                crate::fs::devfs::mmap(f.ino, vaddr, length, pte_flags)
             })
         } else {
             resolve_vaddr(p, addr, size, map_fixed, |vaddr| {
-                vmm::map_anon(root_pa, vaddr, size as usize, pte_flags)
+                vmm::map_anon(root_pa, vaddr, size as usize, pte_flags).map(|_| vaddr)
             })
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn reserves_prefix_and_final_page_for_packed_framebuffers() {
+        assert_eq!(mapping_size(0x7d000, 0x400), Some(0x7e000));
+        assert_eq!(mapping_size(0x7d000, 0x600), Some(0x7e000));
+        assert_eq!(mapping_size(0x96000, 0x800), Some(0x97000));
+        assert_eq!(mapping_size(0x7d000, 0), Some(0x7d000));
+        assert_eq!(mapping_size(u64::MAX, 0x800), None);
     }
 }

@@ -38,6 +38,7 @@ pub(in super::super) unsafe fn sys_write(tf: &mut TrapFrame, fd: u64, buf: u64, 
         if !user_buf_ok(buf, len, false) {
             return Errno::Fault.as_i64();
         }
+        let fd = vfs::resolve_stdio(fd);
         if fd == 1 || fd == 2 {
             let src = buf as *const u8;
             let mut written: i64 = 0;
@@ -92,6 +93,7 @@ pub(in super::super) unsafe fn sys_read(tf: &mut TrapFrame, _fd: u64, buf: u64, 
         if !user_buf_ok(buf, len, true) {
             return Errno::Fault.as_i64();
         }
+        let _fd = vfs::resolve_stdio(_fd);
         if _fd == 0 {
             // Console line discipline (raw / non-canonical VMIN-VTIME /
             // cooked + O_NONBLOCK) lives in its own module (todo P1 #3/#5).

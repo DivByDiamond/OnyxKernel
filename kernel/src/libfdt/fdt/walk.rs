@@ -50,6 +50,13 @@ pub unsafe fn walk(cb: &mut dyn FnMut(&str, &[(u32, &[u8])]) -> bool) {
             p = p.add(4);
             match tok {
                 FDT_BEGIN_NODE => {
+                    // A node's properties end before its first child. Emit
+                    // them here so parent properties are not discarded.
+                    if prop_count > 0 {
+                        if cb(node_name, &props[..prop_count]) {
+                            return;
+                        }
+                    }
                     // Bounded NUL scan (fix): the name must terminate within
                     // the block; a malformed unterminated name aborts the
                     // walk instead of running off the blob.
@@ -79,6 +86,8 @@ pub unsafe fn walk(cb: &mut dyn FnMut(&str, &[(u32, &[u8])]) -> bool) {
                         if cb(node_name, slice) {
                             return;
                         }
+                        // Closing ancestors must not emit the last leaf again.
+                        prop_count = 0;
                     }
                 }
                 FDT_PROP => {
