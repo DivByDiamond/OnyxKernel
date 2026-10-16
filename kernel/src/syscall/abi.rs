@@ -120,6 +120,8 @@ pub const O_DIRECTORY: u32 = 1 << 16; // 0x10000
 
 // fcntl() commands.
 pub const F_DUPFD: u32 = 0;
+/// Onyx extension: bind fd to standard stream arg (0..2); MAX fd restores UART.
+pub const F_BIND_STDIO: u32 = 0x4f01;
 pub const F_GETFD: u32 = 1;
 pub const F_SETFD: u32 = 2;
 pub const F_GETFL: u32 = 3;

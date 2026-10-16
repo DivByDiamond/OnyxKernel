@@ -13,6 +13,31 @@ pub use pty_nodes::{DEVFS_PTMX_INO, is_pty_ino, pty_poll, ptym_ino, ptym_ino_idx
 
 pub const DEVFS_ROOT_INO: u32 = 1;
 pub const DEVFS_FB0_INO: u32 = 2;
+const DEVFS_EXTRA_FB_BASE_INO: u32 = 64;
+
+pub fn fb_ino(index: usize) -> u32 {
+    if index == 0 { DEVFS_FB0_INO } else { DEVFS_EXTRA_FB_BASE_INO + index as u32 - 1 }
+}
+
+pub fn is_framebuffer_ino(ino: u32) -> bool { framebuffer(ino).is_some() }
+
+fn framebuffer(ino: u32) -> Option<fb::Framebuffer> {
+    let index = if ino == DEVFS_FB0_INO { 0 } else {
+        ino.checked_sub(DEVFS_EXTRA_FB_BASE_INO)? as usize + 1
+    };
+    fb::display(index)
+}
+
+fn fb_index(name: &[u8]) -> Option<usize> {
+    let digits = name.strip_prefix(b"fb")?;
+    if digits.is_empty() { return None; }
+    let mut index = 0usize;
+    for &c in digits {
+        if !c.is_ascii_digit() { return None; }
+        index = index.checked_mul(10)?.checked_add((c - b'0') as usize)?;
+    }
+    (index < fb::count()).then_some(index)
+}
 
 /// Base inode for block devices: /dev/blk<N> has inode DEVFS_BLK_BASE_INO + N.
 /// Chosen to avoid collision with root (1), fb0 (2) and legacy blk0 (3).
@@ -31,9 +56,7 @@ pub fn lookup(name: &[u8]) -> KResult<u32> {
     if let Some(ino) = pty_nodes::lookup_name(name) {
         return Ok(ino);
     }
-    if name == b"fb0" {
-        return Ok(DEVFS_FB0_INO);
-    }
+    if let Some(index) = fb_index(name) { return Ok(fb_ino(index)); }
     if let Some(idx) = blk::parse_name(name) {
         if idx < crate::drivers::virtio::count() {
             return Ok(blk_ino(idx));
@@ -59,7 +82,7 @@ pub fn stat(ino: u32) -> KResult<DevfsStat> {
     }
     match ino {
         DEVFS_ROOT_INO => Ok(st(ino, 0, 0o040755)),
-        DEVFS_FB0_INO => Ok(st(ino, fb::size_bytes() as u32, 0o100666)),
+        ino if is_framebuffer_ino(ino) => Ok(st(ino, framebuffer(ino).unwrap().size as u32, 0o100666)),
         _ => Err(Errno::NoEnt),
     }
 }
@@ -82,13 +105,14 @@ pub unsafe fn read(ino: u32, buf: *mut u8, offset: u32, len: u32) -> KResult<u32
             return blk::read(idx, buf, offset, len);
         }
         match ino {
-            DEVFS_FB0_INO => {
-                let size = fb::size_bytes() as u32;
+            ino if is_framebuffer_ino(ino) => {
+                let display = framebuffer(ino).ok_or(Errno::NoEnt)?;
+                let size = display.size as u32;
                 let to_read = len.min(size.saturating_sub(offset));
                 if to_read == 0 {
                     return Ok(0);
                 }
-                let fb_base = fb::fb_base_ptr();
+                let fb_base = display.base as *mut u8;
                 // SAFETY: to_read = min(len, size - offset) after the
                 // early-return, so offset + to_read <= fb size; buf covers
                 // `len` bytes per the caller contract, hence to_read too.
@@ -118,13 +142,14 @@ pub unsafe fn write(ino: u32, buf: *const u8, offset: u32, len: u32) -> KResult<
             return blk::write(idx, buf, offset, len);
         }
         match ino {
-            DEVFS_FB0_INO => {
-                let size = fb::size_bytes() as u32;
+            ino if is_framebuffer_ino(ino) => {
+                let display = framebuffer(ino).ok_or(Errno::NoEnt)?;
+                let size = display.size as u32;
                 let to_write = len.min(size.saturating_sub(offset));
                 if to_write == 0 {
                     return Ok(0);
                 }
-                let fb_base = fb::fb_base_ptr();
+                let fb_base = display.base as *mut u8;
                 // SAFETY: to_write = min(len, size - offset) after the
                 // early-return, so offset + to_write <= fb size; buf covers
                 // `len` readable bytes per the caller contract.
@@ -137,30 +162,25 @@ pub unsafe fn write(ino: u32, buf: *const u8, offset: u32, len: u32) -> KResult<
 }
 
 pub fn readdir_entry(idx: u32, name_out: *mut u8, name_len: usize) -> Option<u32> {
-    match idx {
-        0 => {
-            copy_name(b".", name_out, name_len);
-            Some(DEVFS_ROOT_INO)
-        }
-        1 => {
-            copy_name(b"..", name_out, name_len);
-            Some(DEVFS_ROOT_INO)
-        }
-        2 => {
-            copy_name(b"fb0", name_out, name_len);
-            Some(DEVFS_FB0_INO)
-        }
-        i => {
-            let n_devs = crate::drivers::virtio::count();
-            let dev_idx = (i - 3) as usize;
-            if dev_idx < n_devs {
-                copy_name(blk::name(dev_idx), name_out, name_len);
-                return Some(blk_ino(dev_idx));
-            }
-            // PTY nodes live right after the block devices (ptymx + pts/N).
-            pty_nodes::readdir_entry(i, name_out, name_len)
-        }
+    if idx < 2 {
+        copy_name(if idx == 0 { b"." } else { b".." }, name_out, name_len);
+        return Some(DEVFS_ROOT_INO);
     }
+    let index = (idx - 2) as usize;
+    if index < fb::count() {
+        let mut name = [0u8; 4];
+        name[..2].copy_from_slice(b"fb");
+        let length = if index < 10 { name[2] = b'0' + index as u8; 3 }
+            else { name[2] = b'0' + (index / 10) as u8; name[3] = b'0' + (index % 10) as u8; 4 };
+        copy_name(&name[..length], name_out, name_len);
+        return Some(fb_ino(index));
+    }
+    let dev_idx = index - fb::count();
+    if dev_idx < crate::drivers::virtio::count() {
+        copy_name(blk::name(dev_idx), name_out, name_len);
+        return Some(blk_ino(dev_idx));
+    }
+    pty_nodes::readdir_entry(idx, name_out, name_len)
 }
 
 /// # Safety
@@ -172,22 +192,30 @@ pub unsafe fn mmap(ino: u32, vaddr: u64, length: u64, pte_flags: u64) -> KResult
     // SAFETY: mapping scoped to the caller's own page table; see # Safety.
     unsafe {
         match ino {
-            DEVFS_FB0_INO => {
-                let fb_pa = fb::fb_base_pa();
-                let fb_size = fb::size_bytes() as u64;
-                let map_len = length.min(fb_size);
-                // SAFETY: maps the device's physical fb range (fb_base_pa,
-                // bounded by map_len <= fb_size) into the current process's
-                // own address space; vaddr validity is established by the
-                // mmap syscall path (resolve_vaddr) before dispatch.
+            ino if is_framebuffer_ino(ino) => {
+                let display = framebuffer(ino).ok_or(Errno::NoEnt)?;
+                let fb_pa = display.base;
+                let fb_size = display.size as u64;
+                let offset = fb_pa as u64 & 0xFFF;
+                let aligned_pa = fb_pa as u64 - offset;
+                let map_len = length.min(fb_size) + offset;
+                // SAFETY: map the covering physical pages; the returned
+                // pointer skips the prefix and exposes the requested display
+                // bytes. resolve_vaddr reserves the full rounded extent in
+                // the current process's address space before dispatch.
                 let p = crate::proc::current();
                 let flags = pte_flags | crate::arch::regs::PTE_A | crate::arch::regs::PTE_D;
-                crate::mm::vmm::map(p.root_pa, vaddr, fb_pa as u64, map_len as usize, flags)?;
-                Ok(vaddr)
+                crate::mm::vmm::map(p.root_pa, vaddr, aligned_pa, map_len as usize, flags)?;
+                Ok(vaddr + offset)
             }
             _ => Err(Errno::NoSys),
         }
     }
+}
+
+/// Prefix needed when exposing a packed, non-page-aligned MMIO surface.
+pub fn mmap_prefix(ino: u32) -> u64 {
+    framebuffer(ino).map_or(0, |display| display.base as u64 & 0xFFF)
 }
 
 pub const FB_IOCTL_GET_INFO: u64 = 0x4600;
@@ -206,7 +234,7 @@ pub unsafe fn ioctl(ino: u32, request: u64, arg: u64) -> KResult<i64> {
             return pty_ioctl(ino, request, arg);
         }
         match ino {
-            DEVFS_FB0_INO => match request {
+            ino if is_framebuffer_ino(ino) => match request {
                 FB_IOCTL_GET_INFO => {
                     let p = crate::proc::current();
                     // SAFETY: sys_ioctl pre-validated arg as a writable user
@@ -218,12 +246,13 @@ pub unsafe fn ioctl(ino: u32, request: u64, arg: u64) -> KResult<i64> {
                     if pa == 0 {
                         return Err(Errno::Inval);
                     }
+                    let display = framebuffer(ino).ok_or(Errno::NoEnt)?;
                     let dst = pa as *mut u32;
-                    *dst = fb::width() as u32;
-                    *dst.add(1) = fb::height() as u32;
-                    *dst.add(2) = fb::bpp() as u32;
-                    *dst.add(3) = fb::pitch() as u32;
-                    *dst.add(4) = fb::size_bytes() as u32;
+                    *dst = display.width as u32;
+                    *dst.add(1) = display.height as u32;
+                    *dst.add(2) = display.bpp as u32;
+                    *dst.add(3) = display.pitch as u32;
+                    *dst.add(4) = display.size as u32;
                     Ok(0)
                 }
                 _ => Err(Errno::NoSys),

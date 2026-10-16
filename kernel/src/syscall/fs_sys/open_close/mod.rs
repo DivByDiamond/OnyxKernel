@@ -13,7 +13,7 @@ pub use stat::*;
 
 use crate::fs::vfs;
 use crate::syscall::abi::{
-    F_DUPFD, F_GETFD, F_GETFL, F_SETFD, F_SETFL, FD_CLOEXEC, O_APPEND, O_NONBLOCK, O_RDONLY,
+    F_BIND_STDIO, F_DUPFD, F_GETFD, F_GETFL, F_SETFD, F_SETFL, FD_CLOEXEC, O_APPEND, O_NONBLOCK, O_RDONLY,
     O_WRONLY,
 };
 use onyx_core::errno::Errno;
@@ -26,7 +26,7 @@ pub(in super::super) unsafe fn sys_close(token: u64) -> i64 {
     // SAFETY: body performs no unsafe operations; the block only wraps the
     // vfs::close call for the unsafe-fn dispatch convention.
     unsafe {
-        match vfs::close(token) {
+        match vfs::close(vfs::resolve_stdio(token)) {
             Ok(()) => 0,
             Err(e) => e.as_i64(),
         }
@@ -57,6 +57,10 @@ pub(in super::super) unsafe fn sys_fcntl(fd: u64, cmd: u32, arg: u64) -> i64 {
     // vfs fd-table calls (each takes its own fd_check bounds validation) for
     // the unsafe-fn dispatch convention.
     unsafe {
+        if cmd == F_BIND_STDIO {
+            return vfs::bind_stdio(fd, arg).map(|t| t as i64).unwrap_or_else(|e| e.as_i64());
+        }
+        let fd = vfs::resolve_stdio(fd);
         match cmd {
             F_DUPFD => vfs::dup(fd)
                 .map(|t| t as i64)

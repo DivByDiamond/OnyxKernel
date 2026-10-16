@@ -177,8 +177,8 @@ const R_CFG_MODERN: u32 = 0x100;
 pub unsafe fn blk_capacity(dev_idx: usize) -> u64 {
     // SAFETY: dev() documents null for out-of-range idx (checked); the
     // config registers are 4-byte aligned MMIO reads on a probed virtio-mmio
-    // base. capacity is a little-endian u64 at config+0, blk_size a u32 at
-    // config+8 per the virtio-blk spec.
+    // base. Capacity is a little-endian u64 at config+0 in 512-byte sectors.
+    // config+8 is size_max, not blk_size; it must never scale capacity.
     unsafe {
         let d = dev(dev_idx);
         if d.is_null() {
@@ -192,13 +192,7 @@ pub unsafe fn blk_capacity(dev_idx: usize) -> u64 {
         let base = (*d).base;
         let lo = reg_r(base, cfg) as u64;
         let hi = reg_r(base, cfg + 4) as u64;
-        let cap = lo | (hi << 32);
-        let bs = reg_r(base, cfg + 8);
-        if bs > 512 {
-            cap * (bs as u64 / 512)
-        } else {
-            cap
-        }
+        lo | (hi << 32)
     }
 }
 

@@ -79,7 +79,7 @@ pub unsafe fn sys_ioctl(fd: u64, request: u64, arg: u64) -> i64 {
                 // FB_IOCTL_GET_INFO writes a 5-u32 struct through `arg` inside
                 // devfs — validate the mapping here so a bad pointer yields
                 // EFAULT instead of an S-mode fault.
-                if f.ino == devfs::DEVFS_FB0_INO
+                if devfs::is_framebuffer_ino(f.ino)
                     && request == devfs::FB_IOCTL_GET_INFO
                     && vmm::check_user_range(proc::current().root_pa, arg, 20, true).is_err()
                 {

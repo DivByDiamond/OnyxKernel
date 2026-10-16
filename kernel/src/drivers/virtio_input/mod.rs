@@ -4,10 +4,10 @@
 //! tablet) from the device's event virtqueue and translates them to
 //! the unified `drivers::input::Event` representation.
 use crate::drivers::virtio::{
-    R_DEVICE_ID, R_GUEST_FEATURES, R_HOST_FEATURES, R_MAGIC_VALUE, R_QUEUE_AVAIL_HIGH,
+    R_DEVICE_ID, R_GUEST_FEATURES, R_GUEST_FEATURES_SEL, R_HOST_FEATURES, R_HOST_FEATURES_SEL, R_MAGIC_VALUE, R_QUEUE_AVAIL_HIGH,
     R_QUEUE_AVAIL_LOW, R_QUEUE_DESC_HIGH, R_QUEUE_DESC_LOW, R_QUEUE_NUM, R_QUEUE_READY,
     R_QUEUE_SEL, R_QUEUE_USED_HIGH, R_QUEUE_USED_LOW, R_STATUS, R_VERSION, VIRTIO_S_ACK,
-    VIRTIO_S_DRIVER, VIRTIO_S_DRIVER_OK, VIRTIO_S_FEATURES_OK, VIRTQ_SIZE, VQ_DESC_F_WRITE,
+    VIRTIO_F_VERSION_1, VIRTIO_S_DRIVER, VIRTIO_S_DRIVER_OK, VIRTIO_S_FEATURES_OK, VIRTQ_SIZE, VQ_DESC_F_WRITE,
     VqAvail, VqDesc, VqUsed, reg_r, reg_w,
 };
 use crate::mm::pmm;
@@ -28,6 +28,7 @@ pub struct VirtioInputEvent {
 
 #[derive(Clone, Copy)]
 pub(crate) struct InDev {
+    pub ready: bool,
     pub base: usize,
     pub modern: bool,
     pub desc: *mut VqDesc,
@@ -38,7 +39,8 @@ pub(crate) struct InDev {
     pub _head: usize,
 }
 
-pub(crate) static mut G_IN: InDev = InDev {
+const EMPTY: InDev = InDev {
+    ready: false,
     base: 0,
     modern: false,
     desc: ptr::null_mut(),
@@ -48,6 +50,8 @@ pub(crate) static mut G_IN: InDev = InDev {
     ev_buf: ptr::null_mut(),
     _head: 0,
 };
+
+pub(crate) static mut G_IN: InDev = EMPTY;
 
 /// # Safety
 ///
@@ -73,14 +77,41 @@ pub unsafe fn init(base: usize) -> KResult<()> {
         if G_IN.base != 0 {
             return Err(Errno::Busy);
         }
+        let result = init_device(base);
+        if result.is_err() {
+            // Stop DMA before releasing partially allocated rings; failed init
+            // must never leave a pollable device or prevent another probe.
+            reg_w(base, R_STATUS, 0);
+            for pa in [G_IN.desc as u64, G_IN.avail as u64, G_IN.used as u64, G_IN.ev_buf as u64] {
+                if pa != 0 { pmm::free(pa); }
+            }
+            G_IN = EMPTY;
+        }
+        result
+    }
+}
+
+unsafe fn init_device(base: usize) -> KResult<()> {
+    unsafe {
         let version = reg_r(base, R_VERSION);
         let modern = version >= 2;
         G_IN.base = base;
         G_IN.modern = modern;
         reg_w(base, R_STATUS, 0);
         reg_w(base, R_STATUS, VIRTIO_S_ACK | VIRTIO_S_DRIVER);
+        reg_w(base, R_HOST_FEATURES_SEL, 0);
         let hf = reg_r(base, R_HOST_FEATURES);
+        reg_w(base, R_GUEST_FEATURES_SEL, 0);
         reg_w(base, R_GUEST_FEATURES, hf & 0x1FFF_FFFF);
+        if modern {
+            reg_w(base, R_HOST_FEATURES_SEL, 1);
+            let high = reg_r(base, R_HOST_FEATURES);
+            reg_w(base, R_HOST_FEATURES_SEL, 0);
+            if high & VIRTIO_F_VERSION_1 == 0 { return Err(Errno::Inval); }
+            reg_w(base, R_GUEST_FEATURES_SEL, 1);
+            reg_w(base, R_GUEST_FEATURES, VIRTIO_F_VERSION_1);
+            reg_w(base, R_GUEST_FEATURES_SEL, 0);
+        }
         if modern {
             reg_w(
                 base,
@@ -95,8 +126,10 @@ pub unsafe fn init(base: usize) -> KResult<()> {
         reg_w(
             base,
             R_STATUS,
-            VIRTIO_S_ACK | VIRTIO_S_DRIVER | VIRTIO_S_DRIVER_OK,
+            VIRTIO_S_ACK | VIRTIO_S_DRIVER | VIRTIO_S_DRIVER_OK
+                | if modern { VIRTIO_S_FEATURES_OK } else { 0 },
         );
+        G_IN.ready = true;
         Ok(())
     }
 }
@@ -111,14 +144,14 @@ unsafe fn setup_event_queue() -> KResult<()> {
         let base = G_IN.base;
         reg_w(base, R_QUEUE_SEL, 0);
         reg_w(base, R_QUEUE_NUM, VIRTQ_SIZE as u32);
-        let desc_pa = pmm::alloc_zero()? as usize;
-        let avail_pa = pmm::alloc_zero()? as usize;
-        let used_pa = pmm::alloc_zero()? as usize;
-        let ev_pa = pmm::alloc_zero()? as *mut VirtioInputEvent;
-        G_IN.desc = desc_pa as *mut VqDesc;
-        G_IN.avail = avail_pa as *mut VqAvail;
-        G_IN.used = used_pa as *mut VqUsed;
-        G_IN.ev_buf = ev_pa;
+        G_IN.desc = pmm::alloc_zero()? as *mut VqDesc;
+        G_IN.avail = pmm::alloc_zero()? as *mut VqAvail;
+        G_IN.used = pmm::alloc_zero()? as *mut VqUsed;
+        G_IN.ev_buf = pmm::alloc_zero()? as *mut VirtioInputEvent;
+        let desc_pa = G_IN.desc as usize;
+        let avail_pa = G_IN.avail as usize;
+        let used_pa = G_IN.used as usize;
+        let ev_pa = G_IN.ev_buf;
         reg_w(base, R_QUEUE_DESC_LOW, desc_pa as u32);
         reg_w(base, R_QUEUE_DESC_HIGH, ((desc_pa as u64) >> 32) as u32);
         reg_w(base, R_QUEUE_AVAIL_LOW, avail_pa as u32);

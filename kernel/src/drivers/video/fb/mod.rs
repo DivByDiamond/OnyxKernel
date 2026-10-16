@@ -1,5 +1,8 @@
 use onyx_core::errno::KResult;
 
+pub mod devices;
+pub use devices::{Framebuffer, count, get as display};
+
 pub const FB_WIDTH: usize = 1280;
 pub const FB_HEIGHT: usize = 720;
 pub const FB_BPP: usize = 32;
@@ -138,9 +141,8 @@ pub unsafe fn init_device(
 ) -> KResult<()> {
     // SAFETY: geometry (non-zero dims, stride >= width*bpp/8) is validated above; G_FB is written once during single-threaded boot init (SIE=0, see crate::sync).
     unsafe {
-        if paddr == 0 || width == 0 || height == 0 || bpp == 0 || stride < width * (bpp / 8) {
-            return Err(onyx_core::errno::Errno::Inval);
-        }
+        let surface = Framebuffer::new(paddr, width, height, stride, bpp)?;
+        devices::register(surface)?;
         G_FB = Fb {
             base: paddr as *mut u8,
             width,

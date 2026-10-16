@@ -41,7 +41,7 @@ pub fn poll() -> Option<EventType> {
     // slot is masked by VIRTQ_SIZE and buf_idx by N_EVENTS, both in-bounds;
     // reads are volatile of device-written memory.
     unsafe {
-        if G_IN.base == 0 {
+        if !G_IN.ready {
             return None;
         }
         let used_idx = ptr::read_volatile(ptr::addr_of!((*G_IN.used).idx));
@@ -131,10 +131,10 @@ fn linux_to_keycode(code: u16) -> KeyCode {
         109 => KeyCode::PageDown,
         110 => KeyCode::Insert,
         111 => KeyCode::Delete,
-        c if (2..=11).contains(&c) => KeyCode::Digit((c - 1) as u8),
-        c if (16..=25).contains(&c) => KeyCode::Letter(b'q' + (c - 16) as u8),
-        c if (30..=38).contains(&c) => KeyCode::Letter(b'a' + (c - 30) as u8),
-        c if (44..=50).contains(&c) => KeyCode::Letter(b'z' + (c - 44) as u8),
+        c if (2..=11).contains(&c) => KeyCode::Digit(b"1234567890"[(c - 2) as usize]),
+        c if (16..=25).contains(&c) => KeyCode::Letter(b"qwertyuiop"[(c - 16) as usize]),
+        c if (30..=38).contains(&c) => KeyCode::Letter(b"asdfghjkl"[(c - 30) as usize]),
+        c if (44..=50).contains(&c) => KeyCode::Letter(b"zxcvbnm"[(c - 44) as usize]),
         c if (59..=68).contains(&c) => KeyCode::F((c - 58) as u8),
         87 => KeyCode::F(11),
         88 => KeyCode::F(12),
@@ -155,4 +155,29 @@ pub fn event_type(ev: EventType) -> Option<Event> {
 /// Convert a polled virtio event into the unified `input::Event` form.
 pub fn poll_unified() -> Option<Event> {
     event_type(poll()?)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn evdev_codes_follow_keyboard_rows_and_ascii_digits() {
+        for (start, row) in [(16, &b"qwertyuiop"[..]), (30, &b"asdfghjkl"[..]), (44, &b"zxcvbnm"[..])] {
+            for (offset, &letter) in row.iter().enumerate() {
+                assert_eq!(linux_to_keycode(start + offset as u16), KeyCode::Letter(letter));
+            }
+        }
+        for (offset, &digit) in b"1234567890".iter().enumerate() {
+            assert_eq!(linux_to_keycode(2 + offset as u16), KeyCode::Digit(digit));
+        }
+    }
+    #[test]
+    fn partially_initialized_device_is_not_polled() {
+        unsafe {
+            super::super::G_IN = super::super::EMPTY;
+            super::super::G_IN.base = 0x10002000;
+            assert!(poll().is_none());
+            super::super::G_IN = super::super::EMPTY;
+        }
+    }
 }

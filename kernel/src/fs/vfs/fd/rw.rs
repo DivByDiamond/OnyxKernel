@@ -56,6 +56,7 @@ pub unsafe fn write(token: FdToken, buf: *const u8, len: u32) -> KResult<u32> {
             Fs::Onyx => with_mount(mnt, || onyxfs::write(fd.ino, buf, fd.pos, len))?,
             Fs::Proc => return Err(Errno::Perm),
             Fs::Ipc => ipcfs::write(fd.ino, buf, fd.pos, len)?,
+            Fs::Devfs => devfs::write(fd.ino, buf, fd.pos, len)?,
             _ => return Err(Errno::NoSys),
         };
         // Bug (fs SERIOUS #1): use checked_add for the new position. The

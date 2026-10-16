@@ -12,7 +12,7 @@ pub unsafe fn sys_dup(old_token: u64) -> i64 {
     // SAFETY: body performs no unsafe operations; the block only wraps the
     // vfs::dup call for the unsafe-fn dispatch convention.
     unsafe {
-        match vfs::dup(old_token) {
+        match vfs::dup(vfs::resolve_stdio(old_token)) {
             Ok(new_token) => new_token as i64,
             Err(e) => e.as_i64(),
         }
