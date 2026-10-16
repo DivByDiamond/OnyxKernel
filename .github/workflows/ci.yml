@@ -21,17 +21,13 @@ jobs:
         with:
           components: rustfmt
 
-      # Strict for everything except the known-dirty kernel sources.
-      - name: cargo fmt --check
-        run: cargo fmt --check -p onyx_core -p onyx_init -p onyx_tools
-
-      # Pre-existing kernel sources (~226 files, hand-written
-      # "{ unsafe { ... }}" brace style) don't satisfy rustfmt yet.
-      # Advisory until they're reformatted; the step above already
-      # hard-fails any regression outside those known-dirty files.
-      - name: cargo fmt --check (known-dirty kernel sources)
-        run: cargo fmt --check -p onyx_kernel
-        continue-on-error: true
+      - name: Check Rust formatting
+        run: |
+          cargo fmt --check -p onyx_core -p onyx_init -p onyx_tools
+          rustfmt --check --edition 2024 \
+            kernel/src/drivers/video/fb/devices.rs \
+            kernel/src/libfdt/fdt/framebuffer.rs \
+            kernel/src/libfdt/fdt/walk.rs
 
   clippy-kernel:
     runs-on: ubuntu-latest
@@ -47,22 +43,13 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
 
-      # NOTE: `cargo clippy -p onyx_kernel --target riscv64gc-...` cannot
-      # run strict yet: cargo always builds the package lib alongside its
-      # bins, and kernel/src/lib.rs is a std-based host-test harness
-      # (no #![no_std]). Until lib.rs becomes target-aware, cross-target
-      # linting is advisory below; real target coverage comes from the
-      # build matrix.
+      # The package library is a std-based host-test harness, so lint it
+      # separately from the freestanding RISC-V kernel binary.
       - name: clippy onyx_kernel lib (host, strict)
         run: cargo clippy -p onyx_kernel --lib -- -D warnings
 
-      - name: clippy onyx_kernel target riscv64 (advisory)
+      - name: clippy onyx_kernel target riscv64 (strict)
         run: cargo clippy -p onyx_kernel --release --target riscv64gc-unknown-none-elf --bin onyx-kernel -- -D warnings
-        continue-on-error: true
-
-      - name: clippy onyx_kernel bin+tests (host, advisory)
-        run: cargo clippy -p onyx_kernel --all-targets -- -D warnings
-        continue-on-error: true
 
   test-core:
     runs-on: ubuntu-latest

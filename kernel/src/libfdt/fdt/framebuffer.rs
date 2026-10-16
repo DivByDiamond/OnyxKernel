@@ -24,7 +24,11 @@ pub struct SimpleFramebuffer {
 /// boot (before secondary harts start).
 pub unsafe fn find_simple_framebuffer() -> Option<SimpleFramebuffer> {
     let mut first = [SimpleFramebuffer::default(); 1];
-    if unsafe { find_simple_framebuffers(&mut first) } == 1 { Some(first[0]) } else { None }
+    if unsafe { find_simple_framebuffers(&mut first) } == 1 {
+        Some(first[0])
+    } else {
+        None
+    }
 }
 
 /// Enumerates valid enabled displays in DT order, independently of parent path.
@@ -34,7 +38,9 @@ pub unsafe fn find_simple_framebuffers(out: &mut [SimpleFramebuffer]) -> usize {
     unsafe {
         let mut count = 0;
         walk(&mut |_name, props: &[(u32, &[u8])]| {
-            if count == out.len() { return true; }
+            if count == out.len() {
+                return true;
+            }
             let mut compatible = false;
             let mut enabled = true;
             let mut bpp = 0;
@@ -61,12 +67,26 @@ pub unsafe fn find_simple_framebuffers(out: &mut [SimpleFramebuffer]) -> usize {
                     "reg" => {
                         base = reg_base(data);
                         extent = if data.len() >= 16 {
-                            ((rd32(data.as_ptr().add(8)) as u64) << 32) | rd32(data.as_ptr().add(12)) as u64
-                        } else if data.len() >= 12 { rd32(data.as_ptr().add(8)) as u64
-                        } else if data.len() >= 8 { rd32(data.as_ptr().add(4)) as u64 } else { 0 };
+                            ((rd32(data.as_ptr().add(8)) as u64) << 32)
+                                | rd32(data.as_ptr().add(12)) as u64
+                        } else if data.len() >= 12 {
+                            rd32(data.as_ptr().add(8)) as u64
+                        } else if data.len() >= 8 {
+                            rd32(data.as_ptr().add(4)) as u64
+                        } else {
+                            0
+                        };
                     }
                     "status" => enabled = data == b"okay\0" || data == b"ok\0",
-                    "format" => bpp = if data == b"r5g6b5\0" { 16 } else if data == b"x8r8g8b8\0" { 32 } else { 0 },
+                    "format" => {
+                        bpp = if data == b"r5g6b5\0" {
+                            16
+                        } else if data == b"x8r8g8b8\0" {
+                            32
+                        } else {
+                            0
+                        }
+                    }
                     "width" if data.len() >= 4 => width = rd32(data.as_ptr()),
                     "height" if data.len() >= 4 => height = rd32(data.as_ptr()),
                     "stride" if data.len() >= 4 => stride = rd32(data.as_ptr()),
@@ -75,13 +95,32 @@ pub unsafe fn find_simple_framebuffers(out: &mut [SimpleFramebuffer]) -> usize {
             }
             let bytes = bpp / 8;
             let row = width.checked_mul(bytes);
-            let pitch = if stride == 0 { row.unwrap_or(0) } else { stride };
+            let pitch = if stride == 0 {
+                row.unwrap_or(0)
+            } else {
+                stride
+            };
             let size = (pitch as u64).checked_mul(height as u64);
-            if compatible && enabled && bytes > 0 && base != 0 && base < 0x8000_0000
-                && width > 0 && height > 0 && row.is_some_and(|r| pitch >= r)
-                && size.is_some_and(|s| s <= extent && base.checked_add(s).is_some_and(|end| end <= 0x8000_0000))
-                && !out[..count].iter().any(|old| old.pa == base as usize) {
-                out[count] = SimpleFramebuffer { pa: base as usize, width, height, stride: pitch, bpp };
+            if compatible
+                && enabled
+                && bytes > 0
+                && base != 0
+                && base < 0x8000_0000
+                && width > 0
+                && height > 0
+                && row.is_some_and(|r| pitch >= r)
+                && size.is_some_and(|s| {
+                    s <= extent && base.checked_add(s).is_some_and(|end| end <= 0x8000_0000)
+                })
+                && !out[..count].iter().any(|old| old.pa == base as usize)
+            {
+                out[count] = SimpleFramebuffer {
+                    pa: base as usize,
+                    width,
+                    height,
+                    stride: pitch,
+                    bpp,
+                };
                 count += 1;
             }
             false
