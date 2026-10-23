@@ -138,7 +138,7 @@ unsafe fn load_into(
         }
 
         for s in &hdr.segs {
-            crate::kinf!(
+            crate::kdbg!(
                 "onx",
                 "seg vaddr=%p memsz=%d filesz=%d flags=%d",
                 Arg::from(s.vaddr),
