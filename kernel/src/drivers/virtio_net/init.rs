@@ -1,6 +1,6 @@
 //! virtio-net device probe and virtqueue setup.
 use super::queue::push_avail;
-use super::{G_NET, HDR_LEN, NET_MTU, RX_DESCS, VIRTIO_ID_NET};
+use super::{G_NET, HDR_LEN, NET_MTU, RX_DESCS, VIRTIO_ID_NET, DEVICES, DEVICE_COUNT, EMPTY_NET, MAX_NET_DEVICES};
 use crate::arch::mmio::Mmio;
 use crate::drivers::virtio::{
     R_DEVICE_ID, R_GUEST_FEATURES, R_GUEST_FEATURES_SEL, R_GUEST_PAGE_SIZE, R_HOST_FEATURES,
@@ -32,6 +32,31 @@ pub unsafe fn probe(base: usize) -> bool {
 /// `base` must be a probed virtio-net MMIO base; must be called during the
 /// single-threaded boot-time device probe, once per base.
 pub unsafe fn init(base: usize) -> KResult<()> {
+    // SAFETY: called during single-hart boot. Preserve the first active card
+    // while each later card gets independent queues and buffer ownership.
+    unsafe {
+        if DEVICE_COUNT >= MAX_NET_DEVICES {
+            return Err(Errno::NoMem);
+        }
+        let previous = G_NET;
+        G_NET = EMPTY_NET;
+        let result = init_device(base);
+        if result.is_ok() {
+            DEVICES[DEVICE_COUNT] = G_NET;
+            DEVICE_COUNT += 1;
+            if previous.base != 0 {
+                G_NET = previous;
+            }
+        } else {
+            G_NET = previous;
+        }
+        result
+    }
+}
+
+/// # Safety
+/// Single-hart boot, with G_NET reset to an empty private staging device.
+unsafe fn init_device(base: usize) -> KResult<()> {
     // SAFETY: boot-time single-threaded probe (SIE=0, see crate::sync) on a probed base, Busy-guarded so G_NET is written at most once; offsets are spec constants and MAC reads target the device config region at 0x100 (legacy MMIO layout).
     unsafe {
         if G_NET.base != 0 {
@@ -87,7 +112,7 @@ pub unsafe fn init(base: usize) -> KResult<()> {
         reg_w(
             base,
             R_STATUS,
-            VIRTIO_S_ACK | VIRTIO_S_DRIVER | VIRTIO_S_DRIVER_OK,
+            driver_ready_status(modern),
         );
         Ok(())
     }
@@ -201,5 +226,19 @@ unsafe fn setup_queue_rings(base: usize, modern: bool) -> KResult<(usize, usize,
             reg_w(base, R_QUEUE_PFN, (desc_pa / 4096) as u32);
             Ok((desc_pa, avail_pa, used_pa))
         }
+    }
+}
+
+fn driver_ready_status(modern: bool) -> u32 {
+    VIRTIO_S_ACK | VIRTIO_S_DRIVER | VIRTIO_S_DRIVER_OK | if modern { VIRTIO_S_FEATURES_OK } else { 0 }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn modern_ready_preserves_negotiated_features() {
+        assert_eq!(driver_ready_status(true), 15);
+        assert_eq!(driver_ready_status(false), 7);
     }
 }

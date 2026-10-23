@@ -86,6 +86,7 @@ pub unsafe fn kmain(hartid: usize, fdt_addr: usize) -> ! {
         }
         crate::net::init(ip, gw, mask);
         crate::net::G_DNS = dns;
+        crate::net::config::seed_boot_interface();
         crate::kinf!(
             "net",
             "IP=%d.%d.%d.%d gw=%d.%d.%d.%d mask=%d.%d.%d.%d dns=%d.%d.%d.%d MAC=%x:%x:%x:%x:%x:%x",

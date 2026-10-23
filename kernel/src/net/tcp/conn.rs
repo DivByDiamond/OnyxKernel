@@ -15,6 +15,12 @@ pub(in crate::net) const TIMEWAIT_US: u64 = 5_000_000;
 
 #[derive(Clone, Copy)]
 pub(in crate::net) struct TcpConn {
+    pub owner_pid: u32,
+    pub(in crate::net) iface: usize,
+    pub(in crate::net) listener: usize,
+    pub(in crate::net) last_tx_us: u64,
+    pub(in crate::net) retries: u8,
+    pub(in crate::net) peer_window: u16,
     pub(in crate::net) state: u8,
     pub(in crate::net) src_port: u16,
     pub(in crate::net) dst_ip: [u8; 4],
@@ -91,19 +97,20 @@ pub(super) fn send_tcp_seg(c: &TcpConn, flags: u8, data: &[u8]) {
     seg[8..12].copy_from_slice(&c.rcv_nxt.to_be_bytes());
     let off_flags = ((TCP_HLEN as u16) / 4) << 12 | flags as u16;
     seg[12..14].copy_from_slice(&off_flags.to_be_bytes());
-    seg[14..16].copy_from_slice(&[0xFF, 0xFF]);
+    seg[14..16].copy_from_slice(&((BUF_SIZE-c.recv_len) as u16).to_be_bytes());
     seg[16..18].copy_from_slice(&[0, 0]);
     seg[18..20].copy_from_slice(&[0, 0]);
     if !data.is_empty() {
         seg[TCP_HLEN..].copy_from_slice(data);
     }
-    // SAFETY: pseudo-header and segment are in-bounds buffers built above; G_IP read per the net contract.
+    // SAFETY: caller holds net_lock; the context is restored after TX/ARP poll.
     unsafe {
-        let cksum = tcp_checksum(&G_IP, &c.dst_ip, &seg);
-        seg[16..18].copy_from_slice(&cksum.to_be_bytes());
+        crate::net::config::with_interface(c.iface, || {
+            let cksum = tcp_checksum(&G_IP, &c.dst_ip, &seg);
+            seg[16..18].copy_from_slice(&cksum.to_be_bytes());
+            ip::send_packet(c.dst_ip, 6, &seg)
+        }).ok();
     }
-    // SAFETY: seg sized TCP_HLEN + data.len(); TX ring contract per ip::send_packet (single-sender).
-    unsafe { ip::send_packet(c.dst_ip, 6, &seg) }.ok();
 }
 
 pub(in crate::net) fn alloc_conn() -> Option<usize> {
@@ -140,7 +147,7 @@ pub(super) fn sweep_timewait(now_us: u64) {
         net_lock();
         for slot in CONNS.iter_mut() {
             let expired = match slot {
-                Some(c) => c.state == 4 && now_us >= c.tw_deadline_us && c.tw_deadline_us != 0,
+                Some(c) => ((c.state == 4 && c.recv_len == 0) || c.state == 5 || c.state==6) && now_us >= c.tw_deadline_us && c.tw_deadline_us != 0,
                 None => false,
             };
             if expired {

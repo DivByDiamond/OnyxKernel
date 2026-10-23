@@ -19,6 +19,9 @@ pub unsafe fn exit(pid: u32, code: i32) {
     // (B4 fix, comment below); by_pid takes proc_list_lock itself and the
     // returned node stays valid until reaped.
     unsafe {
+        // No PROC/RQ lock held here: reclaim process-owned network slots
+        // before teardown so interrupted servers do not retain ports.
+        crate::net::ownership::close_process(pid);
         if let Some(p) = by_pid(pid) {
             // Normal exit (code == 0) is INFO, not ERR: logging every clean
             // shutdown as "[ERR] proc: pid N exited code=0" (e.g. after

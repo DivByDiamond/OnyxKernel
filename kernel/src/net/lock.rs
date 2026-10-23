@@ -121,6 +121,22 @@ pub fn owned_depth() -> usize {
     }
 }
 
+/// Serializes host tests that touch process-global net statics (CONNS,
+/// UDP_SOCKS, LISTENERS, the ARP cache, interface config, and NET_LOCK's own
+/// depth). The harness runs `#[test]` fns in parallel and the test
+/// `hart_id()` is always 0, so the recursion fast-path treats every test
+/// thread as the same owner: without this guard the "recursive" lock gives
+/// the tests no mutual exclusion at all (docs/TESTING.md, "Ограничения
+/// текущего прогона"). Every test under `kernel/src/net` takes it as its
+/// first statement; it is a local binding, so a panicking test releases it
+/// while unwinding, and poisoning is ignored on purpose — one failed
+/// assertion must not cascade into every later test.
+#[cfg(test)]
+pub fn test_serial() -> std::sync::MutexGuard<'static, ()> {
+    static SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    SERIAL.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -131,6 +147,7 @@ mod tests {
     /// deterministic (same pattern as runqueue.rs).
     #[test]
     fn test_recursive_lock_nesting_and_reacquire() {
+        let _serial = crate::net::lock::test_serial();
         // Host test: hart_id() == 0, single thread — exercise the recursion.
         net_lock();
         assert_eq!(owned_depth(), 1);

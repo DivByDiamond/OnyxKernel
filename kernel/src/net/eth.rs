@@ -12,7 +12,8 @@ pub struct EthHdr {
     pub ethertype: u16,
 }
 
-const ARP_CACHE_MAX: usize = 8;
+const ARP_CACHE_MAX: usize = 64;
+static mut ARP_CACHE_IFACE: [usize; ARP_CACHE_MAX] = [0; ARP_CACHE_MAX];
 static mut ARP_CACHE_IP: [[u8; 4]; ARP_CACHE_MAX] = [[0; 4]; ARP_CACHE_MAX];
 static mut ARP_CACHE_MAC: [[u8; 6]; ARP_CACHE_MAX] = [[0; 6]; ARP_CACHE_MAX];
 static mut ARP_CACHE_LEN: usize = 0;
@@ -30,7 +31,7 @@ pub unsafe fn arp_lookup(ip: [u8; 4]) -> Option<[u8; 6]> {
         net_lock();
         let mut found = None;
         for i in 0..ARP_CACHE_LEN {
-            if ARP_CACHE_IP[i] == ip {
+            if ARP_CACHE_IP[i] == ip && ARP_CACHE_IFACE[i] == virtio_net::active_device() {
                 found = Some(ARP_CACHE_MAC[i]);
                 break;
             }
@@ -51,13 +52,14 @@ pub unsafe fn arp_insert(ip: [u8; 4], mac: [u8; 6]) {
     unsafe {
         net_lock();
         for i in 0..ARP_CACHE_LEN {
-            if ARP_CACHE_IP[i] == ip {
+            if ARP_CACHE_IP[i] == ip && ARP_CACHE_IFACE[i] == virtio_net::active_device() {
                 ARP_CACHE_MAC[i] = mac;
                 net_unlock();
                 return;
             }
         }
         if ARP_CACHE_LEN < ARP_CACHE_MAX {
+            ARP_CACHE_IFACE[ARP_CACHE_LEN] = virtio_net::active_device();
             ARP_CACHE_IP[ARP_CACHE_LEN] = ip;
             ARP_CACHE_MAC[ARP_CACHE_LEN] = mac;
             ARP_CACHE_LEN += 1;
@@ -119,13 +121,16 @@ unsafe fn handle_arp_inner(frame: &[u8]) {
             return;
         }
         let mac = virtio_net::mac();
+        if frame[14..20] != [0,1,8,0,6,4] { return; }
         let oper = u16::from_be_bytes([frame[20], frame[21]]);
+        if oper != 1 && oper != 2 { return; }
         let spa: [u8; 4] = [frame[28], frame[29], frame[30], frame[31]];
         let sha: [u8; 6] = [
             frame[22], frame[23], frame[24], frame[25], frame[26], frame[27],
         ];
         let tpa: [u8; 4] = [frame[38], frame[39], frame[40], frame[41]];
-        arp_insert(spa, sha);
+        if frame[6..12] != sha || (oper==2 && (frame[32..38]!=mac || tpa!=crate::net::G_IP)) { return; }
+        if spa != [0;4] { arp_insert(spa, sha); }
         if oper == 1 && tpa == crate::net::G_IP {
             let mut pkt = [0u8; 42];
             pkt[0..6].copy_from_slice(&sha);
@@ -179,4 +184,11 @@ pub unsafe fn dispatch(frame: &[u8]) {
             _ => {}
         }
     }
+}
+
+/// # Safety
+/// Caller holds net_lock while replacing the active interface/address.
+pub unsafe fn clear_arp_cache() {
+    // SAFETY: the serialization contract excludes all cache readers/writers.
+    unsafe { ARP_CACHE_LEN = 0; }
 }

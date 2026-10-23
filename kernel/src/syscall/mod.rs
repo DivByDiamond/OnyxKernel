@@ -18,6 +18,8 @@ pub mod handler;
 pub mod input_sys;
 pub mod ipc_sys;
 pub mod net_sys;
+mod net_admin_sys;
+mod net_server_sys;
 pub mod poll_sys;
 pub mod power_sys;
 pub mod proc_sys;

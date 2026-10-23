@@ -5,7 +5,7 @@ use crate::net::lock::{net_lock, net_unlock};
 use onyx_core::errno::{Errno, KResult};
 
 use super::{
-    MAX_UDP_SOCKS, UDP_BUF_SIZE, UDP_HLEN, UDP_SOCKS, UdpSocket, alloc_udp_sock, next_udp_port,
+    MAX_UDP_SOCKS, UDP_HLEN, UDP_SOCKS, UdpSocket, alloc_udp_sock, next_udp_port,
 };
 
 /// # Safety
@@ -17,7 +17,7 @@ pub unsafe fn udp_send(socket: &mut UdpSocket, data: &[u8]) -> KResult<()> {
     // SAFETY: segment vector sized UDP_HLEN + data.len(); socket access is through the exclusive &mut above; net_lock() guards G_IP reads and the nested ip::send_packet (recursive, same hart).
     unsafe {
         net_lock();
-        let result = send_packet_inner(socket, data);
+        let result = send_endpoint(socket.local_port, socket.remote_ip, socket.remote_port, socket.connected, data);
         net_unlock();
         result
     }
@@ -28,24 +28,28 @@ pub unsafe fn udp_send(socket: &mut UdpSocket, data: &[u8]) -> KResult<()> {
 /// # Safety
 ///
 /// Caller contract: net_lock() held; `socket` exclusively owned by the caller.
-unsafe fn send_packet_inner(socket: &mut UdpSocket, data: &[u8]) -> KResult<()> {
+unsafe fn send_endpoint(local_port: u16, remote_ip: [u8;4], remote_port: u16, connected: bool, data: &[u8]) -> KResult<()> {
     // SAFETY: segment vector sized UDP_HLEN + data.len(); socket access is through the exclusive &mut above.
     unsafe {
-        if !socket.connected {
+        if !connected || data.len() > 1472 {
             return Err(Errno::Inval);
         }
         let udp_len = UDP_HLEN + data.len();
         let mut seg = alloc::vec![0u8; udp_len];
-        seg[0..2].copy_from_slice(&socket.local_port.to_be_bytes());
-        seg[2..4].copy_from_slice(&socket.remote_port.to_be_bytes());
+        seg[0..2].copy_from_slice(&local_port.to_be_bytes());
+        seg[2..4].copy_from_slice(&remote_port.to_be_bytes());
         seg[4..6].copy_from_slice(&(udp_len as u16).to_be_bytes());
         seg[6..8].copy_from_slice(&[0, 0]);
         if !data.is_empty() {
             seg[UDP_HLEN..].copy_from_slice(data);
         }
-        let cksum = pseudo_checksum(&G_IP, &socket.remote_ip, ip::IP_PROTO_UDP, &seg);
-        seg[6..8].copy_from_slice(&cksum.to_be_bytes());
-        ip::send_packet(socket.remote_ip, ip::IP_PROTO_UDP, &seg)
+        let iface = crate::net::config::route(remote_ip).ok_or(Errno::Io)?;
+        crate::net::config::with_interface(iface, || {
+            let cksum = pseudo_checksum(&G_IP, &remote_ip, ip::IP_PROTO_UDP, &seg);
+            let cksum=if cksum==0 {u16::MAX} else {cksum};
+            seg[6..8].copy_from_slice(&cksum.to_be_bytes());
+            ip::send_packet(remote_ip, ip::IP_PROTO_UDP, &seg)
+        })
     }
 }
 
@@ -59,19 +63,20 @@ pub unsafe fn udp_bind(port: u16) -> KResult<usize> {
     // (net sync fix, todo P1 #4).
     unsafe {
         net_lock();
+        if UDP_SOCKS.iter().flatten().any(|socket|socket.bound && socket.local_port==port) { net_unlock();return Err(Errno::Busy); }
         let idx = alloc_udp_sock().ok_or_else(|| {
             net_unlock();
             Errno::Busy
         })?;
         UDP_SOCKS[idx] = Some(UdpSocket {
+            owner_pid:0,
+            iface: crate::drivers::virtio_net::active_device(),
             local_port: port,
             remote_ip: [0; 4],
             remote_port: 0,
             bound: true,
             connected: false,
-            recv_buf: [0; UDP_BUF_SIZE],
-            recv_len: 0,
-            recv_head: 0,
+            datagrams: super::datagram::DatagramQueue::EMPTY,
         });
         net_unlock();
         Ok(idx)
@@ -106,29 +111,16 @@ unsafe fn udp_sendto_inner(dst_ip: [u8; 4], dst_port: u16, data: &[u8]) -> KResu
         let idx = alloc_udp_sock().ok_or(Errno::Busy)?;
         let port = next_udp_port();
         UDP_SOCKS[idx] = Some(UdpSocket {
+            owner_pid:0,
+            iface: crate::net::config::route(dst_ip).ok_or(Errno::Io)?,
             local_port: port,
             remote_ip: dst_ip,
             remote_port: dst_port,
             bound: false,
             connected: true,
-            recv_buf: [0; UDP_BUF_SIZE],
-            recv_len: 0,
-            recv_head: 0,
+            datagrams: super::datagram::DatagramQueue::EMPTY,
         });
-        let result = {
-            // Audit fix (🟡 #7): replace `UDP_SOCKS[idx].as_mut().unwrap()`.
-            // alloc_udp_sock() returned Some(idx) moments ago, but a
-            // malicious caller racing on another core could close the slot
-            // between alloc and here. The unwrap would then panic the
-            // kernel. Match-and-fail-closed is safe.
-            let sock = match UDP_SOCKS[idx].as_mut() {
-                Some(s) => s,
-                None => {
-                    return Err(Errno::Inval);
-                }
-            };
-            udp_send(sock, data)
-        };
+        let result = send_endpoint(port, dst_ip, dst_port, true, data);
         UDP_SOCKS[idx] = None;
         result
     }
@@ -161,16 +153,20 @@ pub unsafe fn udp_bind_connect(dst_ip: [u8; 4], dst_port: u16) -> KResult<usize>
                 return Err(Errno::Busy);
             }
         };
+        let iface = match crate::net::config::route(dst_ip) {
+            Some(iface) => iface,
+            None => { net_unlock(); return Err(Errno::Io); }
+        };
         let port = next_udp_port();
         UDP_SOCKS[idx] = Some(UdpSocket {
+            owner_pid:0,
+            iface,
             local_port: port,
             remote_ip: dst_ip,
             remote_port: dst_port,
             bound: true,
             connected: true,
-            recv_buf: [0; UDP_BUF_SIZE],
-            recv_len: 0,
-            recv_head: 0,
+            datagrams: super::datagram::DatagramQueue::EMPTY,
         });
         net_unlock();
         Ok(idx)
@@ -190,8 +186,9 @@ pub unsafe fn udp_send_bound(sock_idx: usize, data: &[u8]) -> KResult<()> {
             return Err(Errno::Inval);
         }
         net_lock();
-        let result = match UDP_SOCKS[sock_idx].as_mut() {
-            Some(s) => send_packet_inner(s, data),
+        let endpoint = UDP_SOCKS[sock_idx].as_ref().map(|s| (s.local_port,s.remote_ip,s.remote_port,s.connected));
+        let result = match endpoint {
+            Some((local,remote,port,connected)) => send_endpoint(local,remote,port,connected,data),
             None => Err(Errno::Inval),
         };
         net_unlock();
@@ -205,40 +202,23 @@ pub unsafe fn udp_send_bound(sock_idx: usize, data: &[u8]) -> KResult<()> {
 /// own that slot exclusively -- a concurrent udp_recv or handle_udp on
 /// the same slot from another hart would race the ring indices.
 pub unsafe fn udp_recv(sock_idx: usize, buf: &mut [u8]) -> KResult<usize> {
-    // SAFETY: valid-slot contract on sock_idx; ring reads masked % UDP_BUF_SIZE; head/len advanced under net_lock() so a concurrent poll/handle_udp cannot race the ring (net sync fix, todo P1 #4).
-    unsafe {
-        net_lock();
-        let r = udp_recv_inner(sock_idx, buf);
-        net_unlock();
-        r
-    }
+    // SAFETY: delegated to the bounded, locked datagram receive operation.
+    unsafe { udp_recv_from(sock_idx,buf).map(|(n,_)|n) }
 }
 
-/// Lock-free body of udp_recv (caller holds net_lock).
-///
 /// # Safety
-///
-/// Caller contract: net_lock() held; valid slot index.
-unsafe fn udp_recv_inner(sock_idx: usize, buf: &mut [u8]) -> KResult<usize> {
-    // SAFETY: sock_idx is bounds-checked below (a hostile/out-of-range
-    // index returns EINVAL instead of indexing out of the slot table and
-    // panicking the kernel); ring reads masked % UDP_BUF_SIZE; caller holds
-    // net_lock().
+/// Kernel context; caller supplies a valid writable slice.
+pub unsafe fn udp_recv_from(sock_idx: usize, buf: &mut [u8]) -> KResult<(usize,super::datagram::Peer)> {
+    // SAFETY: bounds checked; socket table and queue are serialized by net_lock.
     unsafe {
-        if sock_idx >= MAX_UDP_SOCKS {
-            return Err(Errno::Inval);
-        }
-        let sock = UDP_SOCKS[sock_idx].as_mut().ok_or(Errno::Inval)?;
-        if sock.recv_len == 0 {
-            return Err(Errno::NoEnt);
-        }
-        let n = buf.len().min(sock.recv_len);
-        for (i, dst) in buf[..n].iter_mut().enumerate() {
-            *dst = sock.recv_buf[(sock.recv_head + i) % UDP_BUF_SIZE];
-        }
-        sock.recv_head = (sock.recv_head + n) % UDP_BUF_SIZE;
-        sock.recv_len -= n;
-        Ok(n)
+        if sock_idx >= MAX_UDP_SOCKS { return Err(Errno::Inval); }
+        net_lock();
+        let result = match UDP_SOCKS[sock_idx].as_mut() {
+            Some(socket) => socket.datagrams.pop(buf).ok_or(Errno::NoEnt),
+            None => Err(Errno::Inval),
+        };
+        net_unlock();
+        result
     }
 }
 
@@ -256,5 +236,24 @@ pub unsafe fn udp_close(sock_idx: usize) {
         net_lock();
         UDP_SOCKS[sock_idx] = None;
         net_unlock();
+    }
+}
+
+/// # Safety
+/// Privileged caller; binds a wildcard listener across all configured interfaces.
+pub unsafe fn udp_bind_any(port:u16) -> KResult<usize> {
+    // SAFETY: outer lock makes bind and wildcard marking atomic.
+    unsafe { net_lock();let result=udp_bind(port);if let Ok(id)=result && let Some(socket)=UDP_SOCKS[id].as_mut() { socket.iface=usize::MAX; } net_unlock();result }
+}
+
+/// # Safety
+/// Caller provides a valid payload; socket table and TX are serialized.
+pub unsafe fn udp_send_from(id:usize, peer:super::datagram::Peer, data:&[u8]) -> KResult<()> {
+    // SAFETY: bounds-checked socket lookup, endpoint copied before reentrant IO.
+    unsafe {
+        net_lock();
+        let local=UDP_SOCKS.get(id).and_then(Option::as_ref).map(|socket|socket.local_port);
+        let result=match local { Some(port)=>send_endpoint(port,peer.ip,peer.port,true,data), None=>Err(Errno::Inval) };
+        net_unlock();result
     }
 }

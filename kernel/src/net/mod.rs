@@ -1,8 +1,11 @@
+pub mod ownership;
 pub mod checksum;
+pub mod config;
 pub mod dhcp;
 pub mod dns;
 pub mod eth;
 pub mod ip;
+pub mod ipv4;
 pub mod lock;
 pub mod tcp;
 
@@ -64,17 +67,35 @@ pub unsafe fn poll() {
         lock::net_lock();
         // Reclaim expired TIMEWAIT TCP slots even when no packets arrive.
         tcp::tick();
-        loop {
+        let previous = virtio_net::active_device();
+        let count = virtio_net::device_count();
+        if (0..count).any(config::is_configured) {
+            for index in 0..count {
+                if config::is_configured(index) && config::activate(index).is_ok() {
+                    drain_current();
+                }
+            }
+            let _ = config::activate(previous);
+        } else {
+            drain_current(); // DHCP before the first interface is configured.
+        }
+        lock::net_unlock();
+    }
+}
+
+/// # Safety
+/// Caller holds net_lock and selected the matching interface/IP context.
+unsafe fn drain_current() {
+    // SAFETY: fixed buffer and ring handling validated by recv_into.
+    unsafe {
+        // Bound work even if a peer continuously fills the receive ring.
+        for _ in 0..64 {
             let mut buf = [0u8; 2048];
             match virtio_net::xfer::recv_into(&mut buf) {
-                Ok(n) => {
-                    if n >= 14 {
-                        eth::dispatch(&buf[..n]);
-                    }
-                }
+                Ok(n) if n >= 14 => eth::dispatch(&buf[..n]),
+                Ok(_) => {},
                 Err(_) => break,
             }
         }
-        lock::net_unlock();
     }
 }

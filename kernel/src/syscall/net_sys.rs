@@ -30,7 +30,7 @@ pub(super) unsafe fn sys_net_connect(ip_ptr: u64, port: u64) -> i64 {
         if vmm::copy_from_user(proc::current().root_pa, ip.as_mut_ptr(), ip_ptr, 4).is_err() {
             return Errno::Fault.as_i64();
         }
-        match net::tcp_connect(ip, port as u16) {
+        match net::ownership::tcp_connect(ip, port as u16,proc::current_pid()) {
             Ok(cid) => cid as i64,
             Err(e) => e.as_i64(),
         }
@@ -55,7 +55,8 @@ pub(super) unsafe fn sys_net_send(conn_id: u64, buf: u64, len: u64) -> i64 {
             return Errno::Fault.as_i64();
         }
         let data = core::slice::from_raw_parts(buf as *const u8, len as usize);
-        match net::tcp_send(conn_id as usize, data) {
+        net::poll();
+        match net::ownership::tcp(conn_id as usize,proc::current_pid(),||net::tcp_send(conn_id as usize, data)) {
             Ok(n) => n as i64,
             Err(e) => e.as_i64(),
         }
@@ -79,7 +80,7 @@ pub(super) unsafe fn sys_net_recv(conn_id: u64, buf: u64, len: u64) -> i64 {
         }
         let data = core::slice::from_raw_parts_mut(buf as *mut u8, len as usize);
         net::poll();
-        match net::tcp_recv(conn_id as usize, data) {
+        match net::ownership::tcp(conn_id as usize,proc::current_pid(),||net::tcp_recv(conn_id as usize, data)) {
             Ok(n) => n as i64,
             Err(e) => e.as_i64(),
         }
@@ -107,7 +108,7 @@ pub(super) unsafe fn sys_net_resolve(name_ptr: u64, ip_out: u64) -> i64 {
         if vmm::check_user_range(proc::current().root_pa, ip_out, 4, true).is_err() {
             return Errno::Fault.as_i64();
         }
-        let dns_server = net::G_DNS;
+        let dns_server = net::config::dns_server();
         match net::dns_resolve(&name_buf[..name_len], dns_server) {
             Ok(ip) => match vmm::copy_to_user(proc::current().root_pa, ip_out, ip.as_ptr(), 4) {
                 Ok(()) => 0,
@@ -129,7 +130,6 @@ pub(super) unsafe fn sys_net_close(conn_id: u64) -> i64 {
         if conn_id >= 8 {
             return Errno::Inval.as_i64();
         }
-        net::tcp_close(conn_id as usize);
-        0
+        net::ownership::tcp(conn_id as usize,proc::current_pid(),||{net::tcp_close(conn_id as usize);Ok(())}).map_or_else(Errno::as_i64,|()|0)
     }
 }
