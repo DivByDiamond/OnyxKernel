@@ -76,8 +76,7 @@ impl AnsiTerm {
     /// parser can never panic (e.g. after a hot-swap to a smaller fb).
     pub(super) fn sync_size(&mut self) {
         let old_rows = self.rows;
-        self.cols = (fb::width() / FONT_W).max(1);
-        self.rows = (fb::height() / FONT_H).max(1);
+        (self.rows, self.cols) = crate::drivers::fb_term::console_geometry();
         // If the scroll region previously spanned the whole screen, keep it
         // spanning the whole screen when the real geometry is taller than
         // the compile-time default (25 rows): the check below only shrinks

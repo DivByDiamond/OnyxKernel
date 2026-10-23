@@ -15,6 +15,7 @@ impl AnsiTerm {
         if bpp != 32 && bpp != 16 {
             return;
         }
+        super::scale::mark(super::viewport::Rect::new(0,self.top*FONT_H,self.cols*FONT_W,(self.bot+1)*FONT_H));
         let row_bytes = pitch * FONT_H;
         for row in self.top..self.bot {
             let dst = base + row * row_bytes;
@@ -36,6 +37,7 @@ impl AnsiTerm {
         if bpp != 32 && bpp != 16 {
             return;
         }
+        super::scale::mark(super::viewport::Rect::new(0,self.top*FONT_H,self.cols*FONT_W,(self.bot+1)*FONT_H));
         let row_bytes = pitch * FONT_H;
         let mut row = self.bot;
         while row > self.top {
@@ -75,14 +77,15 @@ impl AnsiTerm {
     pub(super) fn erase_line(&mut self, mode: u32) {
         let (w, h) = (FONT_W, FONT_H);
         let x0 = match mode {
-            1 => 0,
-            _ => self.cur_col * w,
+            0 => self.cur_col * w,
+            _ => 0,
         };
         let x1 = match mode {
-            0 | 1 => self.cols * w,
-            _ => (self.cur_col + 1) * w,
+            1 => (self.cur_col + 1) * w,
+            _ => self.cols * w,
         };
         let y = self.cur_row * h;
+        super::scale::mark(super::viewport::Rect::new(x0,y,x1,y+h));
         for x in x0..x1.min(fb::width()) {
             for dy in 0..h.min(fb::height() - y) {
                 fb::put_pixel_blend(x, y + dy, self.bg);
@@ -94,6 +97,7 @@ impl AnsiTerm {
     }
 
     fn clear_row(&mut self, row: usize) {
+        super::scale::mark(super::viewport::Rect::new(0,row*FONT_H,self.cols*FONT_W,(row+1)*FONT_H));
         let (_, pitch, bpp, _) = paint_info();
         let base = paint_base_addr();
         if base != 0 && (bpp == 32 || bpp == 16) {
@@ -117,6 +121,7 @@ impl AnsiTerm {
     }
 
     fn draw_char_at(&mut self, row: usize, col: usize, c: u8) {
+        super::scale::mark(super::viewport::Rect::new(col*FONT_W,row*FONT_H,(col+1)*FONT_W,(row+1)*FONT_H));
         let (fg, bg) = if self.reverse {
             (self.bg, self.fg)
         } else {
@@ -146,6 +151,7 @@ impl AnsiTerm {
     }
 
     pub(super) fn enter_alt(&mut self) {
+        super::scale::mark(super::viewport::Rect::new(0,0,self.cols*FONT_W,self.rows*FONT_H));
         let (base, bytes) = match surface() {
             Some(v) => v,
             None => return,
@@ -165,6 +171,7 @@ impl AnsiTerm {
     }
 
     pub(super) fn exit_alt(&mut self) {
+        super::scale::mark(super::viewport::Rect::new(0,0,self.cols*FONT_W,self.rows*FONT_H));
         let (base, bytes) = match surface() {
             Some(v) => v,
             None => return,

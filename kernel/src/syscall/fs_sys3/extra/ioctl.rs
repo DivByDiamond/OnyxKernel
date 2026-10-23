@@ -172,7 +172,7 @@ pub unsafe fn sys_ioctl(fd: u64, request: u64, arg: u64) -> i64 {
             }
             0x5413 => {
                 // TIOCGWINSZ: real terminal size. On the framebuffer console
-                // derive it from the fb geometry (ANSI cell grid 8x16); else
+                // use its ANSI grid (8x16, capped to UART on Sedna); else
                 // fall back to the UART default 80x24.
                 if arg == 0 {
                     return 0;
@@ -186,12 +186,11 @@ pub unsafe fn sys_ioctl(fd: u64, request: u64, arg: u64) -> i64 {
                 }
                 let ws = pa as *mut u16;
                 let (rows, cols) = if crate::drivers::fb::enabled() {
-                    let cols = (crate::drivers::fb::width() / 8) as u16;
-                    let rows = (crate::drivers::fb::height() / 16) as u16;
-                    (rows.max(1), cols.max(1))
+                    crate::drivers::fb_term::console_geometry()
                 } else {
                     (24, 80)
                 };
+                let (rows, cols) = (rows as u16, cols as u16);
                 // ws_row, ws_col, ws_xpixel, ws_ypixel
                 ptr::write(ws.add(0), rows);
                 ptr::write(ws.add(1), cols);

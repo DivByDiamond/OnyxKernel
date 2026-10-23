@@ -11,21 +11,33 @@ use onyx_core::fmt::Arg;
 pub(crate) unsafe fn init_and_draw() {
     // SAFETY: framebuffer memory is the DTB simple-framebuffer region or fresh pmm pages; single-threaded boot call.
     unsafe {
+        crate::drivers::fb_term::set_serial_mirror(crate::libfdt::fdt::is_sedna());
         // Prefer the device-tree simple-framebuffer (OC2R/sedna monitor): it is an
         // MMIO region the host actually samples, whereas private RAM is invisible
         // outside the VM. Fallback: pmm RAM (QEMU without virtio-gpu). The ECAM PCI
         // scan (hardcoded QEMU-virt 0x30000000) is meaningless on OC2R/sedna and has
         // been observed to return a bogus display BAR — never use it here.
-        let mut displays = [crate::libfdt::fdt::SimpleFramebuffer::default(); fb::devices::MAX_FRAMEBUFFERS];
+        let mut displays =
+            [crate::libfdt::fdt::SimpleFramebuffer::default(); fb::devices::MAX_FRAMEBUFFERS];
         let display_count = crate::libfdt::fdt::find_simple_framebuffers(&mut displays);
         for display in &displays[..display_count] {
             let result = if !fb::enabled() {
-                fb::init_device(display.pa, display.width as usize, display.height as usize,
-                    display.stride as usize, display.bpp as usize)
+                fb::init_device(
+                    display.pa,
+                    display.width as usize,
+                    display.height as usize,
+                    display.stride as usize,
+                    display.bpp as usize,
+                )
             } else {
-                fb::Framebuffer::new(display.pa, display.width as usize, display.height as usize,
-                    display.stride as usize, display.bpp as usize)
-                    .and_then(|surface| fb::devices::register(surface).map(|_| ()))
+                fb::Framebuffer::new(
+                    display.pa,
+                    display.width as usize,
+                    display.height as usize,
+                    display.stride as usize,
+                    display.bpp as usize,
+                )
+                .and_then(|surface| fb::devices::register(surface).map(|_| ()))
             };
             if result.is_ok() {
                 crate::kinf!("fb", "simple-framebuffer at %p", Arg::from(display.pa));
@@ -132,7 +144,11 @@ pub(crate) unsafe fn init_and_draw() {
                 let scan = crate::drivers::bus::pci::find_vga_fb();
                 crate::drivers::uart::putc(b'}');
                 if let Ok(vga_pa) = scan {
-                    crate::kinf!("display", "pci VGA scan returned %p", Arg::from(vga_pa as u64));
+                    crate::kinf!(
+                        "display",
+                        "pci VGA scan returned %p",
+                        Arg::from(vga_pa as u64)
+                    );
                     if vga_pa >= 0x4000_0000 {
                         crate::drivers::uart::putc(b'[');
                         let ok = fb::init_device(vga_pa, 1280, 720, 1280 * 4, 32).is_ok();

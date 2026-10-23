@@ -112,6 +112,29 @@ pub fn present() {
     }
 }
 
+/// Publish only a console rectangle. Native applications retain full-surface
+/// access; console refreshes need not copy millions of untouched MMIO pixels.
+pub fn present_region(width: usize, height: usize) {
+    let pa = G_BACK_PA.load(Ordering::Acquire);
+    if pa == 0 {
+        return;
+    }
+    let pitch = super::pitch();
+    let row_bytes = width.min(super::width()) * (super::bpp() / 8);
+    let height = height.min(super::height());
+    for y in 0..height {
+        // SAFETY: geometry is bounded to the installed surface; back and
+        // front buffers are disjoint and both contain pitch*height bytes.
+        unsafe {
+            core::ptr::copy_nonoverlapping(
+                (pa as *const u8).add(y * pitch),
+                front_base().add(y * pitch),
+                row_bytes,
+            );
+        }
+    }
+}
+
 pub fn draw_char(x: usize, y: usize, c: u8, fg: u32, bg: u32) {
     let glyph = font::glyph_bitmap(c);
     for (row, &bits) in glyph.iter().enumerate() {

@@ -148,8 +148,13 @@ pub(crate) fn present_locked() {
     // borrow does not escape this block.
     unsafe {
         let t = &raw mut super::G_ANSI;
-        crate::drivers::fb::present();
-        (*t).draw_cursor_front();
+        if !super::scale::present(&*t) {
+            crate::drivers::fb::present_region(
+                (*t).cols * super::state::FONT_W,
+                (*t).rows * super::state::FONT_H,
+            );
+            (*t).draw_cursor_front();
+        }
     }
     G_DIRTY.store(false, Ordering::Release);
 }
