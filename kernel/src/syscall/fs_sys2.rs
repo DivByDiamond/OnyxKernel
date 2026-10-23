@@ -1,8 +1,7 @@
 //! Filesystem syscalls (part 2) — `sys_exec`, `sys_sbrk`, `sys_readdir`,
 //! `sys_write_fd`, `sys_create`, `sys_mkdir`.
-use crate::arch::trap_frame::{TrapFrame, reg_truncate};
+use crate::arch::trap_frame::TrapFrame;
 use crate::fs::vfs;
-use crate::mm::heap;
 use crate::proc;
 use onyx_core::errno::Errno;
 
@@ -11,119 +10,8 @@ use super::handler::{parse_user_path, user_ptr_ok};
 #[inline(never)]
 /// # Safety: call only from handler::handle's syscall path (current process set, ACL checked); user pointers validated inside.
 pub(super) unsafe fn sys_exec(tf: &mut TrapFrame, path: u64, argv: u64) -> i64 {
-    // SAFETY: parse_user_path validates the path internally; root_refcount is
-    // this process's own live heap u32 (null-checked) and the old root table
-    // is only destroyed once its refcount drops to zero.
-    unsafe {
-        let mut path_buf = [0u8; 256];
-        let path_len = match parse_user_path(path, &mut path_buf) {
-            Some(l) => l,
-            None => return Errno::Inval.as_i64(),
-        };
-        let path_bytes = &path_buf[..path_len];
-        let cur_ring = proc::current_ring();
-        let token = match vfs::open(path_bytes, vfs::PERM_READ | vfs::PERM_SEEK) {
-            Ok(t) => t,
-            Err(e) => return e.as_i64(),
-        };
-        let mut size = 0u32;
-        vfs::stat(token, &mut size).ok();
-        let img = match heap::kmalloc(size as usize) {
-            Ok(p) => p,
-            Err(e) => return e.as_i64(),
-        };
-        vfs::read(token, img, size).ok();
-        vfs::close(token).ok();
-        let r = match proc::onx::load(img, size as usize) {
-            Ok(r) => r,
-            Err(e) => {
-                heap::kfree(img);
-                return e.as_i64();
-            }
-        };
-        heap::kfree(img);
-        if cur_ring == proc::PROC_RING_USER && r.ring == 1 {
-            return Errno::Perm.as_i64();
-        }
-        let (argc, argv_sp) = proc::onx::copy_argv_to_stack(r.root_pa, r.ustack, argv);
-        let p = proc::current();
-        // Bug (proc SERIOUS #4): close FD_CLOEXEC file descriptors before
-        // replacing the process image, matching sys_execve's behavior.
-        // Without this, file descriptors marked close-on-exec would leak
-        // across exec() (sys_execve handled it, but sys_exec didn't).
-        for i in 0..p.fds.len() {
-            if p.fds[i].used && p.fds[i].cloexec {
-                let token = crate::fs::vfs::fd_token(i, p.fds[i].epoch);
-                let _ = crate::fs::vfs::close(token);
-            }
-        }
-        // Bug #8 fix: port the root_refcount logic from sys_execve. The previous
-        // code unconditionally destroyed the old root page table, even when
-        // fork() had shared it with a child via root_refcount. After fork+exec,
-        // the child's root_pa pointer would dangle into freed page-table memory
-        // — a classic UAF. Now we decrement the refcount and only destroy when
-        // it reaches zero, and we allocate a fresh refcount for the new root.
-        if p.root_pa != 0 {
-            if !p.root_refcount.is_null() {
-                *p.root_refcount -= 1;
-                if *p.root_refcount == 0 {
-                    heap::kfree(p.root_refcount as *mut u8);
-                    crate::mm::vmm::destroy_root(p.root_pa);
-                }
-            } else {
-                crate::mm::vmm::destroy_root(p.root_pa);
-            }
-        }
-        p.root_pa = r.root_pa;
-        // Allocate a fresh refcount for the new root page table.
-        match heap::kmalloc(4) {
-            Ok(rc) => {
-                let rcp = rc as *mut u32;
-                *rcp = 1;
-                p.root_refcount = rcp;
-            }
-            Err(e) => return e.as_i64(),
-        }
-        p.entry = r.entry;
-        p.ustack = if argc > 0 { argv_sp } else { r.ustack };
-        p.heap_brk = r.heap_brk;
-        p.readdir_ino = 0;
-        p.readdir_idx = 0;
-        p.readdir_active = false;
-        p.readdir_fs = crate::fs::vfs::Fs::None;
-        p.ring = if r.ring == 1 {
-            proc::PROC_RING_ROOT
-        } else {
-            proc::PROC_RING_USER
-        };
-        // Set up tf such that after handler does sepc += 4 and a0 = ret,
-        // we get correct values:
-        //   sepc = entry  (tf.sepc - 4 to compensate for handler's +4)
-        //   a0   = argc   (return argc, handler will set a0 = ret)
-        tf.sepc = reg_truncate(r.entry.wrapping_sub(4));
-        tf.sp = reg_truncate(if argc > 0 { argv_sp } else { r.ustack });
-        tf.a0 = reg_truncate(argc as u64);
-        tf.a1 = reg_truncate(if argc > 0 { argv_sp + 8 } else { 0 });
-        // envp (a2): copy_argv_to_stack builds [argc][argv..NULL][envp={NULL}][auxv],
-        // so the empty envp array sits right after argv's NULL terminator.
-        tf.a2 = reg_truncate(if argc > 0 {
-            argv_sp + 8 + (argc as u64 + 1) * 8
-        } else {
-            0
-        });
-        tf.sstatus =
-            reg_truncate(crate::arch::regs::SSTATUS_SPIE | crate::arch::regs::SSTATUS_FS_INITIAL);
-        #[cfg(target_pointer_width = "64")]
-        {
-            tf.satp = crate::arch::regs::SATP_MODE_SV39 | (r.root_pa >> 12);
-        }
-        #[cfg(target_pointer_width = "32")]
-        {
-            tf.satp = crate::arch::bits::SATP_MODE_SV32
-                | (((r.root_pa >> 12) & 0x3FF_FFFF) as crate::arch::trap_frame::Reg);
-        }
-        argc as i64
-    }
+    // SAFETY: identical syscall context and pointer contract; exec has no envp.
+    unsafe { super::fs_sys3::sys_execve(tf, path, argv, 0) }
 }
 
 /// # Safety: call only from handler::handle's syscall path (current process set, ACL checked); no user pointers dereferenced.

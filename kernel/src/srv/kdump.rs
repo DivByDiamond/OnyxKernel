@@ -53,8 +53,8 @@ pub unsafe fn kdump() {
             vformat(&mut w, "pid=%d\n", args);
         }
         if let Some(p) = crate::proc::current_opt() {
-            let args: &[Arg] = &[Arg::from(p.ring), Arg::from(p.parent_pid)];
-            vformat(&mut w, "ring=%d parent=%d\n", args);
+            let args: &[Arg] = &[Arg::from(p.ring), Arg::from(p.uid)];
+            vformat(&mut w, "ring=%d uid=%d\n", args);
         }
 
         let cnt = crate::proc::count();

@@ -26,12 +26,62 @@ pub fn current_ring() -> u8 {
     }
 }
 
-pub fn current_opt() -> Option<&'static mut Proc> {
-    // SAFETY: own-hart slot; Some(&mut) is handed out only while the process
-    // is current on this hart and not yet freed by the reaper.
+/// Owned metadata: callers can retain this value across mutation, scheduling,
+/// or process teardown. It contains no references or dereferenceable pointers.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CurrentProcessSnapshot {
+    pub pid: u32,
+    pub ring: u8,
+    pub root_pa: u64,
+    pub uid: u32,
+    pub gid: u32,
+    pub stack_canary: u64,
+}
+
+/// Return copied metadata rather than an unconstrained mutable Proc reference.
+/// Disable local interrupts during the copy so this hart cannot switch away
+/// between reading its current slot and the last field. No Proc borrow escapes.
+pub fn current_opt() -> Option<CurrentProcessSnapshot> {
+    // SAFETY: current slots are owned by their hart. With local interrupts
+    // disabled, a current Proc cannot be switched out/reaped during this copy.
+    // Raw field reads avoid creating a whole-Proc reference that could alias
+    // references already held by syscall callers.
     unsafe {
+        use crate::arch::{csr, regs::SSTATUS_SIE};
+        let status = csr::read_sstatus();
+        csr::clear_sstatus(SSTATUS_SIE);
+        // CSR helpers use asm(nomem): explicitly keep memory accesses inside
+        // the interrupt-disabled region at the compiler level as well.
+        core::sync::atomic::compiler_fence(core::sync::atomic::Ordering::SeqCst);
         let p = G_HART_CURRENT[hart_id()];
-        if p.is_null() { None } else { Some(&mut *p) }
+        let snapshot = if p.is_null() {
+            None
+        } else {
+            Some(snapshot_from_ptr(p))
+        };
+        core::sync::atomic::compiler_fence(core::sync::atomic::Ordering::SeqCst);
+        if status & SSTATUS_SIE != 0 {
+            csr::set_sstatus(SSTATUS_SIE);
+        }
+        snapshot
+    }
+}
+
+/// # Safety
+/// `p` must remain live and its metadata stable for this copy. The current
+/// accessor enforces this through hart ownership and disabled interrupts.
+unsafe fn snapshot_from_ptr(p: *const Proc) -> CurrentProcessSnapshot {
+    // SAFETY: only Copy fields are read through a live pointer; no &Proc or
+    // &mut Proc is created, and stack bytes are read without alignment assumptions.
+    unsafe {
+        CurrentProcessSnapshot {
+            pid: core::ptr::read(&raw const (*p).pid),
+            ring: core::ptr::read(&raw const (*p).ring),
+            root_pa: core::ptr::read(&raw const (*p).root_pa),
+            uid: core::ptr::read(&raw const (*p).uid),
+            gid: core::ptr::read(&raw const (*p).gid),
+            stack_canary: core::ptr::read_unaligned((&raw const (*p).kstack).cast::<u64>()),
+        }
     }
 }
 
@@ -39,7 +89,10 @@ pub fn current_opt() -> Option<&'static mut Proc> {
 ///
 /// Caller contract: must run in process context on this hart (current is
 /// non-null); returns a reference to the per-hart current Proc, valid only
-/// while it stays current on this hart.
+/// while it stays current on this hart. The caller must ensure exclusive
+/// access for the entire borrow, including callees: do not call current()
+/// again, yield, or retain this reference across a context switch. Prefer
+/// current_opt() for read-only metadata; it returns an owned snapshot.
 pub unsafe fn current() -> &'static mut Proc {
     // SAFETY: caller contract guarantees the slot is non-null and points at
     // a live heap-allocated Proc that stays current on this hart.
@@ -179,4 +232,37 @@ pub fn dump_all<W: onyx_core::fmt::Write>(w: &mut W) {
         }
     }
     super::globals::proc_list_unlock();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn metadata_snapshot_outlives_process_without_borrowing_it() {
+        let mut process = Box::new(Proc::new());
+        process.pid = 42;
+        process.uid = 1000;
+        process.gid = 100;
+        process.ring = 2;
+        process.parent_pid = 7;
+        process.root_pa = 0x123000;
+        process.kstack[..8].copy_from_slice(&super::super::types::KSTACK_CANARY.to_ne_bytes());
+        // SAFETY: local live Proc, no concurrent accesses; no reference escapes.
+        let snapshot = unsafe { snapshot_from_ptr(&raw const *process) };
+        process.uid = 2000;
+        drop(process);
+        assert_eq!(snapshot.pid, 42);
+        assert_eq!(snapshot.uid, 1000);
+        assert_eq!(snapshot.gid, 100);
+        assert_eq!(snapshot.ring, 2);
+        assert_eq!(snapshot.root_pa, 0x123000);
+        assert_eq!(snapshot.stack_canary, super::super::types::KSTACK_CANARY);
+    }
+
+    #[test]
+    fn optional_current_is_an_owned_send_sync_value() {
+        fn assert_owned<T: Copy + Send + Sync + 'static>(_: fn() -> Option<T>) {}
+        assert_owned(current_opt);
+    }
 }

@@ -77,7 +77,7 @@ Part of the [OnyxOS](https://github.com/anomalyco/OnyxOS) ecosystem. Booted by
 - **FDT parser** — device tree discovery (memory, PLIC, devices)
 - **Per-process FD table** — 16 slots per process with capability tokens
 - **Userland** — `/bin/login`, `/bin/osh` (shell), `/bin/passwd`, `/bin/useradd`, `/bin/userdel`
-- **Authentication** — `/etc/passwd` + `/etc/shadow`; first-boot interactive root password setup
+- **Authentication** — `/etc/passwd` + `/etc/shadow`; first boot seeds root with a hashed empty password (change it with `passwd`)
 - **/proc filesystem** — `version`, `cpuinfo`, `meminfo`, `uptime`, `load`, `stat`, `modules`
 
 ----
@@ -93,7 +93,8 @@ Part of the [OnyxOS](https://github.com/anomalyco/OnyxOS) ecosystem. Booted by
 | 2 | User Space | U-mode | Restricted syscall ACL; cannot access `/service/*` |
 
 - `dropring(target)` — one-way privilege drop: 0→1, 0→2, 1→2. Privilege escalation is prevented.
-- `/bin/login` drops from ring 1 to ring 2, then `exec`s `/bin/osh`.
+- `/bin/login` verifies passwd/shadow; root retains ring 1, while non-root login drops to ring 2 before `execve`. Both rings run in hardware U-mode.
+- The shipped `/bin/osh` is RING1-tagged, so the non-root path cannot launch it. Login does not yet install passwd uid/gid; a complete unprivileged login session remains unfinished.
 
 ### Memory Layout (Sv39)
 
@@ -242,8 +243,7 @@ jumping to kernel
 
 OnyxOS Login
 login: root
-password: 
-[login] dropping to ring 2
+Login OK (root, ring 1)
 osh> _
 ```
 
@@ -305,7 +305,7 @@ osh> _
 - Panic recovery / kdump (stack trace, process dump, QEMU reboot)
 - Multi-core (SMP) support (up to 8 harts, per-CPU queues, load balancing, CPU affinity)
 - Full userland: init, login, osh, passwd, useradd, userdel
-- Authentication: /etc/passwd + /etc/shadow, first-boot root password setup
+- Authentication: /etc/passwd + /etc/shadow, first-boot root account seeding
 - /proc filesystem: version, cpuinfo, meminfo, uptime, load, stat, modules
 - Per-process FD tables (16 slots with capability tokens)
 - Network stack (Ethernet/IP/UDP/TCP) with DHCP, DNS resolver and syscall interface

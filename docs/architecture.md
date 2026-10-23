@@ -8,7 +8,7 @@ OnyxKernel — RISC-V 64 (rv64gc) ядро с трёхуровневой изо�
 - **Ring 1 (Root Space)** — привилегированное пользовательское пространство (init, сервисы)
 - **Ring 2 (User Space)** — непривилегированное пользовательское пространство (shell, юзерские программы)
 
-Бинарник init (`/bin/init`) запускается как PID 1 в Ring 1. Он сканирует `/service/` на предмет `*.bin`/`*.osh` файлов, запускает каждый как root-сервис, затем запускает `/bin/login`. Login аутентифицирует пользователя и через `dropring(2)` опускается в Ring 2, после чего exec-ит `/bin/osh` — пользовательский shell.
+Бинарник init (`/bin/init`) запускается как PID 1 в Ring 1. Он сканирует `/service/` на предмет `*.bin`/`*.osh` файлов, запускает каждый как root-сервис, затем запускает `/bin/login`. Login проверяет `/etc/passwd` и `/etc/shadow`: root сохраняет Ring 1, для остальных вызывается `dropring(2)`, затем `execve` настроенного shell. Оба пользовательских кольца работают в аппаратном U-mode; ring — политика ядра, а не отдельный режим CPU.
 
 ---
 
@@ -47,7 +47,7 @@ OnyxKernel — RISC-V 64 (rv64gc) ядро с трёхуровневой изо�
 | 2 | User Space | U-mode | нет | ограниченный набор syscalls; нет доступа к /service/* |
 
 ### 3.1 Ограничения Ring 2 (User)
-- **Syscall ACL** (`kernel/src/syscall/handler/acl.rs`): spawn, wait, kill, create, mkdir, snapshot, chan_create запрещены
+- **Syscall ACL** (`kernel/src/syscall/handler/acl.rs`): spawn, wait, mkdir, snapshot, chan_create запрещены; kill ограничен политикой сигналов, create/rename имеют исключение для uid 0
 - **Path policy** (`kernel/src/syscall/fs_sys/open_close/open.rs:34`): User-процессы не могут открыть файлы из `/service/`
 
 ### 3.2 Dropring
@@ -71,19 +71,21 @@ OnyxKernel — RISC-V 64 (rv64gc) ядро с трёхуровневой изо�
 
 **`/bin/login`** (`init/src/login/`):
 1. Выводит `OnyxOS Login`
-2. Читает username и password через `SYS_read`
-3. MVP-логика: любой непустой username/password → успех
-4. `SYS_dropping(2)` — опускает привилегии в Ring 2
-5. `SYS_exec("/bin/osh")` — запускает пользовательский shell
+2. Загружает `/etc/passwd`; если пользователей нет, создаёт root с хэшем пустого пароля в `/etc/shadow`.
+3. Находит username и проверяет salted/iterated SHA-256 хэш; неизвестная учётная запись или неверный пароль отклоняются с задержкой. Отсутствующее, повреждённое или заблокированное shadow-поле не означает пустой пароль.
+4. Root (uid 0 в записи passwd) сохраняет Ring 1; для остальных вызывается `SYS_dropring(2)`.
+5. `SYS_execve` запускает shell из passwd (по умолчанию `/bin/osh`) с HOME/USER/SHELL/PATH.
+
+Ограничение: стандартный `/bin/osh` собирается с RING1, поэтому его запуск после понижения в Ring 2 отклоняется. Login пока не устанавливает uid/gid из passwd; полный путь непривилегированной сессии требует отдельной доработки. Ring и uid/gid — разные механизмы, их нельзя считать взаимозаменяемыми.
 
 ---
 
 ## 6. Пользовательский Shell (osh)
 
 **`/bin/osh`** (пользовательский shell; исходник не входит в это дерево репозитория, в систему попадает как бинарник `/bin/osh`):
-- Работает в Ring 2 (user space)
+- Стандартная сборка имеет флаг RING1 и работает в Ring 1 после входа root; запуск RING1 из Ring 2 запрещён
 - Команды: `help`, `echo`, `cat`, `ls`, `exec`, `clear`, `exit`, `whoami`, `pwd`
-- `whoami` вызывает `SYS_getring()` и выводит "root" (ring 1) или "user" (ring 2)
+- `whoami` показывает uid и программное кольцо привилегий
 - `cat`/`ls` используют `SYS_open`/`SYS_read`/`SYS_readdir`
 - `exec` использует `SYS_exec` — заменяет текущий процесс на новый бинарник
 - `exit` вызывает `SYS_exit(0)`
@@ -95,7 +97,7 @@ OnyxKernel — RISC-V 64 (rv64gc) ядро с трёхуровневой изо�
 ### 7.1 Диспетчеризация
 - Trap handler (`kernel/src/srv/trap.rs`) ловит `ecall` (CAUSE_U_ECALL)
 - Вызывает `handler::handle()` (`kernel/src/syscall/handler/dispatch.rs`)
-- Всего 85 syscall (см. `kernel/src/syscall/abi.rs`)
+- Актуальные номера syscall определены в `kernel/src/syscall/abi.rs`
 
 ### 7.2 ACL
 
@@ -279,4 +281,4 @@ cargo build --release --target riscv64gc-unknown-none-elf
 ./scripts/run_qemu.sh
 ```
 
-**TODO** (`todo.md`): `/etc/passwd` + `/etc/shadow` для настоящей аутентификации, полноценный IPC, SMP, драйверы для реального железа.
+**Статус:** `/etc/passwd` + `/etc/shadow`, IPC и SMP реализованы; открытые задачи и аппаратные ограничения отслеживаются в `todo.md` и `docs/TESTING.md`.
