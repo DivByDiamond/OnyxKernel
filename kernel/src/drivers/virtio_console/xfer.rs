@@ -1,58 +1,82 @@
-//! virtio-console RX/TX — polled receive, synchronous transmit.
-use super::{G_CON, push};
-use crate::drivers::virtio::{R_QUEUE_NOTIFY, VqDesc};
-use crate::mm::pmm;
-use core::ptr;
-use onyx_core::errno::KResult;
+//! Nonblocking byte-stream I/O. Buffer ownership remains with the device
+//! until its used index advances; no per-byte page allocation or busy wait.
+use super::{BUF_SIZE, QUEUE_SIZE, G_CON, LOCK, present, push};
+use crate::drivers::virtio::{R_QUEUE_NOTIFY, VqDesc, reg_r, reg_w};
+use core::{ptr, sync::atomic::{fence, Ordering}};
+use onyx_core::errno::{Errno, KResult};
 
-/// Poll for one received byte, or `None` if no data is available.
-pub fn getc() -> Option<u8> {
-    // SAFETY: valid only after init completed: rx_used/rx_buf then point at PMM rings/page; single volatile u16/u8 reads, then the descriptor is recycled via push().
+/// # Safety
+/// Caller provides `length` writable bytes. Syscall context, interrupts off.
+pub unsafe fn read(buffer: *mut u8, length: usize) -> KResult<u32> {
+    if !present() { return Err(Errno::NoEnt); }
+    if length == 0 { return Ok(0); }
+    LOCK.lock();
+    let result = unsafe { read_locked(buffer, length) };
+    LOCK.unlock();
+    result
+}
+
+unsafe fn read_locked(buffer: *mut u8, length: usize) -> KResult<u32> {
     unsafe {
-        let used_idx = ptr::read_volatile(ptr::addr_of!((*G_CON.rx_used).idx));
-        if used_idx == G_CON.rx_last {
-            return None;
+        reg_w(G_CON.base, 0x64, reg_r(G_CON.base, 0x60)); // Acknowledge polled IRQs.
+        if G_CON.rx_offset == G_CON.rx_len {
+            let used = ptr::read_volatile(ptr::addr_of!((*G_CON.rx_used).idx));
+            if used == G_CON.rx_last { return Err(Errno::Again); }
+            fence(Ordering::Acquire);
+            let entry = ptr::read_volatile(ptr::addr_of!((*G_CON.rx_used).ring[G_CON.rx_last as usize % QUEUE_SIZE]));
+            G_CON.rx_last = G_CON.rx_last.wrapping_add(1);
+            G_CON.rx_offset = 0;
+            G_CON.rx_len = (entry.len as usize).min(BUF_SIZE);
         }
-        G_CON.rx_last = used_idx;
-        let byte = *G_CON.rx_buf;
-        // Recycle the RX buffer so we can receive the next byte.
-        push(0, true);
-        Some(byte)
+        let count = length.min(G_CON.rx_len - G_CON.rx_offset);
+        ptr::copy_nonoverlapping(G_CON.rx_buf.add(G_CON.rx_offset), buffer, count);
+        G_CON.rx_offset += count;
+        if G_CON.rx_offset == G_CON.rx_len {
+            push(0, true);
+            reg_w(G_CON.base, R_QUEUE_NOTIFY, 0);
+        }
+        if count == 0 { Err(Errno::Again) } else { Ok(count as u32) }
     }
 }
 
-/// Send a single byte synchronously. Allocates a temporary page for the
-/// TX payload — virtio-console expects the descriptor address to be a
-/// physical address, so we use PMM directly.
-pub fn putc(b: u8) -> KResult<()> {
-    // SAFETY: valid only after init completed: tx_desc/tx_used are PMM rings; buf_pa is a fresh PMM page holding the byte, freed only after tx_used.idx advances past our entry.
+/// # Safety
+/// Caller provides `length` readable bytes. Syscall context, interrupts off.
+pub unsafe fn write(buffer: *const u8, length: usize) -> KResult<u32> {
+    if !present() { return Err(Errno::NoEnt); }
+    if length == 0 { return Ok(0); }
+    LOCK.lock();
+    let result = unsafe { write_locked(buffer, length) };
+    LOCK.unlock();
+    result
+}
+
+unsafe fn write_locked(buffer: *const u8, length: usize) -> KResult<u32> {
     unsafe {
-        let buf_pa = pmm::alloc_zero()? as *mut u8;
-        *buf_pa = b;
-        (*G_CON.tx_desc.add(0)) = VqDesc {
-            addr: buf_pa as u64,
-            len: 1,
-            flags: 0,
-            next: 0,
-        };
+        let completed = ptr::read_volatile(ptr::addr_of!((*G_CON.tx_used).idx));
+        if G_CON.tx_busy {
+            if completed == G_CON.tx_last { return Err(Errno::Again); }
+            fence(Ordering::Acquire);
+            G_CON.tx_busy = false;
+        }
+        let count = length.min(BUF_SIZE);
+        ptr::copy_nonoverlapping(buffer, G_CON.tx_buf, count);
+        *G_CON.tx_desc = VqDesc { addr: G_CON.tx_buf as u64, len: count as u32, flags: 0, next: 0 };
+        // Capture completion BEFORE publish/notify: the host may consume the
+        // descriptor immediately during the MMIO notify store.
+        G_CON.tx_last = completed;
+        G_CON.tx_busy = true;
         push(0, false);
         reg_w(G_CON.base, R_QUEUE_NOTIFY, 1);
-        let used_idx = ptr::read_volatile(ptr::addr_of!((*G_CON.tx_used).idx));
-        loop {
-            if ptr::read_volatile(ptr::addr_of!((*G_CON.tx_used).idx)) != used_idx {
-                break;
-            }
-        }
-        pmm::free(buf_pa as u64);
-        Ok(())
+        reg_w(G_CON.base, 0x64, reg_r(G_CON.base, 0x60));
+        Ok(count as u32)
     }
 }
 
-/// Send a string byte-by-byte.
-pub fn puts(s: &str) {
-    for &b in s.as_bytes() {
-        let _ = putc(b);
-    }
+pub fn getc() -> Option<u8> {
+    let mut byte = 0;
+    unsafe { read(&mut byte, 1).ok().map(|_| byte) }
 }
-
-use crate::drivers::virtio::reg_w;
+pub fn putc(byte: u8) -> KResult<()> { unsafe { write(&byte, 1).map(|_| ()) } }
+/// Nonblocking string write; returns the accepted prefix length.
+/// The caller must retry the remaining suffix after EAGAIN/partial progress.
+pub fn puts(text: &str) -> KResult<u32> { unsafe { write(text.as_ptr(), text.len()) } }

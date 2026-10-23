@@ -13,6 +13,7 @@ pub use pty_nodes::{DEVFS_PTMX_INO, is_pty_ino, pty_poll, ptym_ino, ptym_ino_idx
 
 pub const DEVFS_ROOT_INO: u32 = 1;
 pub const DEVFS_FB0_INO: u32 = 2;
+pub const DEVFS_HVC0_INO: u32 = 49;
 const DEVFS_EXTRA_FB_BASE_INO: u32 = 64;
 
 pub fn fb_ino(index: usize) -> u32 {
@@ -56,6 +57,7 @@ pub fn lookup(name: &[u8]) -> KResult<u32> {
     if let Some(ino) = pty_nodes::lookup_name(name) {
         return Ok(ino);
     }
+    if name == b"hvc0" && crate::drivers::virtio_console::present() { return Ok(DEVFS_HVC0_INO); }
     if let Some(index) = fb_index(name) { return Ok(fb_ino(index)); }
     if let Some(idx) = blk::parse_name(name) {
         if idx < crate::drivers::virtio::count() {
@@ -82,6 +84,7 @@ pub fn stat(ino: u32) -> KResult<DevfsStat> {
     }
     match ino {
         DEVFS_ROOT_INO => Ok(st(ino, 0, 0o040755)),
+        DEVFS_HVC0_INO if crate::drivers::virtio_console::present() => Ok(st(ino, u32::MAX, 0o100600)),
         ino if is_framebuffer_ino(ino) => Ok(st(ino, framebuffer(ino).unwrap().size as u32, 0o100666)),
         _ => Err(Errno::NoEnt),
     }
@@ -105,6 +108,7 @@ pub unsafe fn read(ino: u32, buf: *mut u8, offset: u32, len: u32) -> KResult<u32
             return blk::read(idx, buf, offset, len);
         }
         match ino {
+            DEVFS_HVC0_INO => crate::drivers::virtio_console::read(buf, len as usize),
             ino if is_framebuffer_ino(ino) => {
                 let display = framebuffer(ino).ok_or(Errno::NoEnt)?;
                 let size = display.size as u32;
@@ -142,6 +146,7 @@ pub unsafe fn write(ino: u32, buf: *const u8, offset: u32, len: u32) -> KResult<
             return blk::write(idx, buf, offset, len);
         }
         match ino {
+            DEVFS_HVC0_INO => crate::drivers::virtio_console::write(buf, len as usize),
             ino if is_framebuffer_ino(ino) => {
                 let display = framebuffer(ino).ok_or(Errno::NoEnt)?;
                 let size = display.size as u32;
@@ -180,7 +185,15 @@ pub fn readdir_entry(idx: u32, name_out: *mut u8, name_len: usize) -> Option<u32
         copy_name(blk::name(dev_idx), name_out, name_len);
         return Some(blk_ino(dev_idx));
     }
-    pty_nodes::readdir_entry(idx, name_out, name_len)
+    if crate::drivers::virtio_console::present() {
+        if dev_idx == crate::drivers::virtio::count() {
+            copy_name(b"hvc0", name_out, name_len);
+            return Some(DEVFS_HVC0_INO);
+        }
+        pty_nodes::readdir_entry(idx - 1, name_out, name_len)
+    } else {
+        pty_nodes::readdir_entry(idx, name_out, name_len)
+    }
 }
 
 /// # Safety

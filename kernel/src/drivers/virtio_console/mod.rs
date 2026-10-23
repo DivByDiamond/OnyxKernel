@@ -1,170 +1,129 @@
-//! virtio-console MMIO driver — root module.
-//!
-//! Owns the device struct, global state, and probe/init. RX/TX queue
-//! helpers live in `xfer.rs`.
+//! Polled virtio-console byte stream, exposed as /dev/hvc0 for OC2R RPC.
 use crate::drivers::virtio::{
-    R_DEVICE_ID, R_GUEST_FEATURES, R_HOST_FEATURES, R_MAGIC_VALUE, R_QUEUE_AVAIL_HIGH,
-    R_QUEUE_AVAIL_LOW, R_QUEUE_DESC_HIGH, R_QUEUE_DESC_LOW, R_QUEUE_NUM, R_QUEUE_READY,
-    R_QUEUE_SEL, R_QUEUE_USED_HIGH, R_QUEUE_USED_LOW, R_STATUS, R_VERSION, VIRTIO_S_ACK,
-    VIRTIO_S_DRIVER, VIRTIO_S_DRIVER_OK, VIRTIO_S_FEATURES_OK, VIRTQ_SIZE, VQ_DESC_F_WRITE,
-    VqAvail, VqDesc, VqUsed, reg_r, reg_w,
+    R_DEVICE_ID, R_GUEST_FEATURES, R_GUEST_FEATURES_SEL, R_GUEST_PAGE_SIZE,
+    R_HOST_FEATURES, R_HOST_FEATURES_SEL, R_MAGIC_VALUE, R_QUEUE_ALIGN,
+    R_QUEUE_AVAIL_HIGH, R_QUEUE_AVAIL_LOW, R_QUEUE_DESC_HIGH, R_QUEUE_DESC_LOW,
+    R_QUEUE_NUM, R_QUEUE_NUM_MAX, R_QUEUE_PFN, R_QUEUE_READY, R_QUEUE_SEL,
+    R_QUEUE_USED_HIGH, R_QUEUE_USED_LOW, R_STATUS, R_VERSION, VIRTIO_F_VERSION_1,
+    VIRTIO_S_ACK, VIRTIO_S_DRIVER, VIRTIO_S_DRIVER_OK, VIRTIO_S_FEATURES_OK,
+    VQ_DESC_F_WRITE, VqAvail, VqDesc, VqUsed, reg_r, reg_w,
 };
-use crate::mm::pmm;
+use crate::{mm::pmm, sync::SpinLock};
 use core::ptr;
 use onyx_core::errno::{Errno, KResult};
 
 pub const VIRTIO_ID_CONSOLE: u32 = 3;
-pub const BUF_SIZE: usize = 256;
+pub const BUF_SIZE: usize = 4096;
+pub(crate) const QUEUE_SIZE: usize = 4; // Sedna console advertises a maximum of four.
+pub(crate) static LOCK: SpinLock = SpinLock::new();
 
-#[derive(Clone, Copy)]
 pub(crate) struct ConDev {
-    pub base: usize,
-    pub modern: bool,
-    pub rx_desc: *mut VqDesc,
-    pub rx_avail: *mut VqAvail,
-    pub rx_used: *mut VqUsed,
-    pub tx_desc: *mut VqDesc,
-    pub tx_avail: *mut VqAvail,
-    pub tx_used: *mut VqUsed,
-    pub rx_last: u16,
-    pub _tx_last: u16,
-    pub rx_buf: *mut u8,
+    base: usize,
+    rx_desc: *mut VqDesc,
+    rx_avail: *mut VqAvail,
+    rx_used: *mut VqUsed,
+    tx_desc: *mut VqDesc,
+    tx_avail: *mut VqAvail,
+    tx_used: *mut VqUsed,
+    rx_last: u16,
+    rx_offset: usize,
+    rx_len: usize,
+    tx_last: u16,
+    tx_busy: bool,
+    rx_buf: *mut u8,
+    tx_buf: *mut u8,
 }
 
 pub(crate) static mut G_CON: ConDev = ConDev {
-    base: 0,
-    modern: false,
-    rx_desc: ptr::null_mut(),
-    rx_avail: ptr::null_mut(),
-    rx_used: ptr::null_mut(),
-    tx_desc: ptr::null_mut(),
-    tx_avail: ptr::null_mut(),
-    tx_used: ptr::null_mut(),
-    rx_last: 0,
-    _tx_last: 0,
-    rx_buf: ptr::null_mut(),
+    base: 0, rx_desc: ptr::null_mut(), rx_avail: ptr::null_mut(),
+    rx_used: ptr::null_mut(), tx_desc: ptr::null_mut(), tx_avail: ptr::null_mut(),
+    tx_used: ptr::null_mut(), rx_last: 0, rx_offset: 0, rx_len: 0,
+    tx_last: 0, tx_busy: false, rx_buf: ptr::null_mut(), tx_buf: ptr::null_mut(),
 };
 
 /// # Safety
-///
-/// `base` must be a candidate virtio-mmio base from the FDT probe or the
-/// QEMU virt fallback constants (identity-mapped at boot).
+/// `base` is a mapped virtio MMIO candidate discovered at boot.
 pub unsafe fn probe(base: usize) -> bool {
-    // SAFETY: base is a candidate virtio-mmio base from the boot-time probe; reg_r reads only spec offsets (magic, device ID).
-    unsafe {
-        if reg_r(base, R_MAGIC_VALUE) != 0x7472_6976 {
-            return false;
-        }
-        reg_r(base, R_DEVICE_ID) == VIRTIO_ID_CONSOLE
-    }
+    unsafe { reg_r(base, R_MAGIC_VALUE) == 0x7472_6976 && reg_r(base, R_DEVICE_ID) == VIRTIO_ID_CONSOLE }
 }
 
 /// # Safety
-///
-/// `base` must be a probed virtio-console MMIO base; must be called during
-/// the single-threaded boot-time device probe, once per base.
+/// Single-threaded boot, mapped and probed console device.
 pub unsafe fn init(base: usize) -> KResult<()> {
-    // SAFETY: boot-time single-threaded probe (SIE=0, see crate::sync) on a probed base, Busy-guarded so G_CON is written at most once; offsets are spec constants.
     unsafe {
-        if G_CON.base != 0 {
-            return Err(Errno::Busy);
-        }
-        let version = reg_r(base, R_VERSION);
-        let modern = version >= 2;
-        G_CON.base = base;
-        G_CON.modern = modern;
+        if G_CON.base != 0 { return Err(Errno::Busy); }
+        let modern = reg_r(base, R_VERSION) >= 2;
         reg_w(base, R_STATUS, 0);
         reg_w(base, R_STATUS, VIRTIO_S_ACK | VIRTIO_S_DRIVER);
-        let hf = reg_r(base, R_HOST_FEATURES);
-        reg_w(base, R_GUEST_FEATURES, hf & 0x1FFF_FFFF);
+        // Only negotiate features we implement. In particular MULTIPORT is
+        // deliberately absent: queues 0 and 1 remain the single console port.
+        reg_w(base, R_GUEST_FEATURES_SEL, 0);
+        reg_w(base, R_GUEST_FEATURES, 0);
         if modern {
-            reg_w(
-                base,
-                R_STATUS,
-                VIRTIO_S_ACK | VIRTIO_S_DRIVER | VIRTIO_S_FEATURES_OK,
-            );
-            if reg_r(base, R_STATUS) & VIRTIO_S_FEATURES_OK == 0 {
-                return Err(Errno::Inval);
-            }
+            reg_w(base, R_HOST_FEATURES_SEL, 1);
+            if reg_r(base, R_HOST_FEATURES) & VIRTIO_F_VERSION_1 == 0 { return Err(Errno::Inval); }
+            reg_w(base, R_HOST_FEATURES_SEL, 0);
+            reg_w(base, R_GUEST_FEATURES_SEL, 1);
+            reg_w(base, R_GUEST_FEATURES, VIRTIO_F_VERSION_1);
+            reg_w(base, R_GUEST_FEATURES_SEL, 0);
+            reg_w(base, R_STATUS, VIRTIO_S_ACK | VIRTIO_S_DRIVER | VIRTIO_S_FEATURES_OK);
+            if reg_r(base, R_STATUS) & VIRTIO_S_FEATURES_OK == 0 { return Err(Errno::Inval); }
         }
-        setup_queue(0, true)?; // RX (queue 0)
-        setup_queue(1, false)?; // TX (queue 1)
-        reg_w(
-            base,
-            R_STATUS,
-            VIRTIO_S_ACK | VIRTIO_S_DRIVER | VIRTIO_S_DRIVER_OK,
-        );
+        setup_queue(base, modern, 0)?;
+        setup_queue(base, modern, 1)?;
+        G_CON.rx_buf = pmm::alloc_zero()? as *mut u8;
+        G_CON.tx_buf = pmm::alloc_zero()? as *mut u8;
+        *G_CON.rx_desc = VqDesc { addr: G_CON.rx_buf as u64, len: BUF_SIZE as u32, flags: VQ_DESC_F_WRITE, next: 0 };
+        push(0, true);
+        let features = if modern { VIRTIO_S_FEATURES_OK } else { 0 };
+        reg_w(base, R_STATUS, VIRTIO_S_ACK | VIRTIO_S_DRIVER | features | VIRTIO_S_DRIVER_OK);
+        G_CON.base = base; // Publish only after all rings and buffers exist.
+        reg_w(base, crate::drivers::virtio::R_QUEUE_NOTIFY, 0);
         Ok(())
     }
 }
 
-/// # Safety
-///
-/// Must be called from `init` with G_CON.base set to a probed base;
-/// `qidx` selects the RX (0) or TX (1) queue.
-unsafe fn setup_queue(qidx: u32, is_rx: bool) -> KResult<()> {
-    // SAFETY: called from init on a probed base during single-threaded boot; rings and RX buffer are fresh contiguous PMM pages stored into G_CON and registered with the device before use; RX descriptor posted at slot 0.
+unsafe fn setup_queue(base: usize, modern: bool, index: u32) -> KResult<()> {
     unsafe {
-        let base = G_CON.base;
-        reg_w(base, R_QUEUE_SEL, qidx);
-        reg_w(base, R_QUEUE_NUM, VIRTQ_SIZE as u32);
-        let desc_pa = pmm::alloc_zero()? as usize;
-        let avail_pa = pmm::alloc_zero()? as usize;
-        let used_pa = pmm::alloc_zero()? as usize;
-        let buf_pa = pmm::alloc_zero()? as *mut u8;
-        let desc = desc_pa as *mut VqDesc;
-        let avail = avail_pa as *mut VqAvail;
-        let used = used_pa as *mut VqUsed;
-        reg_w(base, R_QUEUE_DESC_LOW, desc_pa as u32);
-        reg_w(base, R_QUEUE_DESC_HIGH, ((desc_pa as u64) >> 32) as u32);
-        reg_w(base, R_QUEUE_AVAIL_LOW, avail_pa as u32);
-        reg_w(base, R_QUEUE_AVAIL_HIGH, ((avail_pa as u64) >> 32) as u32);
-        reg_w(base, R_QUEUE_USED_LOW, used_pa as u32);
-        reg_w(base, R_QUEUE_USED_HIGH, ((used_pa as u64) >> 32) as u32);
-        reg_w(base, R_QUEUE_READY, 1);
-        if is_rx {
-            G_CON.rx_desc = desc;
-            G_CON.rx_avail = avail;
-            G_CON.rx_used = used;
-            G_CON.rx_buf = buf_pa;
-            // Pre-post a single RX descriptor.
-            (*desc.add(0)) = VqDesc {
-                addr: buf_pa as u64,
-                len: BUF_SIZE as u32,
-                flags: VQ_DESC_F_WRITE,
-                next: 0,
-            };
-            push(0, true);
+        reg_w(base, R_QUEUE_SEL, index);
+        if reg_r(base, R_QUEUE_NUM_MAX) < QUEUE_SIZE as u32 { return Err(Errno::Inval); }
+        reg_w(base, R_QUEUE_NUM, QUEUE_SIZE as u32);
+        let (desc, avail, used) = if modern {
+            let d = pmm::alloc_zero()? as usize;
+            let a = pmm::alloc_zero()? as usize;
+            let u = pmm::alloc_zero()? as usize;
+            reg_w(base, R_QUEUE_DESC_LOW, d as u32); reg_w(base, R_QUEUE_DESC_HIGH, (d as u64 >> 32) as u32);
+            reg_w(base, R_QUEUE_AVAIL_LOW, a as u32); reg_w(base, R_QUEUE_AVAIL_HIGH, (a as u64 >> 32) as u32);
+            reg_w(base, R_QUEUE_USED_LOW, u as u32); reg_w(base, R_QUEUE_USED_HIGH, (u as u64 >> 32) as u32);
+            reg_w(base, R_QUEUE_READY, 1);
+            (d, a, u)
         } else {
-            G_CON.tx_desc = desc;
-            G_CON.tx_avail = avail;
-            G_CON.tx_used = used;
-        }
-        Ok(())
-    }
-}
-
-/// # Safety
-///
-/// The avail ring of the selected queue must have been initialized by
-/// `init` (non-null); `idx` must be a valid descriptor index for it.
-pub(crate) unsafe fn push(idx: usize, is_rx: bool) {
-    // SAFETY: G_CON.{rx,tx}_avail are PMM rings set up by init; ring slot masked % VIRTQ_SIZE per spec; volatile write + SeqCst fence order entry before idx bump.
-    unsafe {
-        let avail = if is_rx {
-            G_CON.rx_avail
-        } else {
-            G_CON.tx_avail
+            let d = pmm::alloc_n(3)? as usize;
+            reg_w(base, R_GUEST_PAGE_SIZE, 4096); reg_w(base, R_QUEUE_ALIGN, 4096);
+            reg_w(base, R_QUEUE_PFN, (d / 4096) as u32);
+            (d, d + QUEUE_SIZE * core::mem::size_of::<VqDesc>(), d + 4096)
         };
-        let i = ptr::read_volatile(ptr::addr_of!((*avail).idx));
-        ptr::write_volatile(
-            ptr::addr_of_mut!((*avail).ring[(i as usize) % VIRTQ_SIZE]),
-            idx as u16,
-        );
+        if index == 0 {
+            G_CON.rx_desc = desc as *mut VqDesc; G_CON.rx_avail = avail as *mut VqAvail; G_CON.rx_used = used as *mut VqUsed;
+        } else {
+            G_CON.tx_desc = desc as *mut VqDesc; G_CON.tx_avail = avail as *mut VqAvail; G_CON.tx_used = used as *mut VqUsed;
+        }
+        Ok(())
+    }
+}
+
+pub fn present() -> bool { unsafe { G_CON.base != 0 } }
+
+/// Caller owns LOCK (or is the boot-time initializer).
+pub(crate) unsafe fn push(index: usize, receive: bool) {
+    unsafe {
+        let avail = if receive { G_CON.rx_avail } else { G_CON.tx_avail };
+        let next = ptr::read_volatile(ptr::addr_of!((*avail).idx));
+        ptr::write_volatile(ptr::addr_of_mut!((*avail).ring[next as usize % QUEUE_SIZE]), index as u16);
         core::sync::atomic::fence(core::sync::atomic::Ordering::SeqCst);
-        ptr::write_volatile(ptr::addr_of_mut!((*avail).idx), i.wrapping_add(1));
+        ptr::write_volatile(ptr::addr_of_mut!((*avail).idx), next.wrapping_add(1));
     }
 }
 
 pub mod xfer;
-pub use xfer::{getc, putc, puts};
+pub use xfer::{getc, putc, puts, read, write};
