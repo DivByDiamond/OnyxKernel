@@ -40,3 +40,6 @@ pub fn write_unicode_str(s: &str) {
         w.puts_unicode(s);
     }
 }
+
+mod geometry;
+pub use geometry::{console_geometry, set_serial_mirror};
