@@ -6,6 +6,7 @@ mod auth;
 use onyx_init::{syscalls, term};
 
 mod backoff;
+mod password;
 mod proc;
 mod seed;
 
@@ -101,14 +102,24 @@ pub unsafe extern "C" fn _start() -> ! {
                 }
             };
 
-            syscalls::write(1, b"password: ".as_ptr(), b"password: ".len());
+            // A seeded appliance account has a HASH of an empty password.
+            // Verify it first: never infer passwordlessness from an empty,
+            // missing, malformed or locked shadow field (those fail closed).
+            let empty_outcome = auth::verify_shadow_outcome(username, b"");
             let mut pass_buf = [0u8; 64];
-            // read_secret_line loops until Enter (a single raw read() returns
-            // after ANY keypress — the 2026-09-04 lockout bug) and restores
-            // cooked mode itself, including the terminating newline echo.
-            let password = term::read_secret_line(&mut pass_buf);
-
-            let outcome = auth::verify_shadow_outcome(username, password);
+            let password = password::read_if_required(
+                empty_outcome != auth::VerifyOutcome::Fail,
+                &mut pass_buf,
+                |buffer| {
+                    syscalls::write(1, b"password: ".as_ptr(), b"password: ".len());
+                    term::read_secret_line(buffer)
+                },
+            );
+            let outcome = if password.is_empty() {
+                empty_outcome
+            } else {
+                auth::verify_shadow_outcome(username, password)
+            };
             if outcome == auth::VerifyOutcome::Fail {
                 syscalls::write(
                     1,
