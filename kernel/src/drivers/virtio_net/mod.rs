@@ -32,7 +32,7 @@ pub(crate) struct NetDev {
     pub mac: [u8; 6],
 }
 
-pub(crate) static mut G_NET: NetDev = NetDev {
+pub(crate) const EMPTY_NET: NetDev = NetDev {
     base: 0,
     modern: false,
     rx_desc: ptr::null_mut(),
@@ -46,6 +46,47 @@ pub(crate) static mut G_NET: NetDev = NetDev {
     _tx_last_used: 0,
     mac: [0; 6],
 };
+
+// Boot discovers several cards; one explicitly selected interface drives the
+// current single-address stack. Selection saves ring cursors before switching.
+pub(crate) static mut G_NET: NetDev = EMPTY_NET;
+pub(crate) const MAX_NET_DEVICES: usize = 8;
+pub(crate) static mut DEVICES: [NetDev; MAX_NET_DEVICES] = [EMPTY_NET; MAX_NET_DEVICES];
+pub(crate) static mut DEVICE_COUNT: usize = 0;
+static mut ACTIVE_DEVICE: usize = 0;
+
+pub fn device_count() -> usize {
+    // SAFETY: populated only during single-hart boot, then immutable.
+    unsafe { DEVICE_COUNT }
+}
+
+pub fn active_device() -> usize {
+    // SAFETY: runtime users hold net_lock; boot is single-hart.
+    unsafe { ACTIVE_DEVICE }
+}
+
+/// # Safety
+/// Caller holds net_lock; no TX/RX operation can run during a switch.
+pub unsafe fn select_device(index: usize) -> onyx_core::errno::KResult<()> {
+    // SAFETY: bounds checked before copying initialized driver/ring state.
+    unsafe {
+        if index >= DEVICE_COUNT {
+            return Err(onyx_core::errno::Errno::Inval);
+        }
+        DEVICES[ACTIVE_DEVICE] = G_NET;
+        G_NET = DEVICES[index];
+        ACTIVE_DEVICE = index;
+        Ok(())
+    }
+}
+
+pub fn device_mac(index: usize) -> onyx_core::errno::KResult<[u8; 6]> {
+    // SAFETY: caller holds net_lock; MACs are boot-initialized and immutable.
+    unsafe {
+        if index >= DEVICE_COUNT { return Err(onyx_core::errno::Errno::Inval); }
+        Ok(DEVICES[index].mac)
+    }
+}
 
 /// True once a virtio-net device has been fully initialized (queues up).
 pub fn present() -> bool {

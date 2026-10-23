@@ -31,12 +31,15 @@ unsafe fn tcp_connect_inner(dst_ip: [u8; 4], port: u16) -> KResult<usize> {
         let sport = alloc_local_port();
         let isn = (sport as u32).wrapping_add(1);
         CONNS[cid] = Some(TcpConn {
+            owner_pid:0,
+            iface: crate::net::config::route(dst_ip).ok_or(Errno::Io)?,
+            listener:usize::MAX,last_tx_us:super::conn::now_us(),retries:0,peer_window:2048,
             state: 1,
             src_port: sport,
             dst_ip,
             dst_port: port,
             snd_una: isn,
-            snd_nxt: isn,
+            snd_nxt: isn.wrapping_add(1),
             rcv_nxt: 0,
             send_buf: [0; BUF_SIZE],
             send_len: 0,
@@ -46,10 +49,13 @@ unsafe fn tcp_connect_inner(dst_ip: [u8; 4], port: u16) -> KResult<usize> {
             peer_fin: false,
             tw_deadline_us: 0,
         });
-        if let Some(ref conn) = CONNS[cid] {
-            send_tcp_seg(conn, super::state::SYN, &[]);
-        }
-        for _ in 0..50000 {
+        if let Some(mut conn) = CONNS[cid] { conn.snd_nxt=isn; send_tcp_seg(&conn, super::state::SYN, &[]); }
+        for attempt in 0..50000 {
+            if attempt > 0 && attempt % 10000 == 0
+                && let Some(mut conn)=CONNS[cid]
+            {
+                conn.snd_nxt=isn; send_tcp_seg(&conn,super::state::SYN,&[]);
+            }
             poll();
             if let Some(ref c) = CONNS[cid]
                 && c.state == 2
@@ -81,16 +87,20 @@ pub unsafe fn tcp_send(cid: usize, data: &[u8]) -> KResult<usize> {
 unsafe fn tcp_send_inner(cid: usize, data: &[u8]) -> KResult<usize> {
     // SAFETY: conn checked non-empty; copy bounds-checked against BUF_SIZE - send_len; net_lock() held by caller.
     unsafe {
-        let conn = CONNS[cid].as_mut().ok_or(Errno::Inval)?;
-        if conn.state != 2 {
+        let mut conn = CONNS.get(cid).and_then(|slot| *slot).ok_or(Errno::Inval)?;
+        if conn.state != 2 && conn.state != 7 {
             return Err(Errno::Io);
         }
         // Send space is freed as ACKs advance snd_una (drain_acked); send_len counts unacked bytes.
-        let n = data.len().min(BUF_SIZE - conn.send_len);
+        let available=usize::from(conn.peer_window).saturating_sub(conn.send_len);
+        let n = data.len().min(BUF_SIZE - conn.send_len).min(536).min(available);
         conn.send_buf[conn.send_len..conn.send_len + n].copy_from_slice(&data[..n]);
+        if n>0 && conn.send_len==0 { conn.last_tx_us=super::conn::now_us(); conn.retries=0; }
         conn.send_len += n;
-        send_tcp_seg(conn, 0x18, &data[..n]);
+        let sent = conn;
         conn.snd_nxt = conn.snd_nxt.wrapping_add(n as u32);
+        CONNS[cid] = Some(conn);
+        if n > 0 { send_tcp_seg(&sent, 0x18, &data[..n]); }
         Ok(n)
     }
 }
@@ -114,39 +124,46 @@ pub unsafe fn tcp_recv(cid: usize, buf: &mut [u8]) -> KResult<usize> {
 unsafe fn tcp_recv_inner(cid: usize, buf: &mut [u8]) -> KResult<usize> {
     // SAFETY: conn checked non-empty; ring reads masked % BUF_SIZE; net_lock() held by caller.
     unsafe {
-        let conn = CONNS[cid].as_mut().ok_or(Errno::Inval)?;
-        if conn.recv_len == 0 {
-            // Peer sent FIN and the receive ring is drained: clean EOF.
-            // Report Ok(0) so callers can distinguish "peer done" from
-            // "no data yet" (Err(NoEnt)) — HTTP responses without
-            // Content-Length rely on this signal.
-            if conn.peer_fin {
-                return Ok(0);
-            }
-            return Err(Errno::NoEnt);
-        }
-        let n = buf.len().min(conn.recv_len);
-        for (i, dst) in buf[..n].iter_mut().enumerate() {
-            *dst = conn.recv_buf[(conn.recv_head + i) % BUF_SIZE];
-        }
-        conn.recv_head = (conn.recv_head + n) % BUF_SIZE;
-        conn.recv_len -= n;
+        let mut conn = CONNS.get(cid).and_then(|slot| *slot).ok_or(Errno::Inval)?;
+        let (n, notify) = read_received(&mut conn, buf)?;
+        CONNS[cid] = Some(conn);
+        // Publish consumed bytes before reentrant TX/ARP polling, with no
+        // mutable table borrow alive. Reopen the advertised receive window.
+        if notify { send_tcp_seg(&conn, super::state::ACK, &[]); }
         Ok(n)
     }
 }
 
+pub(super) fn read_received(conn: &mut TcpConn, buf: &mut [u8]) -> KResult<(usize, bool)> {
+    if conn.state == 6 { return Err(Errno::Io); }
+    if conn.recv_len == 0 {
+        return if conn.peer_fin { Ok((0,false)) } else { Err(Errno::NoEnt) };
+    }
+    let n = buf.len().min(conn.recv_len);
+    for (i,dst) in buf[..n].iter_mut().enumerate() {
+        *dst = conn.recv_buf[(conn.recv_head+i)%BUF_SIZE];
+    }
+    conn.recv_head = (conn.recv_head+n)%BUF_SIZE;
+    conn.recv_len -= n;
+    Ok((n,n>0 && !conn.peer_fin))
+}
+
 /// # Safety: indexes CONNS[cid] under net_lock() (net sync fix, todo P1 #4).
 pub unsafe fn tcp_close(cid: usize) {
-    // SAFETY: FIN send reads a copy of the conn; slot cleared exactly once; slot access under net_lock().
+    // SAFETY: bounded socket table under net_lock; copied before reentrant TX.
     unsafe {
+        if cid>=super::conn::MAX_CONNS{return;}
         net_lock();
-        if let Some(conn) = CONNS[cid].as_ref()
-            && conn.state == 2
-        {
-            let c = *conn;
-            send_tcp_seg(&c, super::state::FIN | super::state::ACK, &[]);
+        if let Some(mut connection)=CONNS[cid] {
+            if connection.state==2 || connection.state==7 {
+                let sent=connection;
+                connection.recv_len=0; // The application explicitly discarded unread data.
+                connection.state=3;connection.snd_nxt=connection.snd_nxt.wrapping_add(1);
+                connection.last_tx_us=super::conn::now_us();connection.retries=0;
+                CONNS[cid]=Some(connection);
+                send_tcp_seg(&sent,super::state::FIN|super::state::ACK,&[]);
+            }else{CONNS[cid]=None;}
         }
-        CONNS[cid] = None;
         net_unlock();
     }
 }

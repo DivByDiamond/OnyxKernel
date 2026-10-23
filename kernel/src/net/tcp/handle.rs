@@ -9,17 +9,6 @@ use super::state::{ACK, FIN, SEG_ACK, SEG_FIN_ACK, tcp_transition};
 /// Total inbound segments dropped for a bad checksum (logged once).
 static BAD_CKSUM: AtomicU32 = AtomicU32::new(0);
 
-fn process_segment(c: &mut super::conn::TcpConn, seq: u32, ack: u32, flags: u8, payload: &[u8]) {
-    let out = tcp_transition(c, seq, ack, flags, payload, now_us());
-    for cmd in out {
-        match cmd {
-            SEG_ACK => send_tcp_seg(c, ACK, &[]),
-            SEG_FIN_ACK => send_tcp_seg(c, FIN | ACK, &[]),
-            _ => {}
-        }
-    }
-}
-
 /// # Safety: RX path — mutates CONNS and sends under net_lock() (recursive
 /// when re-entered from poll inside send_packet; net sync fix, todo P1 #4).
 pub unsafe fn handle_tcp(frame: &[u8], ip_start: usize, ihl: usize, total_len: usize) {
@@ -82,7 +71,7 @@ unsafe fn handle_tcp_inner(frame: &[u8], ip_start: usize, ihl: usize, total_len:
         ]);
         let flags = frame[tcp_off + 13];
         let data_off = ((frame[tcp_off + 12] >> 4) as usize) * 4;
-        if data_off < TCP_HLEN {
+        if data_off < TCP_HLEN || tcp_off + data_off > seg_end {
             return;
         }
         let payload_start = tcp_off + data_off;
@@ -97,13 +86,31 @@ unsafe fn handle_tcp_inner(frame: &[u8], ip_start: usize, ihl: usize, total_len:
             return;
         }
         let payload = &frame[payload_start..payload_start + payload_len];
-        for c in CONNS.iter_mut().flatten() {
-            // Full 4-tuple match (local port AND remote IP:port) blocks off-path injection.
-            if c.src_port != dport || c.dst_port != sport || c.dst_ip != sip {
-                continue;
+        let iface = crate::drivers::virtio_net::active_device();
+        if let Some(cid) = CONNS.iter().position(|slot| slot.as_ref().is_some_and(|c|
+            c.iface == iface && c.src_port == dport && c.dst_port == sport && c.dst_ip == sip)) {
+            // Do not retain a mutable socket-table borrow across TX's nested poll.
+            if let Some(mut connection) = CONNS[cid] {
+                let before=connection.state;
+                if flags & 0x04 != 0 {connection.state=6;connection.tw_deadline_us=now_us()+5_000_000;CONNS[cid]=Some(connection);return;}
+                connection.peer_window=u16::from_be_bytes([frame[tcp_off+14],frame[tcp_off+15]]);
+                let commands = tcp_transition(&mut connection, seq, ack, flags, payload, now_us());
+                CONNS[cid] = Some(connection);
+                if before==5 && (connection.state==2 || connection.state==7) { super::listen::established(cid,connection.listener); }
+                if before==5 && flags & super::state::SYN != 0 && seq.wrapping_add(1)==connection.rcv_nxt {
+                    let mut resend=connection;resend.snd_nxt=resend.snd_una;
+                    send_tcp_seg(&resend,super::state::SYN|ACK,&[]);
+                }
+                for command in commands {
+                    match command {
+                        SEG_ACK => send_tcp_seg(&connection, ACK, &[]),
+                        SEG_FIN_ACK => send_tcp_seg(&connection, FIN | ACK, &[]),
+                        _ => {},
+                    }
+                }
             }
-            process_segment(c, seq, ack, flags, payload);
-            break;
+        } else if flags & (super::state::SYN|ACK) == super::state::SYN {
+            super::listen::incoming_syn(dport,sip,sport,seq,u16::from_be_bytes([frame[tcp_off+14],frame[tcp_off+15]]));
         }
     }
 }

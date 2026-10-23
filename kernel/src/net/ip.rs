@@ -42,17 +42,26 @@ pub unsafe fn send_packet(dst_ip: [u8; 4], protocol: u8, payload: &[u8]) -> KRes
 unsafe fn send_packet_inner(dst_ip: [u8; 4], protocol: u8, payload: &[u8]) -> KResult<()> {
     // SAFETY: header vector sized IP_HLEN + payload.len(); IP_ID RMW and ARP cache accessed under the caller's net_lock().
     unsafe {
-        let dst_mac = if dst_ip == [255, 255, 255, 255] {
+        if payload.len() > 1480 { return Err(Errno::Range); }
+        let mask = u32::from_be_bytes(crate::net::G_MASK);
+        let local = u32::from_be_bytes(G_IP);
+        let destination = u32::from_be_bytes(dst_ip);
+        let broadcast = dst_ip == [255;4] || (mask != 0 && destination == (local | !mask));
+        let next_hop = if !broadcast && (destination & mask) != (local & mask) {
+            if crate::net::G_GW == [0;4] { return Err(Errno::Io); }
+            crate::net::G_GW
+        } else { dst_ip };
+        let dst_mac = if broadcast {
             [0xFF; 6]
         } else {
-            match eth::arp_lookup(dst_ip) {
+            match eth::arp_lookup(next_hop) {
                 Some(m) => m,
                 None => {
-                    eth::arp_request(dst_ip);
+                    eth::arp_request(next_hop);
                     let mut found = None;
                     for _ in 0..1000 {
                         crate::net::poll();
-                        if let Some(m) = eth::arp_lookup(dst_ip) {
+                        if let Some(m) = eth::arp_lookup(next_hop) {
                             found = Some(m);
                             break;
                         }
@@ -97,65 +106,23 @@ unsafe fn send_packet_inner(dst_ip: [u8; 4], protocol: u8, payload: &[u8]) -> KR
 /// RX dispatcher: requires the net single-poller contract; protocol
 /// dispatches to sub-handlers that validate their own offsets.
 pub unsafe fn handle_ip(frame: &[u8]) {
-    if frame.len() < eth::ETH_HLEN + IP_HLEN {
-        return;
-    }
-    let ip_start = eth::ETH_HLEN;
-    let ihl = (frame[ip_start] & 0x0F) as usize * 4;
-    let total_len = u16::from_be_bytes([frame[ip_start + 2], frame[ip_start + 3]]) as usize;
-    let protocol = frame[ip_start + 9];
-    match protocol {
-        // SAFETY: callee re-validates offsets against frame.len(); RX single-poller contract.
-        IP_PROTO_ICMP => unsafe { handle_icmp(frame, ip_start, ihl, total_len) },
-        // SAFETY: callee re-validates offsets against frame.len(); RX single-poller contract.
-        IP_PROTO_TCP => unsafe { crate::net::tcp::handle_tcp(frame, ip_start, ihl, total_len) },
-        // SAFETY: callee re-validates offsets against frame.len(); RX single-poller contract.
-        IP_PROTO_UDP => unsafe { crate::net::udp::handle_udp(frame, ip_start) },
-        _ => {}
-    }
-}
-
-/// # Safety
-///
-/// RX path: reads the frame with explicit bounds checks and replies via
-/// send_frame; net single-poller contract applies to the statics.
-unsafe fn handle_icmp(frame: &[u8], ip_start: usize, _ihl: usize, _total_len: usize) {
-    // SAFETY: icmp_start offset checked against frame.len() before indexing; reply buffers sized from checked lengths.
+    let Some(packet) = super::ipv4::parse(frame) else { return; };
+    // SAFETY: context selected under net_lock; validated sizes bound every slice.
     unsafe {
-        let icmp_start = ip_start + IP_HLEN;
-        if frame.len() < icmp_start + 8 {
-            return;
+        let mask = u32::from_be_bytes(crate::net::G_MASK);
+        let broadcast = packet.destination == [255;4] || (mask != 0 && u32::from_be_bytes(packet.destination) == (u32::from_be_bytes(G_IP) | !mask));
+        if packet.destination != G_IP && !broadcast { return; }
+        let frame = &frame[..eth::ETH_HLEN + packet.total_len];
+        match packet.protocol {
+            IP_PROTO_ICMP if !broadcast => {
+                let payload = &frame[eth::ETH_HLEN + packet.header_len..];
+                if let Some(reply) = super::ipv4::echo_reply(payload) {
+                    let _ = send_packet(packet.source, IP_PROTO_ICMP, &reply);
+                }
+            },
+            IP_PROTO_TCP if !broadcast => crate::net::tcp::handle_tcp(frame, eth::ETH_HLEN, packet.header_len, packet.total_len),
+            IP_PROTO_UDP => crate::net::udp::handle_udp(frame, eth::ETH_HLEN),
+            _ => {},
         }
-        if frame[icmp_start] != 8 {
-            return;
-        }
-        let mut reply = alloc::vec![0u8; frame.len() - ip_start];
-        reply[0] = 0;
-        reply[1] = 0;
-        reply[2..4].copy_from_slice(&[0, 0]);
-        if reply.len() > 4 {
-            reply[4..].copy_from_slice(&frame[icmp_start + 4..]);
-        }
-        let ck = checksum(&reply);
-        reply[2..4].copy_from_slice(&ck.to_be_bytes());
-        let mut ip_pkt = alloc::vec![0u8; IP_HLEN + reply.len()];
-        ip_pkt[0] = 0x45;
-        let total = IP_HLEN + reply.len();
-        ip_pkt[2..4].copy_from_slice(&(total as u16).to_be_bytes());
-        ip_pkt[8] = 64;
-        ip_pkt[9] = IP_PROTO_ICMP;
-        let src: [u8; 4] = [
-            frame[ip_start + 16],
-            frame[ip_start + 17],
-            frame[ip_start + 18],
-            frame[ip_start + 19],
-        ];
-        ip_pkt[12..16].copy_from_slice(&src);
-        ip_pkt[16..20].copy_from_slice(&G_IP);
-        let ck = checksum(&ip_pkt[..IP_HLEN]);
-        ip_pkt[10..12].copy_from_slice(&ck.to_be_bytes());
-        ip_pkt[20..].copy_from_slice(&reply);
-        let src_mac = [frame[6], frame[7], frame[8], frame[9], frame[10], frame[11]];
-        eth::send_frame(src_mac, eth::ET_IP, &ip_pkt);
     }
 }

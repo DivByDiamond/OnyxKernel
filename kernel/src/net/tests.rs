@@ -4,6 +4,7 @@ use super::tcp::conn::tcp_checksum_ok;
 
 #[test]
 fn test_tcp_checksum_verify_roundtrip() {
+    let _serial = crate::net::lock::test_serial();
     let src = [10, 0, 0, 2];
     let dst = [10, 0, 0, 5];
     // Minimal TCP header with a correct checksum field.
@@ -16,6 +17,7 @@ fn test_tcp_checksum_verify_roundtrip() {
 
 #[test]
 fn test_tcp_checksum_verify_rejects_corruption() {
+    let _serial = crate::net::lock::test_serial();
     let src = [10, 0, 0, 2];
     let dst = [10, 0, 0, 5];
     let mut seg = [0u8; 25]; // odd length exercises the pad path
@@ -35,6 +37,7 @@ fn test_tcp_checksum_verify_rejects_corruption() {
 
 #[test]
 fn test_checksum_all_zeros() {
+    let _serial = crate::net::lock::test_serial();
     assert_eq!(checksum(&[]), 0xFFFF);
     assert_eq!(checksum(&[0, 0]), 0xFFFF);
     assert_eq!(checksum(&[0, 0, 0, 0]), 0xFFFF);
@@ -42,6 +45,7 @@ fn test_checksum_all_zeros() {
 
 #[test]
 fn test_checksum_single_word() {
+    let _serial = crate::net::lock::test_serial();
     assert_eq!(checksum(&[0x00, 0x01]), 0xFFFE);
     assert_eq!(checksum(&[0xFF, 0xFF]), 0x0000);
     assert_eq!(checksum(&[0x12, 0x34]), 0xEDCB);
@@ -49,12 +53,14 @@ fn test_checksum_single_word() {
 
 #[test]
 fn test_checksum_with_carry() {
+    let _serial = crate::net::lock::test_serial();
     assert_eq!(checksum(&[0xFF, 0xFF, 0x00, 0x01]), 0xFFFE);
     assert_eq!(checksum(&[0xFF, 0xFF, 0xFF, 0xFF]), 0x0000);
 }
 
 #[test]
 fn test_checksum_odd_length() {
+    let _serial = crate::net::lock::test_serial();
     assert_eq!(checksum(&[0x01]), 0xFEFF);
     assert_eq!(checksum(&[0x00]), 0xFFFF);
     // words: 0x0102 + 0x0300 (odd byte in high position) = 0x0402 -> ~0x0402
@@ -63,6 +69,7 @@ fn test_checksum_odd_length() {
 
 #[test]
 fn test_checksum_known_ip_header() {
+    let _serial = crate::net::lock::test_serial();
     let hdr: [u8; 20] = [
         0x45, 0x00, 0x00, 0x54, 0x00, 0x00, 0x40, 0x00, 0x40, 0x01, 0x00, 0x00, 0xC0, 0xA8, 0x01,
         0x01, 0xC0, 0xA8, 0x01, 0x02,
@@ -72,6 +79,7 @@ fn test_checksum_known_ip_header() {
 
 #[test]
 fn test_arp_cache_insert_lookup() {
+    let _serial = crate::net::lock::test_serial();
     // SAFETY: test-only access to the global ARP cache; IPs are disjoint from other tests
     // (see note in test_arp_cache_insert_many), though the shared LEN counter is unsynchronized.
     unsafe {
@@ -98,6 +106,7 @@ fn test_arp_cache_insert_lookup() {
 
 #[test]
 fn test_arp_cache_insert_many() {
+    let _serial = crate::net::lock::test_serial();
     // SAFETY: test-only access to the global ARP cache; disjoint IPs per the NOTE below,
     // but ARP_CACHE_LEN is a shared unsynchronized RMW across parallel tests (known race).
     unsafe {
@@ -130,6 +139,7 @@ fn test_arp_cache_insert_many() {
 /// interfere.
 #[test]
 fn test_net_tables_concurrent_exclusivity() {
+    let _serial = crate::net::lock::test_serial();
     use crate::net::lock::{net_lock, net_unlock};
     use crate::net::tcp::conn::{CONNS, alloc_conn, alloc_local_port};
     use crate::net::udp::{udp_bind, udp_close, udp_recv};
@@ -180,6 +190,8 @@ fn test_net_tables_concurrent_exclusivity() {
             match alloc_conn() {
                 Some(cid) => {
                     CONNS[cid] = Some(crate::net::tcp::conn::TcpConn {
+                        owner_pid:0,
+            iface: 0, listener: usize::MAX, last_tx_us: 0, retries: 0, peer_window: 2048,
                         state: 2,
                         src_port: 5100 + cids_used as u16,
                         dst_ip: [10, 9, 9, 1],
