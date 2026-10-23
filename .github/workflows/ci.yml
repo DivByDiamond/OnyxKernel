@@ -23,6 +23,8 @@ jobs:
 
       - name: Check Rust formatting
         run: |
+          python3 scripts/generate-syscalls.py --check
+          python3 scripts/test-generate-syscalls.py
           cargo fmt --check -p onyx_core -p onyx_init -p onyx_tools
           rustfmt --check --edition 2024 \
             kernel/src/drivers/video/fb/devices.rs \

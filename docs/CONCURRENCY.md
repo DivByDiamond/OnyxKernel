@@ -119,3 +119,20 @@ struct-блок, безымянный узел, отвергнутые заго�
   (`libfdt/tests.rs`).
 - QEMU SMP: `bash scripts/test_concurrency.sh` (2 и 4 харта: boot → login →
   fork-стресс фоновыми задачами → procfs-чтения → 0 паников).
+
+## Current-process metadata and exec ownership
+
+`proc::current_opt()` returns an owned `CurrentProcessSnapshot`, never a
+`Proc` reference. Local interrupts and compiler barriers bracket raw field
+copies. Only fields owned by the current hart are included; `parent_pid`
+is excluded because orphan reparenting can update it from another hart.
+Do not treat a saved `root_pa` number as ownership of an address space.
+The legacy unsafe `current()` accessor requires an exclusive, short borrow;
+never retain it across another accessor call or a context switch.
+
+`exec` and `execve` share one replacement path. `PreparedExec` owns the new
+root until permission checks, refcount allocation and stack setup finish.
+An abandoned preparation destroys the root and frees its private refcount.
+Only then does commit close CLOEXEC descriptors and install the new image;
+there are no fallible allocations after that point. Fork increments and
+exec/exit decrements of shared root refcounts use atomic operations.

@@ -3,8 +3,8 @@ mod globals;
 mod types;
 
 pub use current::{
-    by_pid, by_pid_unlocked, current, current_opt, current_pid, current_ring, cwd, dump_all,
-    set_cwd,
+    CurrentProcessSnapshot, by_pid, by_pid_unlocked, current, current_opt, current_pid,
+    current_ring, cwd, dump_all, set_cwd,
 };
 pub use globals::{
     G_ALL_PROCS, G_HART_IDLE_TF, G_HART_IDLE_TF_VALID, G_NEED_RESCHED, G_PROC_LIST_LOCK, MAX_HARTS,

@@ -56,7 +56,7 @@ OnyxKernel — 64-битное RISC-V ядро ОС (~98% Rust, ассембле
 - **Парсер FDT** — обнаружение устройств через дерево устройств (память, PLIC, устройства)
 - **Пер-процессная таблица FD** — 16 слотов на процесс с capability-токенами
 - **Юзерленд** — `/bin/login`, `/bin/osh` (shell), `/bin/passwd`, `/bin/useradd`, `/bin/userdel`
-- **Аутентификация** — `/etc/passwd` + `/etc/shadow`; интерактивная установка пароля root при первой загрузке
+- **Аутентификация** — `/etc/passwd` + `/etc/shadow`; при первой загрузке создаётся root с хэшем пустого пароля (смените его через `passwd`)
 - **Файловая система /proc** — `version`, `cpuinfo`, `meminfo`, `uptime`, `load`, `stat`, `modules`
 
 ----
@@ -72,7 +72,8 @@ OnyxKernel — 64-битное RISC-V ядро ОС (~98% Rust, ассембле
 | 2 | User Space | U-mode | Ограниченный ACL syscall; нет доступа к `/service/*` |
 
 - `dropring(target)` — однонаправленное понижение привилегий: 0→1, 0→2, 1→2. Повышение привилегий невозможно.
-- `/bin/login` понижает привилегии с ring 1 до ring 2, затем выполняет `exec` `/bin/osh`.
+- `/bin/login` проверяет passwd/shadow: root сохраняет ring 1, остальные переходят в ring 2 перед `execve`. Оба кольца работают в аппаратном U-mode.
+- Стандартный `/bin/osh` имеет флаг RING1, поэтому запуск из ring 2 отклоняется. Login пока не устанавливает uid/gid из passwd; непривилегированная сессия требует доработки.
 
 ### Раскладка памяти (Sv39)
 
@@ -221,8 +222,7 @@ jumping to kernel
 
 OnyxOS Login
 login: root
-password: 
-[login] dropping to ring 2
+Login OK (root, ring 1)
 osh> _
 ```
 

@@ -34,7 +34,7 @@ pub unsafe fn run(tf: &mut TrapFrame, scause: u64, interrupted_user: bool) {
         {
             let cur = proc::current_opt();
             if let Some(p) = cur {
-                let canary = core::ptr::read_volatile(p.kstack.as_ptr() as *const u64);
+                let canary = p.stack_canary;
                 static OVFL_LOGGED: core::sync::atomic::AtomicU32 =
                     core::sync::atomic::AtomicU32::new(0);
                 if canary != crate::proc::KSTACK_CANARY
