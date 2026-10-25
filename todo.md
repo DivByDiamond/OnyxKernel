@@ -8,9 +8,7 @@
 
 ## 1. P0 — блокеры
 
-| ID | Проблема | Детали | Критерий закрытия |
-|----|----------|--------|-------------------|
-| OC2R-1 | Guest fault после save/reopen мира при расширенном RGB | Трассировка OC2R подтвердила worker после последнего CPU save при живой mmap RAM. В Fabric unload очищает отложенный dirty-флаг до финальной записи; исправление shutdown/final-save проверяется в OC2R. Это не подтверждённый дефект RGB или ядра. Отчёт: `build/reports/onyx-live-acceptance/trap-diagnosis/`. | Повторные reload с точным сравнением финальной CPU/RAM-пары проходят на обеих версиях |
+Активных P0 нет. Проверенные OC2R-1/2 перенесены в §5.
 
 ## 2. P1 — ближайшие задачи
 
@@ -84,7 +82,14 @@ write/create/unlink/truncate через VFS + LFN + FSINFO (`5e92115`), совм
   прошли на обеих версиях Fabric (монитор 320×200×16, проектор 640×480×16).
 - ✅ OnyxFS snapshot/rollback на минимальном root (create/list/rollback,
   байты файла восстановлены после изменения).
-- ⚠️ Расширенный RGB → save/reopen мира: guest fault (см. OC2R-1).
+- ✅ OC2R-1 закрыт в OC2R `58a3e8be` ([PR #60](https://github.com/DivByDiamond/OC2R/pull/60), CI ещё идёт):
+  shutdown ждёт worker и немедленно помечает чанк для финального CPU save до
+  Fabric unload. На исходном ядре 66148d… + Sedna 5.2 проходят по три
+  последовательных reload на Fabric 26.1.2 и 26.2; CPU-регистры/CSR и четыре
+  RAM-модуля побайтно совпали frozen → final save → restore. Новые ответы
+  shell, RAM-переменная, private-root файл и RGB565 проходят во всех 6 циклах.
+  Это исправление чистого shutdown, не гарантия атомарности при crash/autosave
+  или обычной выгрузке чанка. Отчёт OC2R: `build/reports/onyx-live-acceptance/trap-diagnosis/postfix-final/README.md`.
 - ✅ OC2R-2 закрыт (`54c4f34`): полный root содержит 965 data + 12 metadata
   блоков (старый подсчёт 197 пропускал indirect allocations). Packed DEFLATE/raw
   snapshot проходит create/list/mutate/rollback и rollback после реального
