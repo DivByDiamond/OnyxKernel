@@ -15,11 +15,11 @@
 
 ## 2. P1 — ближайшие задачи
 
+_Сделано 2026-10-25 и ушло в архив: TCP recv-окно 8 KiB (`e0dc146`), FAT32
+write/create/unlink/truncate через VFS + LFN + FSINFO (`5e92115`)._
+
 | ID | Задача | Где | Статус / что осталось |
 |----|--------|-----|------------------------|
-| F1 | **FAT32: запись через VFS** | `fs/fat32/write/**`, `fs/vfs/fd/rw.rs`, `node/{create,unlink}.rs`, `meta/truncate.rs` | Драйвер записи написан (`write`/`create`/`unlink`/`truncate_chain`), но VFS отдаёт `NoSys` для `Fs::Fat32` — код мёртвый. Подключить write/create/unlink/truncate + синхронизация размера в dirent |
-| F2 | **FAT32: LFN** | `fs/fat32/helpers.rs`, `dir/`, `write/` | Чтение: `scan_dir_entries` пропускает LFN, `readdir_entry` отдаёт только 8.3. Запись: `create` пишет только 8.3. Нужны разбор LFN-цепочек (N×13 UTF-16, checksum, 0x40-флаг) и генерация LFN при создании |
-| N1 | **TCP: recv-буфер и EOF** | `net/tcp/{conn,sock,state}.rs` | В рабочем дереве: recv-кольцо 2 KiB → 8 KiB (`RECV_BUF_SIZE`, окно = свободное место), EOF по FIN уже был (`Ok(0)`, тесты `net/tcp/recv_tests.rs`). Осталось: живой QEMU-тест больших ответов |
 | N2 | **obrowse: стадии C/D вживую** | `OnyxApps/apps/obrowse` | Стадии A–D в коде; нужен сквозной прогон URL → DNS → TCP → GET → HTML → render → переход по ссылке → back |
 | D1 | **UART IRQ-driven RX** | `drivers/uart.rs`, PLIC | Сейчас только LSR-poll в `getc`, ни одной регистрации в PLIC. Нужен RX-буфер + обработчик PLIC |
 | D2 | **SBI: spec version + SRST** | `arch/sbi.rs`, `arch/asm/mtrap*.rs`, `syscall/power_sys.rs` | В `sbi.rs` только legacy v0.1 `set_timer`. Нужны базовое расширение (`get_spec_version`, `get_impl_id`, `probe_extension`) и SRST (`system_reset`), причём и через собственный M-mode шим (`-bios none`), и через OpenSBI (`smode`) |
@@ -64,8 +64,6 @@
 
 | ID | Симптом / ограничение | Где |
 |----|------------------------|-----|
-| L1 | `readdir`/`lookup` видят только 8.3-имена (LFN не парсится) | `fs/fat32` |
-| L2 | FAT32 write-пути не вызываются из VFS (`NoSys`) | `fs/vfs/fd/rw.rs` |
 | L3 | Нет честного EOF-сигнала после RST (`Err(Io)` вместо `Ok(0)`) — сознательно, приложение отличает сброс от FIN | `net/tcp/sock.rs` |
 | L4 | Glyph-blit по MMIO попиксельный (scroll/clear — word-копии) | `drivers/video/fb_term` |
 | L5 | Tearing/двойная буферизация на живом мониторе OC2R не проверены | `drivers/video/fb` |
@@ -105,6 +103,8 @@
   (5 багов), сеть/ohttp (errno, virtio-net TX/legacy, порты UDP/TCP), аудиты
   2026-08-24/27, SAFETY-волны, dead-code чистки и т.п.
 - `docs/history/YYYY-MM-<тема>.md` — формат для новых расследований.
+- 2026-10-25: TCP recv-окно 8 KiB (`e0dc146`) и FAT32 write/LFN (`5e92115`),
+  проверено в QEMU + mtools + `fsck.fat` на сыром FAT32-диске.
 - Закрытые пункты (>30 дней) удаляются из этого файла в архив.
 
 ## 8. Как вести этот файл
