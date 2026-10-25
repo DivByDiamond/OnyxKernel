@@ -10,8 +10,7 @@
 
 | ID | Проблема | Детали | Критерий закрытия |
 |----|----------|--------|-------------------|
-| OC2R-1 | Guest fault после save/reopen мира при расширенном RGB | Реальный OC2R (Fabric 26.1.2 и 26.2): `/bin/fb-draw` + проверка пикселей — базовые R/G/B проходят, а расширенный RGB → reload дважды выявил guest trap на обеих версиях; контрольный повтор прошёл, причина не установлена. Отчёт: `build/reports/onyx-live-acceptance/report.md`. См. `docs/TESTING.md` §11. | Воспроизведено и исправлено, либо доказано, что reload ни при чём |
-| OC2R-2 | OnyxFS snapshot полного системного root | 197 блоков до добавления probe против лимита snapshot в 31; `snapshot_create` → `-12`/`NoMem` на обеих версиях. Минимальный root проходит (create=1, list=1, rollback=0, байты восстановлены). | Root-snapshot работает, либо лимит осознанно поднят и задокументирован |
+| OC2R-1 | Guest fault после save/reopen мира при расширенном RGB | Трассировка OC2R подтвердила worker после последнего CPU save при живой mmap RAM. В Fabric unload очищает отложенный dirty-флаг до финальной записи; исправление shutdown/final-save проверяется в OC2R. Это не подтверждённый дефект RGB или ядра. Отчёт: `build/reports/onyx-live-acceptance/trap-diagnosis/`. | Повторные reload с точным сравнением финальной CPU/RAM-пары проходят на обеих версиях |
 
 ## 2. P1 — ближайшие задачи
 
@@ -85,10 +84,20 @@ write/create/unlink/truncate через VFS + LFN + FSINFO (`5e92115`)._
 - ✅ OnyxFS snapshot/rollback на минимальном root (create/list/rollback,
   байты файла восстановлены после изменения).
 - ⚠️ Расширенный RGB → save/reopen мира: guest fault (см. OC2R-1).
-- ⚠️ Snapshot полного системного root: `NoMem` (см. OC2R-2).
+- ✅ OC2R-2 закрыт (`54c4f34`): полный root содержит 965 data + 12 metadata
+  блоков (старый подсчёт 197 пропускал indirect allocations). Packed DEFLATE/raw
+  snapshot проходит create/list/mutate/rollback и rollback после реального
+  Minecraft world reload на Fabric 26.1.2 и 26.2. Все 7 фаз проходят на каждой
+  версии; OC2R private root без съёмного диска. Kernel SHA256:
+  `b55d8a1740ce7a72ea1e9e7a559333a980f98da891e4145a4a4ed0640c3702a3`.
+  Проверки: 58 core + 3 tools + 234 kernel tests, QEMU boot/interactive.
+  Формат и recovery: [ONYXFS_SNAPSHOTS.md](docs/ONYXFS_SNAPSHOTS.md).
 
 ## 6. Принятые компромиссы (не баги)
 
+- Packed snapshots читают legacy raw/RLE, но downgrade на старое ядро с записью
+  snapshot не поддерживается. В существующей области 1 MiB помещается одна полная
+  копия этого root; следующая может вернуть NoSpace.
 - `lto = false`: fat/thin LTO ломают линк ядра (`__rust_alloc` после LTO-merge).
 - KDF без memory-hardness — осознанная позиция (10k SHA-256 до перехода на `$5$`).
 - Точечные clippy-исключения — обоснованы в коде; новых `#[allow(dead_code)]` быть не должно.
