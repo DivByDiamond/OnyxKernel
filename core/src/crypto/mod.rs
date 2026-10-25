@@ -7,6 +7,7 @@
 
 pub mod kdf;
 pub mod sha256;
+pub mod sha256crypt;
 
 pub use kdf::*;
 pub use sha256::*;

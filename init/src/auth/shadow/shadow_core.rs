@@ -12,9 +12,7 @@
 )]
 
 use crate::auth::SHADOW_PATH;
-use crate::auth::crypto::{
-    classify_password, format_shadow_field, generate_salt, hash_password, parse_shadow_field,
-};
+use crate::auth::crypto::{classify_field, generate_salt, sha256crypt};
 use onyx_core::crypto::HashScheme;
 
 /// Result of checking a password against /etc/shadow.
@@ -108,13 +106,9 @@ pub fn verify_shadow_outcome(username: &[u8], password: &[u8]) -> VerifyOutcome 
         Err(_) => return VerifyOutcome::Fail,
     };
 
-    let field = match parse_shadow_field(stored_slice(&stored)) {
-        Some(f) => f,
-        None => return VerifyOutcome::Fail,
-    };
-
-    match classify_password(password, &field) {
-        HashScheme::Iterated => VerifyOutcome::Ok,
+    match classify_field(password, stored_slice(&stored)) {
+        HashScheme::Sha256Crypt => VerifyOutcome::Ok,
+        HashScheme::Iterated => VerifyOutcome::OkLegacy,
         HashScheme::Legacy => VerifyOutcome::OkLegacy,
         HashScheme::Unknown => VerifyOutcome::Fail,
     }
@@ -126,8 +120,15 @@ pub fn verify_shadow_password(username: &[u8], password: &[u8]) -> bool {
 }
 
 pub(crate) fn format_shadow_entry(username: &[u8], password: &[u8]) -> ([u8; 128], usize) {
+    // 8 random bytes rendered as 16 hex characters: a valid $5$ salt (any
+    // byte except '$', ':' and newline) that keeps the existing entropy path.
+    const HEX: &[u8; 16] = b"0123456789abcdef";
     let salt = generate_salt();
-    let hash = hash_password(password, &salt);
+    let mut salt_text = [0u8; 16];
+    for (i, &b) in salt.iter().enumerate() {
+        salt_text[i * 2] = HEX[usize::from(b >> 4)];
+        salt_text[i * 2 + 1] = HEX[usize::from(b & 0x0F)];
+    }
 
     let mut buf = [0u8; 128];
     let mut pos = 0;
@@ -143,9 +144,16 @@ pub(crate) fn format_shadow_entry(username: &[u8], password: &[u8]) -> ([u8; 128
         buf[pos] = b':';
         pos += 1;
     }
-    // "$5$<salt-hex>$<hash-hex>" — see onyx_core::crypto::kdf for the
-    // documented deviation from crypt(3) sha256crypt.
-    let field_len = format_shadow_field(&salt, &hash, &mut buf[pos..]);
+    // Crypt(3)-compatible "$5$<salt>[rounds=...$]<hash>" so the shadow file
+    // can be verified by standard tools; the legacy hex layout is still
+    // accepted on read (see `classify_field`).
+    let field_len = sha256crypt::hash_into(
+        password,
+        &salt_text,
+        sha256crypt::DEFAULT_ROUNDS,
+        &mut buf[pos..],
+    )
+    .unwrap_or(0);
     pos += field_len;
     (buf, pos)
 }

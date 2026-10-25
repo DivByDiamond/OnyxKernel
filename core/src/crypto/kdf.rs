@@ -169,7 +169,9 @@ pub fn format_shadow_field(salt: &[u8; SALT_LEN], hash: &[u8; 32], buf: &mut [u8
 /// Which scheme a stored field matches.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum HashScheme {
-    /// Matches the current 10k-iterated KDF.
+    /// Matches a crypt(3)-compatible `$5$` sha256crypt hash.
+    Sha256Crypt,
+    /// Matches the previous 10k-iterated KDF (hex layout).
     Iterated,
     /// Matches the legacy single-round scheme (needs migration).
     Legacy,
@@ -188,6 +190,28 @@ pub fn classify_password(password: &[u8], field: &ShadowField) -> HashScheme {
         return HashScheme::Legacy;
     }
     HashScheme::Unknown
+}
+
+/// Classify `password` against a raw stored shadow field, accepting both the
+/// crypt(3)-compatible `$5$` layout and the historical hex layout.
+///
+/// The two are distinguishable by shape alone (crypt has a 43-character
+/// crypt-base64 tail, the legacy layout a 64-character hex one), so an
+/// attacker cannot downgrade a stored hash by reformatting it: the legacy
+/// branch still re-computes the old KDF and the new one is checked against
+/// the real sha256crypt.
+pub fn classify_field(password: &[u8], stored: &[u8]) -> HashScheme {
+    if super::sha256crypt::parse(stored).is_some() {
+        return if super::sha256crypt::verify(password, stored) {
+            HashScheme::Sha256Crypt
+        } else {
+            HashScheme::Unknown
+        };
+    }
+    match parse_shadow_field(stored) {
+        Some(field) => classify_password(password, &field),
+        None => HashScheme::Unknown,
+    }
 }
 
 #[cfg(test)]

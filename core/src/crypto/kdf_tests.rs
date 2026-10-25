@@ -97,3 +97,28 @@ fn const_time_eq_basics() {
     assert!(!const_time_eq(b"abc", b"abd"));
     assert!(!const_time_eq(b"abc", b"ab"));
 }
+
+#[test]
+fn classify_field_accepts_sha256crypt_and_the_legacy_hex_layout() {
+    let mut field = [0u8; 128];
+    let len = super::super::sha256crypt::hash_into(
+        b"pw",
+        b"saltsalt",
+        super::super::sha256crypt::DEFAULT_ROUNDS,
+        &mut field,
+    )
+    .expect("hash fits");
+    assert_eq!(
+        classify_field(b"pw", &field[..len]),
+        HashScheme::Sha256Crypt
+    );
+    assert_eq!(classify_field(b"nope", &field[..len]), HashScheme::Unknown);
+
+    // The historical hex layout keeps working through the same entry point.
+    let salt = *b"01234567";
+    let hash = hash_password(b"pw", &salt);
+    let mut legacy = [0u8; 128];
+    let n = format_shadow_field(&salt, &hash, &mut legacy);
+    assert_eq!(classify_field(b"pw", &legacy[..n]), HashScheme::Iterated);
+    assert_eq!(classify_field(b"nope", &legacy[..n]), HashScheme::Unknown);
+}
