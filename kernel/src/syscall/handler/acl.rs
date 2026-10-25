@@ -92,8 +92,7 @@ fn syscall_allowed_uid(nr: u64, ring: u8, uid: Option<u32>) -> bool {
         | SYS_chmod
         | SYS_fchmod
         | SYS_chown
-        | SYS_fchown
-        | SYS_reboot => ring <= proc::PROC_RING_ROOT,
+        | SYS_fchown => ring <= proc::PROC_RING_ROOT,
         // kill() is open to ring 2 (todo P2 #5) — the syscall layer
         // (sys_kill) enforces the own-process-group restriction for
         // unprivileged callers; root/kernel may signal anything.
@@ -108,6 +107,12 @@ fn syscall_allowed_uid(nr: u64, ring: u8, uid: Option<u32>) -> bool {
         SYS_net_config | SYS_udp_bind | SYS_udp_sendto | SYS_udp_recv | SYS_udp_close | SYS_net_listen | SYS_net_accept | SYS_net_unlisten | SYS_udp_recvfrom | SYS_udp_sendfrom =>
             ring <= proc::PROC_RING_ROOT || uid.is_some_and(|u| u == 0),
         SYS_create | SYS_rename => ring <= proc::PROC_RING_ROOT || uid.is_some_and(|u| u == 0),
+        // reboot(2) power-cycles the machine, so it stays root-only — but
+        // "root" includes uid 0 in the user ring, the same self-service
+        // exception create/rename use above: `osh` spawns `/bin/powerctl`
+        // in ring 2, and a root login must be able to shut its own machine
+        // down. Ordinary users remain denied.
+        SYS_reboot => ring <= proc::PROC_RING_ROOT || uid.is_some_and(|u| u == 0),
         _ => false,
     }
 }
@@ -171,13 +176,23 @@ mod tests {
             SYS_snapshot_rollback,
             SYS_snapshot_list,
             SYS_fsync,
-            SYS_reboot,
         ];
         for &nr in &ring1_only {
             assert!(!syscall_allowed_uid(nr, PROC_RING_USER, Some(1000)));
             assert!(syscall_allowed_uid(nr, PROC_RING_ROOT, Some(0)));
             assert!(syscall_allowed_uid(nr, PROC_RING_KERNEL, Some(0)));
         }
+    }
+
+    #[test]
+    fn test_reboot_root_uid_exception() {
+        // reboot: ring <= 1 always; ring 2 only for uid 0 (root's own shell
+        // spawning /bin/powerctl). Ordinary users stay denied.
+        assert!(syscall_allowed_uid(SYS_reboot, PROC_RING_KERNEL, None));
+        assert!(syscall_allowed_uid(SYS_reboot, PROC_RING_ROOT, Some(1000)));
+        assert!(syscall_allowed_uid(SYS_reboot, PROC_RING_USER, Some(0)));
+        assert!(!syscall_allowed_uid(SYS_reboot, PROC_RING_USER, Some(1000)));
+        assert!(!syscall_allowed_uid(SYS_reboot, PROC_RING_USER, None));
     }
 
     #[test]

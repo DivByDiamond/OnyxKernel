@@ -67,6 +67,12 @@
 - [x] S-mode ядро под M-mode OnyxBoot → честный kpanic с подсказкой (не тихая смерть на pc=0)
 - [x] `rdcycle` из S-mode/U-mode легален (mcounteren/scounteren включены)
 - [x] FP для U-mode включён (sstatus.FS=Initial) — hard-float бинарники не падают
+- [x] SBI base + SRST на обеих цепочках: лог `sbi: spec=2.0 impl=0x4f4e5958 srst=1`
+      под OnyxBoot (M-mode шим) и `spec=3.0 impl=1 srst=1` под OpenSBI; `reboot`
+      в шелле перезагружает машину (второй баннер + повторный логин), `poweroff`
+      завершает QEMU с кодом 0
+- [x] UART RX через PLIC: лог `uart: rx irq: N byte(s) buffered` появляется при
+      первом вводе, логин и `echo` работают (не LSR-poll)
 
 ## 7. Безопасность
 

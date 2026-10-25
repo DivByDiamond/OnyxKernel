@@ -8,13 +8,19 @@ pub const R_MCR: u32 = 4;
 pub const R_LSR: u32 = 5;
 pub const LSR_THRE: u8 = 0x20;
 pub const LSR_DR: u8 = 0x01;
+// Interrupt enable register (IER) bits. Only "received data available"
+// is used: the driver is poll-free on the input side but leaves TX on the
+// THRE-spin path in `putc`.
+pub const IER_RX: u8 = 0x01;
 // FCR (shared with IIR at offset 2): FIFO control.
 pub const FCR_FIFO_ENA: u8 = 0x01;
 pub const FCR_RX_FIFO_RESET: u8 = 0x02;
 pub const FCR_TX_FIFO_RESET: u8 = 0x04;
-// Bits 6-7 = RX trigger level. 0b11 = 14 bytes: with the 16-byte FIFO this
-// buffers a burst of input between polls without an interrupt-driven RX path.
-pub const FCR_TRIGGER_14: u8 = 0xC0;
+// Bits 6-7 = RX trigger level. 0b00 = 1 byte: with RX interrupts enabled
+// (`enable_rx_irq` + the PLIC handler in `drivers::uart_rx`) this wakes the
+// handler on every keystroke instead of waiting for a 14-byte burst or the
+// FIFO character-timeout interrupt.
+pub const FCR_TRIGGER_1: u8 = 0x00;
 static mut G_UART: Uart = Uart::new();
 
 #[derive(Clone, Copy)]
@@ -52,7 +58,7 @@ impl Uart {
             r.reg_u8(R_IER).write(0x00);
             r.reg_u8(R_LCR).write(0x03);
             r.reg_u8(R_IIR_FCR)
-                .write(FCR_FIFO_ENA | FCR_RX_FIFO_RESET | FCR_TX_FIFO_RESET | FCR_TRIGGER_14);
+                .write(FCR_FIFO_ENA | FCR_RX_FIFO_RESET | FCR_TX_FIFO_RESET | FCR_TRIGGER_1);
             r.reg_u8(R_MCR).write(0x0B);
         }
         // SAFETY: publishing the configured UART during single-threaded boot console init; kernel code never runs with SIE set (see crate::sync).
@@ -87,7 +93,20 @@ impl Uart {
             self.putc(b);
         }
     }
-    pub fn getc(self) -> Option<u8> {
+    /// Enable the "received data available" interrupt (IER bit 0).
+    ///
+    /// `init` deliberately leaves IER at 0 until the PLIC handler is
+    /// registered, so no interrupt can be raised with nothing to service it.
+    pub fn enable_rx_irq(self) {
+        // SAFETY: self.base is the configured UART MMIO base; IER is a
+        // write-only NS16550A register at offset R_IER.
+        unsafe {
+            self.regs().reg_u8(R_IER).write(IER_RX);
+        }
+    }
+
+    /// One raw byte from the hardware FIFO, bypassing the software ring.
+    pub fn read_fifo_byte(self) -> Option<u8> {
         // SAFETY: self.base is the configured UART MMIO base; LSR poll and DATA read use NS16550A register offsets via MmioBlock.
         unsafe {
             let r = self.regs();
@@ -98,11 +117,21 @@ impl Uart {
             }
         }
     }
+
+    /// Next input byte: the interrupt-fed ring first, then the hardware
+    /// FIFO directly. The fallback keeps early-boot input (before the PLIC
+    /// handler exists) and platforms without a usable UART IRQ working.
+    pub fn getc(self) -> Option<u8> {
+        super::uart_rx::pop().or_else(|| self.read_fifo_byte())
+    }
     /// Non-consuming readiness peek: true when at least one RX byte sits in
     /// the hardware FIFO (LSR.DR set). Unlike getc() this does not pop the
     /// byte, so poll()/FIONREAD can probe stdin without stealing input from
     /// a concurrent reader.
     pub fn rx_ready(self) -> bool {
+        if super::uart_rx::has_data() {
+            return true;
+        }
         // SAFETY: self.base is the configured UART MMIO base; LSR read uses the NS16550A register offset via MmioBlock.
         unsafe {
             let r = self.regs();
@@ -145,6 +174,31 @@ pub fn getc() -> Option<u8> {
         (*p).getc()
     }
 }
+/// Enable the UART RX interrupt on the configured console.
+pub fn enable_rx_irq() {
+    // SAFETY: G_UART is written once at boot (uart::init) and only read
+    // afterwards; the IER write touches the configured MMIO base.
+    unsafe {
+        let p = &raw const G_UART;
+        (*p).enable_rx_irq();
+    }
+}
+
+/// One raw FIFO byte, bypassing the software ring (IRQ handler path).
+pub fn read_fifo_byte() -> Option<u8> {
+    // SAFETY: G_UART is written once at boot and only read afterwards; MMIO
+    // access uses the configured base.
+    unsafe {
+        let p = &raw const G_UART;
+        (*p).read_fifo_byte()
+    }
+}
+
+/// Buffered RX bytes awaiting a reader (0 when only the FIFO has data).
+pub fn rx_buffered() -> usize {
+    super::uart_rx::available()
+}
+
 /// Non-consuming stdin readiness peek (see Uart::rx_ready).
 pub fn rx_ready() -> bool {
     // SAFETY: G_UART defaults to the QEMU virt base (0x1000_0000) and is reconfigured by uart::init during single-threaded boot; NS16550A register accesses from kernel context, which never runs with SIE set (see crate::sync).
@@ -175,9 +229,10 @@ mod tests {
     }
 
     #[test]
-    fn test_fcr_fifo_trigger14() {
-        let fcr = FCR_FIFO_ENA | FCR_RX_FIFO_RESET | FCR_TX_FIFO_RESET | FCR_TRIGGER_14;
-        assert_eq!(fcr, 0xC7);
+    fn test_fcr_fifo_trigger1() {
+        let fcr = FCR_FIFO_ENA | FCR_RX_FIFO_RESET | FCR_TX_FIFO_RESET | FCR_TRIGGER_1;
+        assert_eq!(fcr, 0x07);
+        assert_eq!(IER_RX & LSR_DR, 1);
     }
 
     #[test]

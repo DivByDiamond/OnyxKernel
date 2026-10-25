@@ -1,6 +1,6 @@
 use crate::arch::csr;
 use crate::arch::regs::*;
-use crate::drivers::{plic, uart};
+use crate::drivers::{plic, uart, uart_rx};
 use crate::libfdt::fdt;
 use crate::mm::{heap, pmm, vmm};
 use crate::module::{self, ModuleType};
@@ -80,8 +80,38 @@ pub(crate) unsafe fn early_init(fdt_addr: usize) {
             plic::set_priority(PLIC_PRIO_VIRTIO, 5);
             plic::enable(PLIC_PRIO_UART, 0);
             plic::set_threshold(0);
+            // Console input becomes interrupt-driven from here on: the UART
+            // RX interrupt is enabled only after its PLIC handler exists.
+            uart_rx::init();
             csr::set_sie((1 << 1) | (1 << 9));
             crate::kinf!("plic", "base=%p", Arg::from(plic_base));
         }
+
+        // Report what the layer beneath actually advertises. Under OpenSBI
+        // this is real firmware; under OnyxBoot it is the M-mode shim
+        // (arch/asm/mtrap.rs), which must answer the same probe for SRST so
+        // reboot/poweroff work on both chains.
+        #[cfg(not(test))]
+        log_sbi_capabilities();
     }
+}
+
+/// Log the SBI spec version and SRST availability (boot evidence).
+#[cfg(not(test))]
+unsafe fn log_sbi_capabilities() {
+    use crate::arch::sbi;
+    let Some((major, minor)) = sbi::spec_version_parts() else {
+        crate::kwrn!("sbi", "no base extension (reset falls back to finisher)");
+        return;
+    };
+    let impl_id = sbi::get_impl_id().unwrap_or(0);
+    let srst = sbi::probe_extension(0x5352_5354);
+    crate::kinf!(
+        "sbi",
+        "spec=%d.%d impl=%p srst=%d",
+        Arg::from(major as usize),
+        Arg::from(minor as usize),
+        Arg::from(impl_id as usize),
+        Arg::from(srst as usize)
+    );
 }

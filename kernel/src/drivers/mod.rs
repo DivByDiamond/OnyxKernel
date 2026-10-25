@@ -15,6 +15,7 @@ pub mod input;
 pub mod net;
 pub mod platform;
 pub mod uart;
+pub mod uart_rx;
 pub mod video;
 pub mod virtio;
 pub mod virtio_console;

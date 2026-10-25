@@ -11,6 +11,7 @@
 | `G_PROC_LIST_LOCK` | `G_ALL_PROCS` (список всех Proc), публикация состояний, unlink/reap | `proc/process/globals.rs` | Внешний лок. try_lock-варианты в `dump_all`/`count()` — вызываются из panic-пути |
 | `NET_LOCK` (рекурсивный) | `UDP_SOCKS`, `NEXT_UDP_PORT`, `CONNS`, `NEXT_PORT`, ARP-кэш, `IP_ID`, доступ к TX/RX-кольцам virtio-net | `net/lock.rs` | Рекурсивный per-hart: владелец может входить повторно |
 | `G_QLOCK[dev]` | Очереди virtio (blk и др. через `virtio_req::request`) | `drivers/virtio/mod.rs` | Leaf-лок драйвера |
+| `UART_RX` (`uart_rx::LOCK`) | Software-кольцо входных байт консоли (4 KiB) | `drivers/uart_rx.rs` | Leaf. Писатель — PLIC-обработчик на hart 0, читатели — любой харт; с `UART_LOCK` не вкладывается |
 | Локи pmm / heap / vmm | Физические страницы, куча, таблицы страниц | `mm/` | Leaf-локи, берутся внутри NET_LOCK (аллокации в TX-пути) |
 | rq-локи (`rq_lock(hart)`) | Per-hart runqueue | `proc/scheduler/runqueue.rs` | Вложенный внутрь `PROC_LIST_LOCK` (порядок см. ниже) |
 

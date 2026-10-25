@@ -24,15 +24,17 @@
 //!     — not something this port changes).
 use core::arch::global_asm;
 
-/// Per-hart save area for `t1`/`t2`/`a0`/`a1` — one more slot than the rv64
-/// scratch (`mtrap.rs`'s `G_MTRAP_SCRATCH`) because the ecall path here
+/// Per-hart save area for `t1`/`t2`/`a0`/`a1`/`a7` — one more slot than the
+/// rv64 scratch (`mtrap.rs`'s `G_MTRAP_SCRATCH`) because the ecall path here
 /// needs BOTH `a0` and `a1` as real inputs (the 64-bit stime split), not
-/// just `a0`. Indexed by `mhartid`; `mscratch` on each hart points at its
-/// own row (set once per hart at M-mode boot, before that hart's first
-/// possible M-mode trap — `boot_32.rs` / `arch/smp/secondary.rs`).
+/// just `a0`. `a7` carries the SBI extension id for the base/SRST dispatch,
+/// `a0`/`a1` double as the ecall output slots (same protocol as rv64).
+/// Indexed by `mhartid`; `mscratch` on each hart points at its own row (set
+/// once per hart at M-mode boot, before that hart's first possible M-mode
+/// trap — `boot_32.rs` / `arch/smp/secondary.rs`).
 #[unsafe(no_mangle)]
-pub static mut G_MTRAP_SCRATCH_32: [[u32; 4]; crate::arch::smp::MAX_HARTS] =
-    [[0; 4]; crate::arch::smp::MAX_HARTS];
+pub static mut G_MTRAP_SCRATCH_32: [[u32; 5]; crate::arch::smp::MAX_HARTS] =
+    [[0; 5]; crate::arch::smp::MAX_HARTS];
 
 global_asm!(
     r#"
@@ -45,27 +47,92 @@ mtrap_entry_32:
     sw t2, 4(t0)
     sw a0, 8(t0)
     sw a1, 12(t0)
+    sw a7, 16(t0)
     csrr t1, mcause
     bltz t1, .Lm32_interrupt
     // Exception: only ecall-from-S-mode (medeleg leaves every other
     // exception delegated straight to S-mode) should ever reach here.
     li t2, 9
     bne t1, t2, .Lm32_restore
+    csrr t2, mepc
+    addi t2, t2, 4
+    csrw mepc, t2
+    // Dispatch on the SBI extension id in a7 (mirrors mtrap.rs).
+    li t2, 0
+    beq a7, t2, .Lm32_set_timer
+    li t2, 0x10
+    beq a7, t2, .Lm32_base
+    li t2, 0x53525354
+    beq a7, t2, .Lm32_srst
+    li t2, -2
+    sw t2, 8(t0)
+    sw zero, 12(t0)
+    j .Lm32_restore
+.Lm32_set_timer:
     csrr t2, mhartid
     slli t2, t2, 3
     li t1, 0x02004000
     add t1, t1, t2
-    li t2, 0xFFFFFFFF
-    sw t2, 4(t1)
     sw a0, 0(t1)
     sw a1, 4(t1)
     li t2, 0x20
     csrc mip, t2
     li t2, 0x80
     csrs mie, t2
-    csrr t2, mepc
-    addi t2, t2, 4
-    csrw mepc, t2
+    j .Lm32_restore
+.Lm32_base:
+    li t2, 0
+    beq a6, t2, .Lm32_base_version
+    li t2, 1
+    beq a6, t2, .Lm32_base_impl_id
+    li t2, 2
+    beq a6, t2, .Lm32_base_impl_version
+    li t2, 3
+    beq a6, t2, .Lm32_base_probe
+    j .Lm32_not_supported
+.Lm32_base_version:
+    sw zero, 8(t0)
+    li t1, 0x02000000
+    sw t1, 12(t0)
+    j .Lm32_restore
+.Lm32_base_impl_id:
+    sw zero, 8(t0)
+    li t1, 0x4F4E5958
+    sw t1, 12(t0)
+    j .Lm32_restore
+.Lm32_base_impl_version:
+    sw zero, 8(t0)
+    li t1, 1
+    sw t1, 12(t0)
+    j .Lm32_restore
+.Lm32_base_probe:
+    li t1, 0x10
+    beq a0, t1, .Lm32_probe_yes
+    li t1, 0x53525354
+    beq a0, t1, .Lm32_probe_yes
+    sw zero, 8(t0)
+    sw zero, 12(t0)
+    j .Lm32_restore
+.Lm32_probe_yes:
+    sw zero, 8(t0)
+    li t1, 1
+    sw t1, 12(t0)
+    j .Lm32_restore
+.Lm32_not_supported:
+    li t1, -2
+    sw t1, 8(t0)
+    sw zero, 12(t0)
+    j .Lm32_restore
+.Lm32_srst:
+    li t1, 0
+    bne a6, t1, .Lm32_not_supported
+    sw zero, 8(t0)
+    sw zero, 12(t0)
+    li t1, 0x100000
+    li t2, 0x5555
+    beqz a0, 1f
+    li t2, 0x7777
+1:  sw t2, 0(t1)
     j .Lm32_restore
 .Lm32_interrupt:
     andi t2, t1, 0xf

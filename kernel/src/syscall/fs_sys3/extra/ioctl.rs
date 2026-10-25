@@ -207,17 +207,20 @@ pub unsafe fn sys_ioctl(fd: u64, request: u64, arg: u64) -> i64 {
             }
             0x541B => {
                 // FIONREAD (todo P1 #2): real byte count immediately
-                // readable without blocking. Console (fd 0): the NS16550
-                // FIFO counter is not readable, LSR.DR is the hardware's
-                // only occupancy signal, so report 1 (>=1 byte pending) or
-                // 0. Regular fds: bytes left before EOF (size - pos).
+                // readable without blocking. Console (fd 0): the interrupt
+                // handler buffers bytes in a software ring, so that count is
+                // exact; the NS16550 FIFO itself has no readable occupancy
+                // counter (LSR.DR is only ">=1"), so fall back to reporting
+                // 1 when the ring is empty but the FIFO has data. Regular
+                // fds: bytes left before EOF (size - pos).
                 if arg == 0 {
                     return 0;
                 }
                 let count: u32 = if fd == 0 {
-                    let mut pending = crate::drivers::input::tty::pending();
-                    if uart::rx_ready() {
-                        pending = pending.saturating_add(1);
+                    let mut pending =
+                        crate::drivers::input::tty::pending().saturating_add(uart::rx_buffered());
+                    if pending == 0 && uart::rx_ready() {
+                        pending = 1;
                     }
                     pending.min(u32::MAX as usize) as u32
                 } else if fd <= 2 {

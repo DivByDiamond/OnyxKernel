@@ -1,11 +1,19 @@
-//! Minimal legacy SBI v0.1 wrappers for S-mode (OC2R/OpenSBI) operation.
+//! SBI wrappers shared by both boot chains.
 //!
-//! Everything in this module is only valid when the kernel actually runs in
-//! S-mode under an SBI firmware (OpenSBI / OC2R ROM). Booted via OnyxBoot the
-//! hart is handed over in M-mode, and an `ecall` from M-mode has nowhere to
-//! go: it traps to `mtvec`, which nobody set, i.e. address 0 — a silent
-//! machine death with no panic and no serial output. `hart_in_m_mode()`
-//! exists so the boot path can detect that mismatch and fail loudly instead.
+//! * S-mode under real firmware (`--features smode`, OpenSBI / OC2R): these
+//!   are ordinary SBI ecalls.
+//! * Booted via OnyxBoot (`-bios none`, no firmware at all): the hart starts
+//!   in M-mode and the kernel's own M-mode trap shim (`arch/asm/mtrap.rs`,
+//!   rv32: `mtrap_32.rs`) services the exact same ecall contract. Without
+//!   that shim an ecall from S-mode would trap to an unset `mtvec`, i.e.
+//!   address 0 — a silent machine death. `hart_in_m_mode()` exists so the
+//!   boot path can detect the mismatch (S-mode kernel, M-mode handoff) and
+//!   fail loudly instead.
+//!
+//! Extensions implemented on both paths: legacy v0.1 `SBI_SET_TIMER`, SBI
+//! v0.2 base (`get_spec_version`, `get_impl_id`, `get_impl_version`,
+//! `probe_extension`) and SRST v2.0 `system_reset` (see the tail of this
+//! file for what the shim does with a reset request).
 
 /// True if the current hart is executing in M-mode.
 ///
@@ -127,62 +135,46 @@ pub unsafe fn set_timer(stime: u64) {
 }
 
 // ---------------------------------------------------------------------------
-// SBI v2.0-style calls (base + SRST).
+// SBI v0.2+ base extension and SRST.
 //
-// In non-`smode` builds there is no real firmware beneath the kernel: the
-// only ecall the M-mode shim (`arch/asm/mtrap.rs`) services is the legacy
-// SBI_SET_TIMER (a7=0) — any other EID would be misinterpreted as a timer
-// arm. So these entry points are no-ops there and callers must fall back
-// (see `klog::reset_machine`'s QEMU finisher path).
+// Both boot chains answer the same probe, so callers do not need to know
+// which one they run on: OpenSBI answers for real, and the M-mode shim
+// (`arch/asm/mtrap*.rs`) advertises v2.0 with `probe_extension` returning
+// true for exactly the extensions it services.
 // ---------------------------------------------------------------------------
 
-/// Legacy "SBI" probe extension EID (FID 0: sbi_probe_extension).
-#[cfg_attr(
-    not(feature = "smode"),
-    allow(
-        dead_code,
-        reason = "only reachable from the smode-feature-gated SBI ecall path below"
-    )
-)]
+/// Legacy "SBI" probe extension EID (FID 0: sbi_probe_extension). Only used
+/// as a fallback for firmware predating the v0.2 base extension.
 const SBI_EID_PROBE: usize = 0x0053_4249;
-/// Base extension EID (FID 0: sbi_get_spec_version).
-#[cfg_attr(
-    not(feature = "smode"),
-    allow(
-        dead_code,
-        reason = "only reachable from the smode-feature-gated SBI ecall path below"
-    )
-)]
+/// SBI v0.2 base extension EID.
 const SBI_EID_BASE: usize = 0x0000_0010;
-/// System Reset extension EID ("SRST"), FID 0: sbi_system_reset.
-#[cfg_attr(
-    not(feature = "smode"),
-    allow(
-        dead_code,
-        reason = "only reachable from the smode-feature-gated SBI ecall path below"
-    )
-)]
+/// SBI v2.0 System Reset extension EID ("SRST"), FID 0: system_reset.
 const SBI_EID_SRST: usize = 0x5352_5354;
+
+/// Base-extension function ids.
+const BASE_GET_SPEC_VERSION: usize = 0;
+const BASE_GET_IMPL_ID: usize = 1;
+const BASE_GET_IMPL_VERSION: usize = 2;
+const BASE_PROBE_EXTENSION: usize = 3;
+
+/// `SBI_SUCCESS` from the v0.2 error-code space.
+const SBI_SUCCESS: isize = 0;
 
 /// SRST reset types (SBI v2.0, FID 0).
 pub const SRST_SHUTDOWN: u64 = 0;
 pub const SRST_COLD_REBOOT: u64 = 1;
 pub const SRST_WARM_REBOOT: u64 = 2;
+/// SRST reset reason: "some unexpected failure" (the SBI default).
+const SRST_REASON_SYSTEM_FAILURE: u64 = 1;
 
 /// Raw SBI v0.2+ ecall: a7 = EID, a6 = FID; returns (error, value).
 ///
 /// # Safety
 ///
-/// Must run in S-mode with an SBI beneath that implements the extension
-/// being called; from M-mode (or the mtrap shim) only a7=0 is defined.
+/// Must run in S-mode with an SBI implementation beneath that services the
+/// extension being called: real firmware, or this kernel's M-mode shim when
+/// booted via OnyxBoot.
 #[inline]
-#[cfg_attr(
-    not(feature = "smode"),
-    allow(
-        dead_code,
-        reason = "only called from the smode-feature-gated SBI callers above"
-    )
-)]
 unsafe fn sbi_ecall(eid: usize, fid: usize, a0: usize, a1: usize) -> (isize, usize) {
     let err: usize;
     let val: usize;
@@ -202,41 +194,60 @@ unsafe fn sbi_ecall(eid: usize, fid: usize, a0: usize, a1: usize) -> (isize, usi
 }
 
 /// Firmware SBI spec version (base extension, FID 0), major<<24 | minor.
-/// `None` when there is no SBI (non-`smode` builds — issuing the ecall
-/// would reach the mtrap shim, which only understands a7=0).
-#[cfg(feature = "smode")]
+/// `None` when the base extension is missing or the call failed.
 pub fn get_spec_version() -> Option<u64> {
-    // SAFETY: S-mode ecall under real firmware (feature-gated, see above).
-    let (err, val) = unsafe { sbi_ecall(SBI_EID_BASE, 0, 0, 0) };
-    (err == 0).then_some(val as u64)
+    let (err, val) = unsafe { sbi_ecall(SBI_EID_BASE, BASE_GET_SPEC_VERSION, 0, 0) };
+    (err == SBI_SUCCESS).then_some(val as u64)
 }
 
-#[cfg(not(feature = "smode"))]
-pub fn get_spec_version() -> Option<u64> {
-    None
+/// Decoded `(major, minor)` from `get_spec_version`.
+pub fn spec_version_parts() -> Option<(u32, u32)> {
+    let v = get_spec_version()?;
+    Some((((v >> 24) & 0x7F) as u32, (v & 0x00FF_FFFF) as u32))
+}
+
+/// Firmware implementation id (base extension, FID 1).
+pub fn get_impl_id() -> Option<u64> {
+    let (err, val) = unsafe { sbi_ecall(SBI_EID_BASE, BASE_GET_IMPL_ID, 0, 0) };
+    (err == SBI_SUCCESS).then_some(val as u64)
+}
+
+/// Firmware implementation version (base extension, FID 2).
+pub fn get_impl_version() -> Option<u64> {
+    let (err, val) = unsafe { sbi_ecall(SBI_EID_BASE, BASE_GET_IMPL_VERSION, 0, 0) };
+    (err == SBI_SUCCESS).then_some(val as u64)
+}
+
+/// True when the layer beneath implements the extension `eid`.
+///
+/// Uses the v0.2 base-extension probe, falling back to the legacy "SBI"
+/// probe extension for older firmware, so this is a real capability check
+/// rather than a hardcoded "yes".
+pub fn probe_extension(eid: u64) -> bool {
+    let (err, val) = unsafe { sbi_ecall(SBI_EID_BASE, BASE_PROBE_EXTENSION, eid as usize, 0) };
+    if err == SBI_SUCCESS {
+        return val != 0;
+    }
+    let (err, val) = unsafe { sbi_ecall(SBI_EID_PROBE, 0, eid as usize, 0) };
+    err == SBI_SUCCESS && val != 0
 }
 
 /// SBI System Reset (SRST, FID 0): `reset_type` 0 = shutdown, 1 = cold
-/// reboot, 2 = warm reboot. Returns `false` when SRST is unavailable
-/// (no SBI, probe negative, or the ecall reported an error) so the caller
-/// can use a platform fallback. On success the machine resets and this
-/// never returns.
+/// reboot, 2 = warm reboot. Returns `false` when SRST is unavailable (no
+/// implementation, probe negative, or the ecall reported an error) so the
+/// caller can use a platform fallback. On success the machine resets and
+/// this never returns.
 pub fn system_reset(reset_type: u64) -> bool {
-    #[cfg(feature = "smode")]
-    {
-        // SAFETY: S-mode ecall under real firmware (feature-gated above).
-        let (err, _) = unsafe {
-            let (err, _) = sbi_ecall(SBI_EID_PROBE, 0, SBI_EID_SRST, 0);
-            if err != 0 {
-                return false;
-            }
-            sbi_ecall(SBI_EID_SRST, 0, reset_type as usize, 1) // behavior: IMMEDIATE
-        };
-        err == 0
+    if !probe_extension(SBI_EID_SRST as u64) {
+        return false;
     }
-    #[cfg(not(feature = "smode"))]
-    {
-        let _ = reset_type;
-        false
-    }
+    let (err, _) = unsafe {
+        sbi_ecall(
+            SBI_EID_SRST,
+            0,
+            reset_type as usize,
+            SRST_REASON_SYSTEM_FAILURE as usize,
+        )
+    };
+    err == SBI_SUCCESS
 }
