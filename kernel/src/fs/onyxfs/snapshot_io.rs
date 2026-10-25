@@ -1,109 +1,23 @@
-//! Snapshot rollback and list operations.
-//!
-//! `snapshot_rollback` reads the per-snapshot header, RLE-decompresses each
-//! stored block (or copies it raw if it was stored uncompressed), and writes
-//! the result back to its original block number. This restores inode table,
-//! data bitmap, and all live data blocks captured at snapshot time — a true
-//! COW rollback.
-//!
-//! `snapshot_list` writes each snapshot name (NUL-terminated, newline-
-//! separated) into `names_out` and returns the number listed.
-//!
-//! See the # Safety sections on the two functions below for the caller
-//! contracts (user-buffer validity is established by the syscall layer).
-use super::compress::rle_decompress;
-use super::journal::{journal_commit, journal_log};
-use super::{
-    G_BUF, G_SB, SNAPSHOT_BLOCKS_EACH, SNAPSHOT_SLOT_BLKS, SNAPSHOT_SLOTS, read_block, write_block,
-};
-use onyx_core::errno::{Errno, KResult};
+//! Public rollback/list entry points under root VFS exclusion.
+use super::snapshot::Disk;
+use super::snapshot_engine;
+use super::{G_BUF, G_SB, read_block};
+use onyx_core::errno::KResult;
 use onyx_core::formats::{ONYFS_BLOCK_SIZE, SnapshotMeta};
 
-/// Restore filesystem state from a snapshot.
-///
-/// Bug #10 (fs critical list, item 11) fix: previously each block write
-/// went directly to disk via `write_block` with no journaling, so a crash
-/// mid-rollback left the filesystem in an inconsistent state (some blocks
-/// restored, others not). Now every block write is preceded by a
-/// `journal_log` call and the whole rollback is wrapped in a single
-/// transaction via `journal_commit` at the end. If a crash occurs mid-
-/// rollback, the next mount's `journal_recover` will replay the remaining
-/// writes and bring the filesystem to a consistent snapshot-restored state.
-///
+/// Restore a snapshot, retaining a durable pending marker until every full
+/// target block has been restored. Mount completes interrupted restores.
 /// # Safety
-///
-/// Caller must not invoke onyxfs operations concurrently from multiple harts
-/// (shared G_BUF scratch global, journal head, and the non-atomic restore of
-/// live blocks). `snapshot_id` is validated against snapshot_count below.
-pub unsafe fn snapshot_rollback(snapshot_id: u32) -> KResult<()> {
-    // SAFETY: single-threaded onyxfs exclusion (see # Safety); n_blocks is
-    // capped at SNAPSHOT_SLOTS so header offsets stay inside the header
-    // block, and comp_size is checked before every slice.
+/// Caller holds root filesystem exclusion and no other disk I/O can interleave.
+pub unsafe fn snapshot_rollback(id: u32) -> KResult<()> {
+    // SAFETY: caller owns the root mount lock across commit and restore.
     unsafe {
-        let sb_ptr = &raw const G_SB;
-        if (*sb_ptr).snapshot_area_start == 0 {
-            return Err(Errno::NoSys);
-        }
-        if snapshot_id == 0 || snapshot_id > (*sb_ptr).snapshot_count {
-            return Err(Errno::NoEnt);
-        }
-        let snap_data_start =
-            (*sb_ptr).snapshot_area_start + 1 + (snapshot_id - 1) * SNAPSHOT_BLOCKS_EACH;
-
-        let mut header = [0u8; ONYFS_BLOCK_SIZE];
-        read_block(snap_data_start, &mut header)?;
-        let n_blocks = u32::from_le_bytes([header[0], header[1], header[2], header[3]]) as usize;
-        if n_blocks > SNAPSHOT_SLOTS as usize {
-            return Err(Errno::Io);
-        }
-
-        let mut comp_buf = [0u8; 8192];
-        let mut blk_buf = [0u8; ONYFS_BLOCK_SIZE];
-        for i in 0..n_blocks {
-            let off = 4 + i * 8;
-            let block_num = u32::from_le_bytes([
-                header[off],
-                header[off + 1],
-                header[off + 2],
-                header[off + 3],
-            ]);
-            let comp_size = u32::from_le_bytes([
-                header[off + 4],
-                header[off + 5],
-                header[off + 6],
-                header[off + 7],
-            ]) as usize;
-
-            // Read 2 blocks of compressed data.
-            let slot_start = snap_data_start + 1 + (i as u32) * SNAPSHOT_SLOT_BLKS;
-            read_block(slot_start, &mut blk_buf)?;
-            comp_buf[..ONYFS_BLOCK_SIZE].copy_from_slice(&blk_buf);
-            read_block(slot_start + 1, &mut blk_buf)?;
-            comp_buf[ONYFS_BLOCK_SIZE..8192].copy_from_slice(&blk_buf);
-
-            let mut out_buf = [0u8; ONYFS_BLOCK_SIZE];
-            if comp_size == ONYFS_BLOCK_SIZE {
-                // Stored raw.
-                out_buf.copy_from_slice(&comp_buf[..ONYFS_BLOCK_SIZE]);
-            } else {
-                let dec = rle_decompress(&comp_buf[..comp_size], &mut out_buf);
-                if dec != ONYFS_BLOCK_SIZE {
-                    return Err(Errno::Io);
-                }
-            }
-            // Bug #10 fix: journal the write so a crash mid-rollback can be
-            // recovered on next mount. Without this, a partial rollback would
-            // leave the filesystem with a mix of pre-rollback and post-rollback
-            // blocks — silently corrupting it.
-            journal_log(block_num, &out_buf)?;
-            write_block(block_num, &out_buf)?;
-        }
-        // Commit the rollback transaction. After this point the rollback is
-        // durable: either all blocks are restored or, if a crash happened
-        // before commit, the next mount's journal_recover will replay the
-        // remaining writes.
-        journal_commit()?;
-        Ok(())
+        super::snapshot_access::access(super::G_SNAPSHOT_QUARANTINED)?;
+        super::journal::journal_commit()?;
+        let mut quarantine = false;
+        let result = snapshot_engine::rollback(&mut Disk, &mut G_SB, id, &mut quarantine);
+        super::G_SNAPSHOT_QUARANTINED = quarantine;
+        result
     }
 }
 

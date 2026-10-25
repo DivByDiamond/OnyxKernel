@@ -20,6 +20,7 @@
 /// encode the caller contract: `dst` must have the capacity documented above
 /// (writes are bounds-checked and return 0 on overflow) and callers must not
 /// invoke onyxfs snapshot code concurrently from multiple harts.
+#[cfg(test)]
 pub(super) unsafe fn rle_compress(src: &[u8], dst: &mut [u8]) -> usize {
     let n = src.len();
     let mut i: usize = 0;
@@ -107,5 +108,5 @@ pub(super) unsafe fn rle_decompress(src: &[u8], dst: &mut [u8]) -> usize {
             out += count;
         }
     }
-    out
+    if i == src.len() { out } else { 0 }
 }

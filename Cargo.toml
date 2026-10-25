@@ -28,3 +28,6 @@ codegen-units = 1
 opt-level = "z"
 debug = true
 strip = "debuginfo"
+
+[patch.crates-io]
+miniz_oxide = { path = "vendor/miniz_oxide" }

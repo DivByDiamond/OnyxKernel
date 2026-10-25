@@ -24,6 +24,7 @@ pub unsafe fn mount(dev: usize, lba_offset: u32) -> KResult<()> {
             Arg::from(dev as u32),
             Arg::from(lba_offset)
         );
+        super::G_SNAPSHOT_QUARANTINED = false;
         G_DEV = dev;
         G_LBA_BASE = lba_offset;
         {
@@ -45,10 +46,11 @@ pub unsafe fn mount(dev: usize, lba_offset: u32) -> KResult<()> {
         };
         G_VERSION = ver;
         G_SB = sb_val;
-        grow_to_device()?;
-        // Crash recovery: replay any committed-but-unapplied journal entries
-        // before the filesystem is handed to the VFS layer.
+        // Complete earlier metadata transactions, then any full-block snapshot
+        // redo, before growth or exposing filesystem state to the VFS layer.
         super::journal::journal_recover()?;
+        super::snapshot::snapshot_recover()?;
+        grow_to_device()?;
         Ok(())
     }
 }
@@ -140,6 +142,7 @@ pub(super) unsafe fn persist_superblock() -> KResult<()> {
 
 /// Number of inode-table blocks occupied by the current filesystem.
 #[inline]
+#[allow(dead_code)]
 pub(super) unsafe fn inode_table_block_count() -> u32 {
     // SAFETY: reads only G_SB (set by mount) and calls inodes_per_block(); no
     // pointer arithmetic beyond the validated superblock fields.

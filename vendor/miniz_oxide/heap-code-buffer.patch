@@ -1,0 +1,51 @@
+--- a/src/deflate/core.rs
++++ b/src/deflate/core.rs
+@@ -1,7 +1,7 @@
+ //! Streaming compression functionality.
+ 
+ use alloc::boxed::Box;
+-#[cfg(target_arch = "wasm32")]
++#[cfg(any(target_arch = "wasm32", feature = "heap-code-buffer"))]
+ use alloc::vec;
+ use core::convert::TryInto;
+ use core::{cmp, mem};
+@@ -1580,9 +1580,9 @@
+ 
+ #[derive(Clone)]
+ pub(crate) struct LZOxide {
+-    #[cfg(target_arch = "wasm32")]
++    #[cfg(any(target_arch = "wasm32", feature = "heap-code-buffer"))]
+     pub codes: Box<[u8; LZ_CODE_BUF_SIZE]>,
+-    #[cfg(not(target_arch = "wasm32"))]
++    #[cfg(not(any(target_arch = "wasm32", feature = "heap-code-buffer")))]
+     pub codes: [u8; LZ_CODE_BUF_SIZE],
+     pub code_position: usize,
+     pub flag_position: usize,
+@@ -1592,7 +1592,7 @@
+ }
+ 
+ impl LZOxide {
+-    #[cfg(target_arch = "wasm32")]
++    #[cfg(any(target_arch = "wasm32", feature = "heap-code-buffer"))]
+     fn new() -> Self {
+         LZOxide {
+             codes: vec![0; LZ_CODE_BUF_SIZE]
+@@ -1606,7 +1606,7 @@
+         }
+     }
+ 
+-    #[cfg(not(target_arch = "wasm32"))]
++    #[cfg(not(any(target_arch = "wasm32", feature = "heap-code-buffer")))]
+     const fn new() -> Self {
+         LZOxide {
+             codes: [0; LZ_CODE_BUF_SIZE],
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -44,6 +44,7 @@
+ resolver = "1"
+ 
+ [features]
++heap-code-buffer = []
+ block-boundary = []
+ default = ["with-alloc"]
+ rustc-dep-of-std = [

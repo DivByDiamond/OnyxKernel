@@ -6,7 +6,9 @@
 //! type and the save/apply primitives plus a mount helper that returns a
 //! context without leaving the singletons pointed at the new volume.
 
-use super::{G_DEV, G_JOURNAL_HEAD, G_LBA_BASE, G_SB, G_VERSION, OnyfsSuper, mount};
+use super::{
+    G_DEV, G_JOURNAL_HEAD, G_LBA_BASE, G_SB, G_SNAPSHOT_QUARANTINED, G_VERSION, OnyfsSuper, mount,
+};
 use onyx_core::errno::KResult;
 
 /// Snapshot of the onyxfs singleton state for one mounted volume.
@@ -17,6 +19,7 @@ pub struct OnyxCtx {
     pub version: u32,
     pub sb: OnyfsSuper,
     pub journal_head: u32,
+    pub snapshot_quarantined: bool,
 }
 
 /// Capture the current singleton state.
@@ -35,6 +38,7 @@ pub unsafe fn save_ctx() -> OnyxCtx {
             version: G_VERSION,
             sb: G_SB,
             journal_head: G_JOURNAL_HEAD,
+            snapshot_quarantined: G_SNAPSHOT_QUARANTINED,
         }
     }
 }
@@ -53,6 +57,7 @@ pub unsafe fn apply_ctx(ctx: &OnyxCtx) {
         G_VERSION = ctx.version;
         G_SB = ctx.sb;
         G_JOURNAL_HEAD = ctx.journal_head;
+        G_SNAPSHOT_QUARANTINED = ctx.snapshot_quarantined;
     }
 }
 

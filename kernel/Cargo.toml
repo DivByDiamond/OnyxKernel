@@ -6,6 +6,7 @@ license.workspace = true
 
 [dependencies]
 onyx_core = { path = "../core" }
+miniz_oxide = { version = "=0.9.1", default-features = false, features = ["with-alloc", "heap-code-buffer"] }
 
 [features]
 default = []

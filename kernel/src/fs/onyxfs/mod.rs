@@ -21,6 +21,9 @@ pub mod read;
 pub mod readdir;
 pub mod rename;
 pub mod snapshot;
+mod snapshot_access;
+mod snapshot_engine;
+mod snapshot_format;
 pub mod snapshot_io;
 pub mod symlink;
 pub mod unlink;
@@ -70,9 +73,7 @@ pub(super) const ONYFS_V1_INODE_SIZE: usize = 64;
 /// v1 on-disk dirent size (legacy 36-byte format).
 pub(super) const ONYFS_V1_DIRENT_SIZE: usize = 36;
 
-/// Number of 4096-byte blocks reserved per snapshot in the snapshot area.
-/// Must be large enough to hold the inode table copy + data bitmap copy.
-pub(super) const SNAPSHOT_BLOCKS_EACH: u32 = 64;
+pub(super) static mut G_SNAPSHOT_QUARANTINED: bool = false;
 
 pub(super) static mut G_DEV: usize = 0;
 pub(super) static mut G_LBA_BASE: u32 = 0;
@@ -103,6 +104,13 @@ pub(super) static mut G_BUF: [u8; ONYFS_BLOCK_SIZE] = [0; ONYFS_BLOCK_SIZE];
 pub(super) static mut G_JOURNAL_HEAD: u32 = 0;
 
 pub(super) unsafe fn read_block(blk: u32, buf: &mut [u8; ONYFS_BLOCK_SIZE]) -> KResult<()> {
+    // SAFETY: all accesses are under root mount exclusion, including this gate.
+    unsafe {
+        snapshot_access::access(G_SNAPSHOT_QUARANTINED)?;
+        raw_read_block(blk, buf)
+    }
+}
+pub(super) unsafe fn raw_read_block(blk: u32, buf: &mut [u8; ONYFS_BLOCK_SIZE]) -> KResult<()> {
     // SAFETY: buf points to a caller-owned ONYFS_BLOCK_SIZE buffer; G_DEV/G_LBA_BASE
     // are set by mount() before any I/O. Caller must not run onyxfs I/O concurrently
     // from multiple harts (globals are unsynchronized).
@@ -120,6 +128,13 @@ pub(super) unsafe fn read_block(blk: u32, buf: &mut [u8; ONYFS_BLOCK_SIZE]) -> K
 /// Write a 4096-byte block back to disk. Used by `update_mtime`,
 /// `write_inode`, and the snapshot management stubs.
 pub(super) unsafe fn write_block(blk: u32, buf: &[u8; ONYFS_BLOCK_SIZE]) -> KResult<()> {
+    // SAFETY: all accesses are under root mount exclusion, including this gate.
+    unsafe {
+        snapshot_access::access(G_SNAPSHOT_QUARANTINED)?;
+        raw_write_block(blk, buf)
+    }
+}
+pub(super) unsafe fn raw_write_block(blk: u32, buf: &[u8; ONYFS_BLOCK_SIZE]) -> KResult<()> {
     // SAFETY: buf points to a fully initialized ONYFS_BLOCK_SIZE buffer owned by the
     // caller; G_DEV/G_LBA_BASE were set by mount(). Same exclusion contract as read_block.
     unsafe {
