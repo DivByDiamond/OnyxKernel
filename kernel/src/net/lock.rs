@@ -126,8 +126,7 @@ pub fn owned_depth() -> usize {
 /// depth). The harness runs `#[test]` fns in parallel and the test
 /// `hart_id()` is always 0, so the recursion fast-path treats every test
 /// thread as the same owner: without this guard the "recursive" lock gives
-/// the tests no mutual exclusion at all (docs/TESTING.md, "Ограничения
-/// текущего прогона"). Every test under `kernel/src/net` takes it as its
+/// the tests no mutual exclusion at all (the test-harness limitations note in docs/TESTING.md). Every test under `kernel/src/net` takes it as its
 /// first statement; it is a local binding, so a panicking test releases it
 /// while unwinding, and poisoning is ignored on purpose — one failed
 /// assertion must not cascade into every later test.

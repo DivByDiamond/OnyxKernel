@@ -34,7 +34,7 @@ fn echo_char(b: u8) {
     // (fs_sys/read_write.rs): the UART MMIO register is shared hardware,
     // and this keystroke-echo path wrote to it completely unlocked,
     // another real cross-hart UART race found while chasing the SMP crash
-    // (todo.md, "Отдельный SMP-краш под -smp 2").
+    // (docs/history/2026-09-investigations.md, "SMP crash under -smp 2").
     //
     // The fb echo (console_putc) takes the same lock: it paints the
     // console back buffer, and painting under the lock keeps the presenter

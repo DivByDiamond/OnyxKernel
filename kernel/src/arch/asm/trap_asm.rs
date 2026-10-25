@@ -63,8 +63,7 @@ trap_entry:
 trap_return:
     ld ra, 0(sp)
     ld gp, 16(sp)
-    // Root-cause fix (SMP crash, todo.md "Отдельный SMP-краш под
-    // -smp 2"): tp is this kernel's hart-id register (hart_id() is a raw
+    // Root-cause fix (SMP crash, docs/history/2026-09-investigations.md, "SMP crash under -smp 2"): tp is this kernel's hart-id register (hart_id() is a raw
     // `mv <reg>, tp` read everywhere), not an ordinary per-context register
     // — it must always equal the PHYSICAL hart currently executing, never
     // whatever a trapframe happened to capture. Restoring it from the
@@ -215,8 +214,7 @@ drop_to_user:
     li s10, 0
     li s11, 0
     li gp, 0
-    // Root-cause fix (SMP crash, todo.md "Отдельный SMP-краш под
-    // -smp 2"): `tp` is NOT an ordinary callee-saved register in this
+    // Root-cause fix (SMP crash, docs/history/2026-09-investigations.md, "SMP crash under -smp 2"): `tp` is NOT an ordinary callee-saved register in this
     // kernel — every hart's `hart_id()` is a raw `mv <reg>, tp` read, and
     // the entire scheduler (G_HART_CURRENT, runqueues, idle contexts,
     // UART_LOCK ownership, ...) trusts it identifies which physical hart

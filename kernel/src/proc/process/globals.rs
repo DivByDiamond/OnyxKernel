@@ -17,7 +17,7 @@ pub static mut G_HART_CURRENT: [*mut Proc; MAX_HARTS] = [ptr::null_mut(); MAX_HA
 
 pub static mut G_HART_IDLE_TF: [TrapFrame; MAX_HARTS] = [TrapFrame::zero(); MAX_HARTS];
 
-/// Root-cause fix (SMP crash, todo.md "Отдельный SMP-краш под -smp 2"):
+/// Root-cause fix (SMP crash, docs/history/2026-09-investigations.md, "SMP crash under -smp 2"):
 /// tracks, per hart, whether `G_HART_IDLE_TF[hart]` holds a real captured
 /// idle context yet. Secondary harts always populate theirs before any
 /// process can run on them (`sched_enter_idle` is their boot entry, so their

@@ -184,8 +184,7 @@ pub fn dump_all<W: onyx_core::fmt::Write>(w: &mut W) {
     // degrade to a best-effort unlocked read instead of deadlocking the
     // panic handler.
     //
-    // Root-cause fix (SMP crash, todo.md "Отдельный SMP-краш под
-    // -smp 2"): the "best-effort unlocked read" used to walk
+    // Root-cause fix (SMP crash, docs/history/2026-09-investigations.md, "SMP crash under -smp 2"): the "best-effort unlocked read" used to walk
     // `G_ALL_PROCS`/`(*cur).all_next` anyway when the lock wasn't held —
     // but another hart concurrently unlinking/relinking a node (exit()'s
     // auto-reap unlink, publish_ready's list insert, ...) can leave `cur`

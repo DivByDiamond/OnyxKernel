@@ -55,8 +55,7 @@ pub(crate) unsafe fn launch() -> ! {
         );
 
         proc::init();
-        // Root-cause fix (SMP crash, todo.md "Отдельный SMP-краш под
-        // -smp 2"): unlike every other hart, the boot hart never calls
+        // Root-cause fix (SMP crash, docs/history/2026-09-investigations.md, "SMP crash under -smp 2"): unlike every other hart, the boot hart never calls
         // `sched_enter_idle()` itself — it drops straight into
         // `enter_user(1)` below — so nothing would ever populate
         // `G_HART_IDLE_TF[0]` before the first time this hart genuinely

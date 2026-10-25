@@ -197,8 +197,7 @@ unsafe fn free_subtree(table: *mut u64, level: u32) {
             let is_leaf = pte & PTE_LEAF != 0;
             let child_pa = (pte & PTE_PPN_MASK) >> PTE_PPN_SHIFT << 12;
             if is_leaf {
-                // Root-cause fix (SMP crash, todo.md "Отдельный SMP-краш под
-                // -smp 2"): every process root carries 3 top-level 1 GiB
+                // Root-cause fix (SMP crash, docs/history/2026-09-investigations.md, "SMP crash under -smp 2"): every process root carries 3 top-level 1 GiB
                 // identity leaf PTEs installed by onx::load (kernel::load_into)
                 // to keep kernel code/data reachable after `csrw satp` — see
                 // the comment in onx/segments.rs. Those leaves are

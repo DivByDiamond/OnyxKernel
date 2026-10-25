@@ -52,7 +52,7 @@ pub unsafe fn is_idle() -> bool {
 /// Seed `G_HART_IDLE_TF[hartid]` with a synthetic-but-valid resume context
 /// pointing at `sched_enter_idle`, and mark it captured.
 ///
-/// Root-cause fix (SMP crash, todo.md "Отдельный SMP-краш под -smp 2"):
+/// Root-cause fix (SMP crash, docs/history/2026-09-investigations.md, "SMP crash under -smp 2"):
 /// every hart except the boot hart calls `sched_enter_idle()` directly at
 /// boot (`arch/smp/secondary.rs`), so its first real trap-out of `wfi`
 /// naturally populates `G_HART_IDLE_TF` via `sched_yield`'s normal capture

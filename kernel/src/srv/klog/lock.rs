@@ -7,7 +7,7 @@ use core::sync::atomic::{AtomicI32, AtomicU32, Ordering};
 /// UART MMIO register, producing garbled log lines that are unreadable
 /// exactly when they matter most (a crash on one hart while another is
 /// still printing). Diagnostic instrumentation for the SMP crash
-/// investigation (todo.md, "Отдельный SMP-краш под -smp 2"), kept as a
+/// investigation (docs/history/2026-09-investigations.md, "SMP crash under -smp 2"), kept as a
 /// permanent fix since the underlying data race is real regardless.
 ///
 /// Reentrant by hart: a fault that occurs while THIS hart is already mid-

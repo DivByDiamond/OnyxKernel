@@ -208,8 +208,7 @@ drop_to_user:
     li s10, 0
     li s11, 0
     li gp, 0
-    // Root-cause fix (SMP crash, OnyxKernel todo.md "Отдельный SMP-краш
-    // под -smp 2"): keep `tp` (this kernel's hart-id register — see the
+    // Root-cause fix (SMP crash, OnyxKernel docs/history/2026-09-investigations.md, "SMP crash under -smp 2"): keep `tp` (this kernel's hart-id register — see the
     // matching comment in trap_asm.rs) instead of zeroing it here. No
     // userspace code reads tp for anything, so this leaks nothing
     // meaningful; `gp` stays zeroed as before.

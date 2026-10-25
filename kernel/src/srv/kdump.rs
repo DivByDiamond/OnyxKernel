@@ -65,8 +65,7 @@ pub unsafe fn kdump() {
         let args: &[Arg] = &[Arg::from(online)];
         vformat(&mut w, "online_harts=%d\n", args);
 
-        // Root-cause fix (SMP crash, todo.md "Отдельный SMP-краш под
-        // -smp 2"): a frame-pointer backtrace used to run here, walking
+        // Root-cause fix (SMP crash, docs/history/2026-09-investigations.md, "SMP crash under -smp 2"): a frame-pointer backtrace used to run here, walking
         // `s0` as an fp-chain (`[fp-8]=ra`, `[fp-16]=old fp`). This project
         // builds with `-C force-frame-pointers=no` (.cargo/config.toml), so
         // `s0` is an ordinary scratch register with no guaranteed fp-chain

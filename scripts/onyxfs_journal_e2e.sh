@@ -2,7 +2,7 @@
 # onyxfs_journal_e2e.sh — OnyxFS v2 journal crash-recovery e2e test.
 #
 # Automated replacement for the manual crash-recovery QEMU loop
-# (todo.md "journal crash-recovery с реальным блочным I/O"). Two controls:
+# (docs/history/2026-09-investigations.md, "journal crash-recovery e2e"). Two controls:
 #
 #   1. positive: inject a COMMITTED transaction (commit_end present) into
 #      the journal area of a boot.img copy -> after a QEMU boot, mount()'s
