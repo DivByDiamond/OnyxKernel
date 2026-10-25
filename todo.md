@@ -15,14 +15,15 @@
 ## 2. P1 — ближайшие задачи
 
 _Сделано 2026-10-25 и ушло в архив: TCP recv-окно 8 KiB (`e0dc146`), FAT32
-write/create/unlink/truncate через VFS + LFN + FSINFO (`5e92115`)._
+write/create/unlink/truncate через VFS + LFN + FSINFO (`5e92115`), совместимый
+с crypt(3) `$5$` sha256crypt (`5b21d00`). Лимит памяти сборки 6 GiB —
+`OnyxOS/scripts/mem-limit.sh`._
 
 | ID | Задача | Где | Статус / что осталось |
 |----|--------|-----|------------------------|
 | N2 | **obrowse: стадии C/D вживую** | `OnyxApps/apps/obrowse` | Стадии A–D в коде; нужен сквозной прогон URL → DNS → TCP → GET → HTML → render → переход по ссылке → back |
 | D1 | **UART IRQ-driven RX** | `drivers/uart.rs`, PLIC | Сейчас только LSR-poll в `getc`, ни одной регистрации в PLIC. Нужен RX-буфер + обработчик PLIC |
 | D2 | **SBI: spec version + SRST** | `arch/sbi.rs`, `arch/asm/mtrap*.rs`, `syscall/power_sys.rs` | В `sbi.rs` только legacy v0.1 `set_timer`. Нужны базовое расширение (`get_spec_version`, `get_impl_id`, `probe_extension`) и SRST (`system_reset`), причём и через собственный M-mode шим (`-bios none`), и через OpenSBI (`smode`) |
-| S1 | **`$5$` sha256crypt** | `core/src/crypto/kdf.rs` + новый модуль | Текущая схема несовместима с glibc: hex вместо crypt-base64, фиксированные 10k раундов вместо A/B/DP/DS. Нужны: совместимый алгоритм, rounds, миграция старых хэшей (старые обязаны продолжать проверяться), locked-политика сохраняется |
 | U1 | **PTY-мультиплексор (userspace)** | `fs/pty/*` готово; приложение — нет | Ядро PTY готово (2026-09-01: 4 пары, `/dev/ptmx`, `/dev/pts/N`, winsize, poll, O_NONBLOCK). Не написан сам мультиплексор (tmux-подобный: панели, переключение, resize) |
 
 ## 3. P2 — backlog по подсистемам
