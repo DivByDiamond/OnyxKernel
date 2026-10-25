@@ -1,5 +1,5 @@
 use super::conn::{
-    BUF_SIZE, CONNS, TIMEWAIT_US, TcpConn, alloc_conn, alloc_local_port, sweep_timewait,
+    CONNS, RECV_BUF_SIZE, SEND_BUF_SIZE, TIMEWAIT_US, TcpConn, alloc_conn, alloc_local_port, sweep_timewait,
 };
 use super::state::{SEG_ACK, drain_acked, tcp_transition};
 
@@ -15,9 +15,9 @@ pub(super) fn test_conn() -> TcpConn {
         snd_una: 1000,
         snd_nxt: 1001,
         rcv_nxt: 0,
-        send_buf: [0; BUF_SIZE],
+        send_buf: [0; SEND_BUF_SIZE],
         send_len: 0,
-        recv_buf: [0; BUF_SIZE],
+        recv_buf: [0; RECV_BUF_SIZE],
         recv_len: 0,
         recv_head: 0,
         peer_fin: false,
@@ -169,9 +169,9 @@ fn test_conn_table_alloc_port_sweep() {
             snd_una: 0,
             snd_nxt: 0,
             rcv_nxt: 0,
-            send_buf: [0; BUF_SIZE],
+            send_buf: [0; SEND_BUF_SIZE],
             send_len: 0,
-            recv_buf: [0; BUF_SIZE],
+            recv_buf: [0; RECV_BUF_SIZE],
             recv_len: 0,
             recv_head: 0,
             peer_fin: false,
@@ -217,16 +217,16 @@ fn reading_a_full_receive_window_requests_an_ack_and_handles_persist_probe() {
     let _serial = crate::net::lock::test_serial();
     let mut c = test_conn();
     c.state=2; c.rcv_nxt=5000;
-    let payload=[b'x';BUF_SIZE];
+    let payload=[b'x';RECV_BUF_SIZE];
     tcp_transition(&mut c,5000,1001,0x10,&payload,0);
-    assert_eq!(c.recv_len,BUF_SIZE);
+    assert_eq!(c.recv_len,RECV_BUF_SIZE);
     let mut output=[0;512];
     let (n,notify)=super::sock::read_received(&mut c,&mut output).unwrap();
-    assert_eq!(n,512);assert!(notify);assert_eq!(BUF_SIZE-c.recv_len,512);
+    assert_eq!(n,512);assert!(notify);assert_eq!(RECV_BUF_SIZE-c.recv_len,512);
     assert_eq!(output,[b'x';512]);
     let seq=c.rcv_nxt.wrapping_sub(1);
     assert_eq!(tcp_transition(&mut c,seq,1001,0x10,b"x",0),[SEG_ACK,0]);
-    assert_eq!(c.recv_len,BUF_SIZE-512);
+    assert_eq!(c.recv_len,RECV_BUF_SIZE-512);
 }
 
 #[test]

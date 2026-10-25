@@ -2,7 +2,7 @@ use crate::net::lock::{net_lock, net_unlock};
 use crate::net::poll;
 use onyx_core::errno::{Errno, KResult};
 
-use super::conn::{BUF_SIZE, CONNS, TcpConn, alloc_conn, alloc_local_port, send_tcp_seg};
+use super::conn::{CONNS, RECV_BUF_SIZE, SEND_BUF_SIZE, TcpConn, alloc_conn, alloc_local_port, send_tcp_seg};
 
 /// # Safety: kernel context with SIE clear; the connect (SYN send + ACK
 /// wait loop with poll) runs under net_lock(), serializing concurrent TCP
@@ -41,9 +41,9 @@ unsafe fn tcp_connect_inner(dst_ip: [u8; 4], port: u16) -> KResult<usize> {
             snd_una: isn,
             snd_nxt: isn.wrapping_add(1),
             rcv_nxt: 0,
-            send_buf: [0; BUF_SIZE],
+            send_buf: [0; SEND_BUF_SIZE],
             send_len: 0,
-            recv_buf: [0; BUF_SIZE],
+            recv_buf: [0; RECV_BUF_SIZE],
             recv_len: 0,
             recv_head: 0,
             peer_fin: false,
@@ -70,7 +70,7 @@ unsafe fn tcp_connect_inner(dst_ip: [u8; 4], port: u16) -> KResult<usize> {
 
 /// # Safety: indexes CONNS[cid] under net_lock() (net sync fix, todo P1 #4) — a concurrent recv/send/close or poll handler on another hart serializes behind the lock instead of racing the slot.
 pub unsafe fn tcp_send(cid: usize, data: &[u8]) -> KResult<usize> {
-    // SAFETY: conn checked non-empty; copy bounds-checked against BUF_SIZE - send_len; slot access under net_lock().
+    // SAFETY: conn checked non-empty; copy bounds-checked against SEND_BUF_SIZE - send_len; slot access under net_lock().
     unsafe {
         net_lock();
         let r = tcp_send_inner(cid, data);
@@ -85,7 +85,7 @@ pub unsafe fn tcp_send(cid: usize, data: &[u8]) -> KResult<usize> {
 ///
 /// Caller contract: net_lock() held; valid cid.
 unsafe fn tcp_send_inner(cid: usize, data: &[u8]) -> KResult<usize> {
-    // SAFETY: conn checked non-empty; copy bounds-checked against BUF_SIZE - send_len; net_lock() held by caller.
+    // SAFETY: conn checked non-empty; copy bounds-checked against SEND_BUF_SIZE - send_len; net_lock() held by caller.
     unsafe {
         let mut conn = CONNS.get(cid).and_then(|slot| *slot).ok_or(Errno::Inval)?;
         if conn.state != 2 && conn.state != 7 {
@@ -93,7 +93,7 @@ unsafe fn tcp_send_inner(cid: usize, data: &[u8]) -> KResult<usize> {
         }
         // Send space is freed as ACKs advance snd_una (drain_acked); send_len counts unacked bytes.
         let available=usize::from(conn.peer_window).saturating_sub(conn.send_len);
-        let n = data.len().min(BUF_SIZE - conn.send_len).min(536).min(available);
+        let n = data.len().min(SEND_BUF_SIZE - conn.send_len).min(536).min(available);
         conn.send_buf[conn.send_len..conn.send_len + n].copy_from_slice(&data[..n]);
         if n>0 && conn.send_len==0 { conn.last_tx_us=super::conn::now_us(); conn.retries=0; }
         conn.send_len += n;
@@ -107,7 +107,7 @@ unsafe fn tcp_send_inner(cid: usize, data: &[u8]) -> KResult<usize> {
 
 /// # Safety: indexes CONNS[cid] under net_lock() — a concurrent recv or poll handler would otherwise corrupt the ring indices.
 pub unsafe fn tcp_recv(cid: usize, buf: &mut [u8]) -> KResult<usize> {
-    // SAFETY: conn checked non-empty; ring reads masked % BUF_SIZE; head/len advanced under net_lock().
+    // SAFETY: conn checked non-empty; ring reads masked % RECV_BUF_SIZE; head/len advanced under net_lock().
     unsafe {
         net_lock();
         let r = tcp_recv_inner(cid, buf);
@@ -122,7 +122,7 @@ pub unsafe fn tcp_recv(cid: usize, buf: &mut [u8]) -> KResult<usize> {
 ///
 /// Caller contract: net_lock() held; valid cid.
 unsafe fn tcp_recv_inner(cid: usize, buf: &mut [u8]) -> KResult<usize> {
-    // SAFETY: conn checked non-empty; ring reads masked % BUF_SIZE; net_lock() held by caller.
+    // SAFETY: conn checked non-empty; ring reads masked % RECV_BUF_SIZE; net_lock() held by caller.
     unsafe {
         let mut conn = CONNS.get(cid).and_then(|slot| *slot).ok_or(Errno::Inval)?;
         let (n, notify) = read_received(&mut conn, buf)?;
@@ -141,9 +141,9 @@ pub(super) fn read_received(conn: &mut TcpConn, buf: &mut [u8]) -> KResult<(usiz
     }
     let n = buf.len().min(conn.recv_len);
     for (i,dst) in buf[..n].iter_mut().enumerate() {
-        *dst = conn.recv_buf[(conn.recv_head+i)%BUF_SIZE];
+        *dst = conn.recv_buf[(conn.recv_head+i)%RECV_BUF_SIZE];
     }
-    conn.recv_head = (conn.recv_head+n)%BUF_SIZE;
+    conn.recv_head = (conn.recv_head+n)%RECV_BUF_SIZE;
     conn.recv_len -= n;
     Ok((n,n>0 && !conn.peer_fin))
 }

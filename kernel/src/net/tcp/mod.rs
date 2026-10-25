@@ -7,6 +7,8 @@ mod sock;
 mod state;
 mod retry;
 #[cfg(test)]
+mod recv_tests;
+#[cfg(test)]
 mod tests;
 
 pub use handle::handle_tcp;

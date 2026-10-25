@@ -4,7 +4,19 @@ use crate::net::lock::{net_lock, net_unlock};
 use crate::srv::timer;
 
 pub(in crate::net) const MAX_CONNS: usize = 8;
-pub(in crate::net) const BUF_SIZE: usize = 2048;
+
+/// Outbound ring: bytes buffered for transmission, freed as ACKs arrive.
+/// Bounded by the peer's advertised window anyway, so it stays small.
+pub(in crate::net) const SEND_BUF_SIZE: usize = 2048;
+
+/// Inbound ring: bytes accepted from the wire but not yet read by the
+/// application. This is also our advertised receive window (see
+/// `send_tcp_seg`), so a larger ring lets a peer blast a whole HTTP
+/// response before waiting for a window update — 2048 forced a round trip
+/// every 2KB. Kept well under the u16 window field and sized so the eight
+/// connection slots stay cheap in `.bss` (8 * ~10KB).
+pub(in crate::net) const RECV_BUF_SIZE: usize = 8192;
+
 pub(in crate::net) const TCP_HLEN: usize = 20;
 
 /// How long a connection stays in state 4 (TIMEWAIT-equivalent) before
@@ -29,9 +41,9 @@ pub(in crate::net) struct TcpConn {
     pub(in crate::net) snd_una: u32,
     pub(in crate::net) snd_nxt: u32,
     pub(in crate::net) rcv_nxt: u32,
-    pub(in crate::net) send_buf: [u8; BUF_SIZE],
+    pub(in crate::net) send_buf: [u8; SEND_BUF_SIZE],
     pub(in crate::net) send_len: usize,
-    pub(in crate::net) recv_buf: [u8; BUF_SIZE],
+    pub(in crate::net) recv_buf: [u8; RECV_BUF_SIZE],
     pub(in crate::net) recv_len: usize,
     pub(in crate::net) recv_head: usize,
     /// Set by the state machine when the peer's FIN is accepted: once the
@@ -97,7 +109,11 @@ pub(super) fn send_tcp_seg(c: &TcpConn, flags: u8, data: &[u8]) {
     seg[8..12].copy_from_slice(&c.rcv_nxt.to_be_bytes());
     let off_flags = ((TCP_HLEN as u16) / 4) << 12 | flags as u16;
     seg[12..14].copy_from_slice(&off_flags.to_be_bytes());
-    seg[14..16].copy_from_slice(&((BUF_SIZE-c.recv_len) as u16).to_be_bytes());
+    // Advertised receive window = free space in the inbound ring, clamped
+    // to the u16 wire field (RECV_BUF_SIZE is far below 65535 today, but a
+    // saturating cast keeps a future bump from silently truncating it).
+    let window = (RECV_BUF_SIZE - c.recv_len).min(u16::MAX as usize) as u16;
+    seg[14..16].copy_from_slice(&window.to_be_bytes());
     seg[16..18].copy_from_slice(&[0, 0]);
     seg[18..20].copy_from_slice(&[0, 0]);
     if !data.is_empty() {

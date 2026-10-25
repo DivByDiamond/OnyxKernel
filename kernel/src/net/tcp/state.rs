@@ -1,4 +1,4 @@
-use super::conn::{BUF_SIZE, TIMEWAIT_US};
+use super::conn::{RECV_BUF_SIZE, TIMEWAIT_US};
 
 pub(super) const FIN: u8 = 0x01;
 pub(super) const SYN: u8 = 0x02;
@@ -49,10 +49,10 @@ pub(super) fn tcp_transition(
             // persist probes and lets peers recover from a lost window update.
             let mut out = [if payload.is_empty() {0} else {SEG_ACK}, 0];
             if seq == c.rcv_nxt && !payload.is_empty() {
-                let n = payload.len().min(BUF_SIZE - c.recv_len);
-                let start = (c.recv_head + c.recv_len) % BUF_SIZE;
+                let n = payload.len().min(RECV_BUF_SIZE - c.recv_len);
+                let start = (c.recv_head + c.recv_len) % RECV_BUF_SIZE;
                 for (j, &b) in payload[..n].iter().enumerate() {
-                    c.recv_buf[(start + j) % BUF_SIZE] = b;
+                    c.recv_buf[(start + j) % RECV_BUF_SIZE] = b;
                 }
                 c.recv_len += n;
                 c.rcv_nxt = c.rcv_nxt.wrapping_add(n as u32);

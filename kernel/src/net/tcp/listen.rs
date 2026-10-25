@@ -1,5 +1,5 @@
 //! Bounded passive TCP listeners; accepted connections use the ordinary socket API.
-use super::{conn::{CONNS, TcpConn, BUF_SIZE, alloc_conn, alloc_local_port, send_tcp_seg}, state::{SYN,ACK}};
+use super::{conn::{CONNS, TcpConn, RECV_BUF_SIZE, SEND_BUF_SIZE, alloc_conn, alloc_local_port, send_tcp_seg}, state::{SYN,ACK}};
 use crate::net::lock::{net_lock,net_unlock};
 use onyx_core::errno::{Errno,KResult};
 const LISTENERS_MAX: usize = 8;
@@ -63,7 +63,7 @@ pub(in crate::net) unsafe fn incoming_syn(port:u16, remote:[u8;4], remote_port:u
             iface:crate::drivers::virtio_net::active_device(), listener:parent,
             state:5,src_port:port,dst_ip:remote,dst_port:remote_port,
             snd_una:isn,snd_nxt:isn.wrapping_add(1),rcv_nxt:seq.wrapping_add(1),
-            send_buf:[0;BUF_SIZE],send_len:0,recv_buf:[0;BUF_SIZE],recv_len:0,recv_head:0,
+            send_buf:[0;SEND_BUF_SIZE],send_len:0,recv_buf:[0;RECV_BUF_SIZE],recv_len:0,recv_head:0,
             peer_fin:false,tw_deadline_us:super::conn::now_us()+5_000_000,last_tx_us:super::conn::now_us(),retries:0,peer_window:window,
         };
         CONNS[cid]=Some(connection);
