@@ -1,5 +1,5 @@
 //! Bounded retransmission plans; no unbounded retry loops or retained socket borrows.
-use super::{conn::{TcpConn,CONNS,send_tcp_seg},state::{SYN,ACK,FIN}};
+use super::{conn::{TcpConn,CONNS,send_tcp_seg_tx},state::{SYN,ACK,FIN}};
 const RETRY_US:u64=1_000_000;
 const RETRIES:u8=5;
 #[derive(Debug,Clone,Copy,PartialEq,Eq)]
@@ -26,15 +26,23 @@ pub(super) unsafe fn tick(now:u64){
     // mutate CONNS, so no slot borrow may stay live across it.
     unsafe{
         if RUNNING{return;}RUNNING=true;
+        // Collect (slot, plan) pairs only: a `TcpConn` value is ~10 KB and
+        // copying it into the pending vector overflows the 64 KiB kstack
+        // (see `TcpTx`). The payload is re-read per entry below.
         let mut pending=alloc::vec::Vec::new();
-        for connection in CONNS.iter_mut().flatten(){
+        for (cid,connection) in CONNS.iter_mut().enumerate().filter_map(|(i,c)|c.as_mut().map(|c|(i,c))){
             if let Some(action)=plan(connection,now){
                 connection.snd_nxt=action.sequence;
-                pending.push((*connection,action));
+                pending.push((cid,action));
             }
         }
-        for (connection,action) in pending{
-            send_tcp_seg(&connection,action.flags,&connection.send_buf[..action.length]);
+        for (cid,action) in pending{
+            let Some(connection)=CONNS[cid].as_ref() else {continue;};
+            let tx=connection.tx();
+            let length=action.length.min(536);
+            let mut payload=[0u8;536];
+            payload[..length].copy_from_slice(&connection.send_buf[..length]);
+            send_tcp_seg_tx(tx,action.flags,&payload[..length]);
         }
         RUNNING=false;
     }

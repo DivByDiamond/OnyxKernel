@@ -16,13 +16,16 @@ _Сделано 2026-10-25 и ушло в архив: TCP recv-окно 8 KiB (`
 write/create/unlink/truncate через VFS + LFN + FSINFO (`5e92115`), совместимый
 с crypt(3) `$5$` sha256crypt (`5b21d00`), UART RX через PLIC с кольцом 4 KiB
 (`drivers/uart_rx.rs`), SBI base + SRST на обеих цепочках (`arch/sbi.rs`,
-`arch/asm/mtrap*.rs`) с `reboot`/`poweroff` в шелле. Лимит памяти сборки
+`arch/asm/mtrap*.rs`) с `reboot`/`poweroff` в шелле, obrowse вживую через
+QEMU slirp (`N2`: рендер → переход по ссылке → back) и PTY-мультиплексор
+`mux` (`U1`). По пути найдены и исправлены три дефекта: `TcpConn` копировался
+по значению и пробивал 64-КиБ kstack, `onyxcc` обрезал смещения > 2047 до
+12 бит (`addi`), и `onyxcc` знаково расширял 32-битные беззнаковые константы
+(`TIOCGPTN` уходил в ядро как `0xFFFFFFFF80045430`). Лимит памяти сборки
 6 GiB — `OnyxOS/scripts/mem-limit.sh`._
 
 | ID | Задача | Где | Статус / что осталось |
 |----|--------|-----|------------------------|
-| N2 | **obrowse: стадии C/D вживую** | `OnyxApps/apps/obrowse` | Стадии A–D в коде; нужен сквозной прогон URL → DNS → TCP → GET → HTML → render → переход по ссылке → back |
-| U1 | **PTY-мультиплексор (userspace)** | `fs/pty/*` готово; приложение — нет | Ядро PTY готово (2026-09-01: 4 пары, `/dev/ptmx`, `/dev/pts/N`, winsize, poll, O_NONBLOCK). Не написан сам мультиплексор (tmux-подобный: панели, переключение, resize) |
 
 ## 3. P2 — backlog по подсистемам
 

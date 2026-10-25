@@ -3,7 +3,7 @@ use core::sync::atomic::{AtomicU32, Ordering};
 use crate::net::G_IP;
 use crate::net::lock::{net_lock, net_unlock};
 
-use super::conn::{CONNS, TCP_HLEN, now_us, send_tcp_seg, sweep_timewait, tcp_checksum_ok};
+use super::conn::{CONNS, TCP_HLEN, now_us, send_tcp_seg_tx, sweep_timewait, tcp_checksum_ok};
 use super::state::{ACK, FIN, SEG_ACK, SEG_FIN_ACK, tcp_transition};
 
 /// Total inbound segments dropped for a bad checksum (logged once).
@@ -89,22 +89,31 @@ unsafe fn handle_tcp_inner(frame: &[u8], ip_start: usize, ihl: usize, total_len:
         let iface = crate::drivers::virtio_net::active_device();
         if let Some(cid) = CONNS.iter().position(|slot| slot.as_ref().is_some_and(|c|
             c.iface == iface && c.src_port == dport && c.dst_port == sport && c.dst_ip == sip)) {
-            // Do not retain a mutable socket-table borrow across TX's nested poll.
-            if let Some(mut connection) = CONNS[cid] {
-                let before=connection.state;
-                if flags & 0x04 != 0 {connection.state=6;connection.tw_deadline_us=now_us()+5_000_000;CONNS[cid]=Some(connection);return;}
-                connection.peer_window=u16::from_be_bytes([frame[tcp_off+14],frame[tcp_off+15]]);
-                let commands = tcp_transition(&mut connection, seq, ack, flags, payload, now_us());
-                CONNS[cid] = Some(connection);
-                if before==5 && (connection.state==2 || connection.state==7) { super::listen::established(cid,connection.listener); }
-                if before==5 && flags & super::state::SYN != 0 && seq.wrapping_add(1)==connection.rcv_nxt {
-                    let mut resend=connection;resend.snd_nxt=resend.snd_una;
-                    send_tcp_seg(&resend,super::state::SYN|ACK,&[]);
+            // Mutate the slot in place (no ~10 KB `TcpConn` copies: see
+            // `TcpTx`) and only hand scalar snapshots to the TX path, which
+            // can re-enter this function through a nested poll.
+            if let Some(connection) = CONNS[cid].as_mut() {
+                let before = connection.state;
+                if flags & 0x04 != 0 {
+                    connection.state = 6;
+                    connection.tw_deadline_us = now_us() + 5_000_000;
+                    return;
+                }
+                connection.peer_window = u16::from_be_bytes([frame[tcp_off + 14], frame[tcp_off + 15]]);
+                let commands = tcp_transition(connection, seq, ack, flags, payload, now_us());
+                if before == 5 && (connection.state == 2 || connection.state == 7) {
+                    super::listen::established(cid, connection.listener);
+                }
+                if before == 5 && flags & super::state::SYN != 0 && seq.wrapping_add(1) == connection.rcv_nxt {
+                    let mut tx = connection.tx();
+                    tx.snd_nxt = tx.snd_una;
+                    send_tcp_seg_tx(tx, super::state::SYN | ACK, &[]);
                 }
                 for command in commands {
+                    let tx = connection.tx();
                     match command {
-                        SEG_ACK => send_tcp_seg(&connection, ACK, &[]),
-                        SEG_FIN_ACK => send_tcp_seg(&connection, FIN | ACK, &[]),
+                        SEG_ACK => send_tcp_seg_tx(tx, ACK, &[]),
+                        SEG_FIN_ACK => send_tcp_seg_tx(tx, FIN | ACK, &[]),
                         _ => {},
                     }
                 }

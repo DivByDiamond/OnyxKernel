@@ -2,7 +2,7 @@ use crate::net::lock::{net_lock, net_unlock};
 use crate::net::poll;
 use onyx_core::errno::{Errno, KResult};
 
-use super::conn::{CONNS, RECV_BUF_SIZE, SEND_BUF_SIZE, TcpConn, alloc_conn, alloc_local_port, send_tcp_seg};
+use super::conn::{CONNS, RECV_BUF_SIZE, SEND_BUF_SIZE, TcpConn, alloc_conn, alloc_local_port, send_tcp_seg_tx};
 
 /// # Safety: kernel context with SIE clear; the connect (SYN send + ACK
 /// wait loop with poll) runs under net_lock(), serializing concurrent TCP
@@ -49,12 +49,22 @@ unsafe fn tcp_connect_inner(dst_ip: [u8; 4], port: u16) -> KResult<usize> {
             peer_fin: false,
             tw_deadline_us: 0,
         });
-        if let Some(mut conn) = CONNS[cid] { conn.snd_nxt=isn; send_tcp_seg(&conn, super::state::SYN, &[]); }
+        // The SYN consumes one sequence number: send it with `isn` while the
+        // stored `snd_nxt` stays `isn + 1` (it did when the slot was built).
+        // Mutating the stored value to `isn` here would make the peer's
+        // SYN-ACK (ack = isn + 1) fail the state machine's ack check.
+        if let Some(conn) = CONNS[cid].as_mut() {
+            let mut tx = conn.tx();
+            tx.snd_nxt = isn;
+            send_tcp_seg_tx(tx, super::state::SYN, &[]);
+        }
         for attempt in 0..50000 {
             if attempt > 0 && attempt % 10000 == 0
-                && let Some(mut conn)=CONNS[cid]
+                && let Some(conn) = CONNS[cid].as_mut()
             {
-                conn.snd_nxt=isn; send_tcp_seg(&conn,super::state::SYN,&[]);
+                let mut tx = conn.tx();
+                tx.snd_nxt = isn;
+                send_tcp_seg_tx(tx, super::state::SYN, &[]);
             }
             poll();
             if let Some(ref c) = CONNS[cid]
@@ -87,20 +97,33 @@ pub unsafe fn tcp_send(cid: usize, data: &[u8]) -> KResult<usize> {
 unsafe fn tcp_send_inner(cid: usize, data: &[u8]) -> KResult<usize> {
     // SAFETY: conn checked non-empty; copy bounds-checked against SEND_BUF_SIZE - send_len; net_lock() held by caller.
     unsafe {
-        let mut conn = CONNS.get(cid).and_then(|slot| *slot).ok_or(Errno::Inval)?;
+        // Mutate the slot in place: copying `TcpConn` by value costs ~10 KB
+        // of kernel stack per copy (see TcpTx).
+        let conn = CONNS
+            .get_mut(cid)
+            .and_then(|slot| slot.as_mut())
+            .ok_or(Errno::Inval)?;
         if conn.state != 2 && conn.state != 7 {
             return Err(Errno::Io);
         }
         // Send space is freed as ACKs advance snd_una (drain_acked); send_len counts unacked bytes.
-        let available=usize::from(conn.peer_window).saturating_sub(conn.send_len);
-        let n = data.len().min(SEND_BUF_SIZE - conn.send_len).min(536).min(available);
+        let available = usize::from(conn.peer_window).saturating_sub(conn.send_len);
+        let n = data
+            .len()
+            .min(SEND_BUF_SIZE - conn.send_len)
+            .min(536)
+            .min(available);
         conn.send_buf[conn.send_len..conn.send_len + n].copy_from_slice(&data[..n]);
-        if n>0 && conn.send_len==0 { conn.last_tx_us=super::conn::now_us(); conn.retries=0; }
+        if n > 0 && conn.send_len == 0 {
+            conn.last_tx_us = super::conn::now_us();
+            conn.retries = 0;
+        }
         conn.send_len += n;
-        let sent = conn;
+        let tx = conn.tx();
         conn.snd_nxt = conn.snd_nxt.wrapping_add(n as u32);
-        CONNS[cid] = Some(conn);
-        if n > 0 { send_tcp_seg(&sent, 0x18, &data[..n]); }
+        if n > 0 {
+            send_tcp_seg_tx(tx, 0x18, &data[..n]);
+        }
         Ok(n)
     }
 }
@@ -124,12 +147,17 @@ pub unsafe fn tcp_recv(cid: usize, buf: &mut [u8]) -> KResult<usize> {
 unsafe fn tcp_recv_inner(cid: usize, buf: &mut [u8]) -> KResult<usize> {
     // SAFETY: conn checked non-empty; ring reads masked % RECV_BUF_SIZE; net_lock() held by caller.
     unsafe {
-        let mut conn = CONNS.get(cid).and_then(|slot| *slot).ok_or(Errno::Inval)?;
-        let (n, notify) = read_received(&mut conn, buf)?;
-        CONNS[cid] = Some(conn);
-        // Publish consumed bytes before reentrant TX/ARP polling, with no
-        // mutable table borrow alive. Reopen the advertised receive window.
-        if notify { send_tcp_seg(&conn, super::state::ACK, &[]); }
+        let conn = CONNS
+            .get_mut(cid)
+            .and_then(|slot| slot.as_mut())
+            .ok_or(Errno::Inval)?;
+        let (n, notify) = read_received(conn, buf)?;
+        // Scalar snapshot only: the ACK reopens the advertised window and
+        // must not carry a 10 KB socket value onto the stack.
+        let tx = conn.tx();
+        if notify {
+            send_tcp_seg_tx(tx, super::state::ACK, &[]);
+        }
         Ok(n)
     }
 }
@@ -154,15 +182,20 @@ pub unsafe fn tcp_close(cid: usize) {
     unsafe {
         if cid>=super::conn::MAX_CONNS{return;}
         net_lock();
-        if let Some(mut connection)=CONNS[cid] {
-            if connection.state==2 || connection.state==7 {
-                let sent=connection;
-                connection.recv_len=0; // The application explicitly discarded unread data.
-                connection.state=3;connection.snd_nxt=connection.snd_nxt.wrapping_add(1);
-                connection.last_tx_us=super::conn::now_us();connection.retries=0;
-                CONNS[cid]=Some(connection);
-                send_tcp_seg(&sent,super::state::FIN|super::state::ACK,&[]);
-            }else{CONNS[cid]=None;}
+        if let Some(connection) = CONNS[cid].as_mut() {
+            if connection.state == 2 || connection.state == 7 {
+                // Snapshot before the FIN bump: the segment carries the
+                // pre-close sequence number, exactly as before.
+                let tx = connection.tx();
+                connection.recv_len = 0; // The application explicitly discarded unread data.
+                connection.state = 3;
+                connection.snd_nxt = connection.snd_nxt.wrapping_add(1);
+                connection.last_tx_us = super::conn::now_us();
+                connection.retries = 0;
+                send_tcp_seg_tx(tx, super::state::FIN | super::state::ACK, &[]);
+            } else {
+                CONNS[cid] = None;
+            }
         }
         net_unlock();
     }

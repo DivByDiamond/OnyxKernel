@@ -55,7 +55,45 @@ pub(in crate::net) struct TcpConn {
     pub(in crate::net) tw_deadline_us: u64,
 }
 
+/// Scalar snapshot of the fields the TX path reads.
+///
+/// `TcpConn` embeds a 2 KiB send ring and an 8 KiB receive ring, so passing
+/// it by value (or `*slot`-copying it out of `CONNS`) costs ~10 KB of kernel
+/// stack per copy. That is not affordable: the connect/RX path already runs
+/// with ~30 KB of stack in use, so such a copy pushed the stack past the
+/// 64 KiB kstack and rewrote the `Proc` header below it (found live while
+/// bringing `obrowse` up, todo N2). Anything that needs to send after
+/// mutating a slot snapshots these scalars instead.
+#[derive(Clone, Copy)]
+pub(in crate::net) struct TcpTx {
+    pub(in crate::net) iface: usize,
+    pub(in crate::net) src_port: u16,
+    pub(in crate::net) dst_ip: [u8; 4],
+    pub(in crate::net) dst_port: u16,
+    pub(in crate::net) snd_una: u32,
+    pub(in crate::net) snd_nxt: u32,
+    pub(in crate::net) rcv_nxt: u32,
+    pub(in crate::net) recv_len: usize,
+}
+
+impl TcpConn {
+    /// Copy out just the scalars `send_tcp_seg_tx` needs.
+    pub(in crate::net) fn tx(&self) -> TcpTx {
+        TcpTx {
+            iface: self.iface,
+            src_port: self.src_port,
+            dst_ip: self.dst_ip,
+            dst_port: self.dst_port,
+            snd_una: self.snd_una,
+            snd_nxt: self.snd_nxt,
+            rcv_nxt: self.rcv_nxt,
+            recv_len: self.recv_len,
+        }
+    }
+}
+
 pub(in crate::net) static mut CONNS: [Option<TcpConn>; MAX_CONNS] = [None; MAX_CONNS];
+
 static mut NEXT_PORT: u16 = 40000;
 
 /// TCP checksum over a full segment (header + payload) with the given
@@ -101,6 +139,13 @@ pub(crate) fn tcp_checksum_ok(src_ip: &[u8; 4], dst_ip: &[u8; 4], segment: &[u8]
 }
 
 pub(super) fn send_tcp_seg(c: &TcpConn, flags: u8, data: &[u8]) {
+    send_tcp_seg_tx(c.tx(), flags, data)
+}
+
+/// TX with an already-snapshotted `TcpTx`. Owners of a `&mut TcpConn` into
+/// `CONNS` use this so no ~10 KB `TcpConn` value ever lands on the kernel
+/// stack (see `TcpTx` for the overflow this fixes).
+pub(super) fn send_tcp_seg_tx(c: TcpTx, flags: u8, data: &[u8]) {
     let tcp_len = TCP_HLEN + data.len();
     let mut seg = alloc::vec![0u8; tcp_len];
     seg[0..2].copy_from_slice(&c.src_port.to_be_bytes());

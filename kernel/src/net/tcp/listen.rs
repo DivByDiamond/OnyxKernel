@@ -1,5 +1,5 @@
 //! Bounded passive TCP listeners; accepted connections use the ordinary socket API.
-use super::{conn::{CONNS, TcpConn, RECV_BUF_SIZE, SEND_BUF_SIZE, alloc_conn, alloc_local_port, send_tcp_seg}, state::{SYN,ACK}};
+use super::{conn::{CONNS, TcpConn, RECV_BUF_SIZE, SEND_BUF_SIZE, alloc_conn, alloc_local_port, send_tcp_seg_tx}, state::{SYN,ACK}};
 use crate::net::lock::{net_lock,net_unlock};
 use onyx_core::errno::{Errno,KResult};
 const LISTENERS_MAX: usize = 8;
@@ -67,8 +67,13 @@ pub(in crate::net) unsafe fn incoming_syn(port:u16, remote:[u8;4], remote_port:u
             peer_fin:false,tw_deadline_us:super::conn::now_us()+5_000_000,last_tx_us:super::conn::now_us(),retries:0,peer_window:window,
         };
         CONNS[cid]=Some(connection);
-        connection.snd_nxt=isn;
-        send_tcp_seg(&connection,SYN|ACK,&[]);
+        // Stored snd_nxt stays isn+1; the SYN-ACK itself carries isn (as
+        // before), and only a scalar snapshot reaches the TX path.
+        if let Some(slot)=CONNS[cid].as_mut() {
+            let mut tx=slot.tx();
+            tx.snd_nxt=isn;
+            send_tcp_seg_tx(tx,SYN|ACK,&[]);
+        }
     }
 }
 
