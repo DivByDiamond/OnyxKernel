@@ -167,6 +167,7 @@ impl Proc {
                 cloexec: false,
                 flags: 0,
                 mnt: crate::fs::vfs::MNT_ROOT as u8,
+                dir: 0,
             }; PROC_MAX_FDS],
             root_refcount: ptr::null_mut(),
             all_next: ptr::null_mut(),

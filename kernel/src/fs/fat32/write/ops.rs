@@ -27,18 +27,21 @@ pub unsafe fn create(dir_cluster: u32, name: &[u8], is_dir: bool) -> KResult<u32
     // SAFETY: single-threaded FAT32 exclusion (see # Safety); all raw access
     // is delegated to the bounds-checked scan/alloc/dirent helpers.
     unsafe {
-        if name.is_empty() || name.len() > 12 {
+        // Long names are allowed here; the LFN path below rejects anything
+        // over 255 bytes (20 fragments) and 8.3 aliases are truncated.
+        if name.is_empty() || name.len() > 255 {
             return Err(Errno::Inval);
         }
         let name_83 = fat32_name_8_3(name);
-        // Check if it already exists.
+        // Check if it already exists (the scanner matches the 8.3 alias and
+        // the LFN name, so neither form can be duplicated).
         let mut existing_cluster = 0u32;
         let mut existing_size = 0u32;
         let mut existing_is_dir = false;
         let mut buf = [0u8; 512];
         let already_exists = scan_dir_entries(
             dir_cluster,
-            &name_83,
+            name,
             &mut existing_cluster,
             &mut existing_size,
             &mut existing_is_dir,
@@ -58,6 +61,15 @@ pub unsafe fn create(dir_cluster: u32, name: &[u8], is_dir: bool) -> KResult<u32
         // If creating a directory, populate "." and ".." entries.
         if is_dir {
             write_dot_entries(dir_cluster, first_cluster)?;
+        }
+        // Names that 8.3 cannot represent get an LFN chain. That path owns its
+        // own dirent allocation, so it must release the cluster on failure.
+        if super::lfn::needs_lfn(name) {
+            if let Err(e) = super::lfn::create_long(dir_cluster, name, first_cluster, is_dir) {
+                let _ = free_chain(first_cluster);
+                return Err(e);
+            }
+            return Ok(first_cluster);
         }
         // Find a free dirent slot. On failure the allocated cluster must
         // be released — otherwise it leaks as an orphaned EOC island no
@@ -116,75 +128,6 @@ unsafe fn write_dot_entries(dir_cluster: u32, first_cluster: u32) -> KResult<()>
         cbuf[0..32].copy_from_slice(&dot);
         cbuf[32..64].copy_from_slice(&dotdot);
         write_cluster_sector(first_cluster, 0, &cbuf)
-    }
-}
-
-/// Mark a directory entry as deleted (0xE5) and free its clusters.
-/// Returns Ok(()) if found and deleted, Err(NoEnt) if not found.
-///
-/// # Safety
-///
-/// Caller must not invoke FAT32 I/O concurrently from multiple harts
-/// (two racing unlinks on the same entry could free the chain twice);
-/// `dir_cluster` must be a valid data cluster and is re-validated on every
-/// chain hop below. NOTE: no FS-level lock exists; the VFS layer does not
-/// serialize callers.
-pub unsafe fn unlink(dir_cluster: u32, name: &[u8]) -> KResult<()> {
-    // SAFETY: single-threaded FAT32 exclusion (see # Safety); entry offsets
-    // are ei*32 with ei < 16, staying within the 512-byte sector buffer.
-    unsafe {
-        if name.is_empty() {
-            return Err(Errno::Inval);
-        }
-        let needle = fat32_name_8_3(name);
-        let mut buf = [0u8; 512];
-        let mut cluster = dir_cluster;
-        let mut hop = 0u32;
-        const MAX_HOPS: u32 = 65536;
-        loop {
-            hop += 1;
-            if hop >= MAX_HOPS {
-                return Err(Errno::Io);
-            }
-            for si in 0..G_SPC {
-                read_cluster_sector(cluster, si, &mut buf)?;
-                for ei in 0..ENTRIES_PER_SECTOR {
-                    let off = ei * DIR_ENTRY_SIZE;
-                    let attr = buf[off + 11];
-                    if attr == ATTR_LFN {
-                        continue;
-                    }
-                    if buf[off] == 0x00 {
-                        return Err(Errno::NoEnt);
-                    }
-                    if buf[off] == 0xE5 {
-                        continue;
-                    }
-                    let mut entry_name = [0u8; 11];
-                    entry_name.copy_from_slice(&buf[off..off + 11]);
-                    if entry_name == needle {
-                        let cluster_lo = u16::from_le_bytes([buf[off + 26], buf[off + 27]]) as u32;
-                        let cluster_hi = u16::from_le_bytes([buf[off + 20], buf[off + 21]]) as u32;
-                        let file_cluster = (cluster_hi << 16) | cluster_lo;
-                        // Tombstone FIRST: once the dirent no longer
-                        // references the chain, freeing it (even across a
-                        // crash) can only leak, never corrupt.
-                        buf[off] = 0xE5;
-                        write_cluster_sector(cluster, si, &buf)?;
-                        // Then release the chain.
-                        if file_cluster != 0 {
-                            free_chain(file_cluster)?;
-                        }
-                        return Ok(());
-                    }
-                }
-            }
-            let next = fat_entry(cluster, &mut buf);
-            if is_eoc(next) || !is_valid_cluster(next) {
-                return Err(Errno::NoEnt);
-            }
-            cluster = next;
-        }
     }
 }
 

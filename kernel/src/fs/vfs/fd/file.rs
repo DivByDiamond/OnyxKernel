@@ -25,7 +25,7 @@ pub unsafe fn open(path: &[u8], perms: u32) -> KResult<FdToken> {
         // exhaust its FD table (VFS_MAX_FDS = 16). We use a closure-style
         // pattern: do the lookup, and on Err, call fd_clear(idx) before
         // propagating the error.
-        let (ino, size) = match fs {
+        let (ino, size, dir) = match fs {
             Fs::Proc => {
                 let ino = match procfs::lookup(subpath) {
                     Ok(i) => i,
@@ -35,7 +35,7 @@ pub unsafe fn open(path: &[u8], perms: u32) -> KResult<FdToken> {
                     }
                 };
                 let st = procfs::stat(ino)?;
-                (ino, st.size)
+                (ino, st.size, 0)
             }
             Fs::Ipc => {
                 let ino = match ipcfs::lookup(subpath) {
@@ -46,7 +46,7 @@ pub unsafe fn open(path: &[u8], perms: u32) -> KResult<FdToken> {
                     }
                 };
                 let st = ipcfs::stat(ino)?;
-                (ino, st.size)
+                (ino, st.size, 0)
             }
             Fs::Devfs => {
                 let ino = match devfs::lookup(subpath) {
@@ -67,16 +67,16 @@ pub unsafe fn open(path: &[u8], perms: u32) -> KResult<FdToken> {
                             return Err(e);
                         }
                     };
-                    (devfs::ptym_ino(pair), u32::MAX)
+                    (devfs::ptym_ino(pair), u32::MAX, 0)
                 } else {
-                    (ino, st.size)
+                    (ino, st.size, 0)
                 }
             }
             Fs::Onyx => {
                 // Lookup + permission check in the target mount's context:
                 // the root fs keeps the singleton state, a secondary mount
                 // is swapped in by with_mount for the duration.
-                let r = with_mount(slot, || -> KResult<(u32, u32)> {
+                let r = with_mount(slot, || -> KResult<(u32, u32, u32)> {
                     let mut st = onyxfs::OnyfsStat::default();
                     onyxfs::lookup(subpath, &mut st)?;
                     if !crate::fs::vfs::is_kernel_boot() {
@@ -101,7 +101,7 @@ pub unsafe fn open(path: &[u8], perms: u32) -> KResult<FdToken> {
                             }
                         }
                     }
-                    Ok((st.ino, st.size.min(u32::MAX as u64) as u32))
+                    Ok((st.ino, st.size.min(u32::MAX as u64) as u32, 0))
                 });
                 match r {
                     Ok(v) => v,
@@ -112,11 +112,14 @@ pub unsafe fn open(path: &[u8], perms: u32) -> KResult<FdToken> {
                 }
             }
             Fs::Fat32 => {
-                let r = with_mount(slot, || -> KResult<(u32, u32)> {
+                // The parent directory cluster is stored in the fd so a
+                // growing write can patch the dirent size in place.
+                let r = with_mount(slot, || -> KResult<(u32, u32, u32)> {
                     let mut cluster = 0u32;
                     let mut sz = 0u32;
-                    fat32::lookup(subpath, &mut cluster, &mut sz)?;
-                    Ok((cluster, sz))
+                    let mut parent = 0u32;
+                    fat32::lookup_full(subpath, &mut cluster, &mut sz, &mut parent)?;
+                    Ok((cluster, sz, parent))
                 });
                 match r {
                     Ok(v) => v,
@@ -132,7 +135,7 @@ pub unsafe fn open(path: &[u8], perms: u32) -> KResult<FdToken> {
             }
         };
 
-        fd_set(idx, ino, size, fs, 0, slot as u8);
+        fd_set(idx, ino, size, fs, 0, slot as u8, dir);
         let fd = fd_get(idx);
         Ok(fd_token(idx, fd.epoch))
     }

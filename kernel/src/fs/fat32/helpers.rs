@@ -1,7 +1,6 @@
 use super::{
-    ATTR_DIRECTORY, ATTR_LFN, DIR_ENTRY_SIZE, ENTRIES_PER_SECTOR, FAT32_EOC, G_DATA_LBA, G_DEV,
-    G_FAT_SZ, G_NUM_FATS, G_RESVD, G_ROOT_CLUSTER, G_SPC, cluster_to_lba, fat_entry, is_eoc,
-    read_sec,
+    FAT32_EOC, G_DATA_LBA, G_DEV, G_FAT_SZ, G_FSINFO, G_NUM_FATS, G_RESVD, G_ROOT_CLUSTER, G_SPC,
+    cluster_to_lba, read_sec,
 };
 use onyx_core::errno::{Errno, KResult};
 
@@ -54,81 +53,6 @@ pub(crate) fn fat32_name_8_3(name: &[u8]) -> [u8; 11] {
         out[8 + i] = if b.is_ascii_lowercase() { b - 32 } else { b };
     }
     out
-}
-
-/// Walk a directory cluster chain looking for the 8.3 name `needle`.
-/// Chain traversal is hop-capped (MAX_HOPS) and every cluster is validated
-/// against the FAT before following it.
-///
-/// # Safety
-///
-/// Caller must not invoke FAT32 I/O concurrently from multiple harts (the
-/// module globals are unsynchronized); `dir_cluster` must be a valid data
-/// cluster; `buf` is a caller-owned 512-byte scratch buffer reused across
-/// sector reads.
-pub(crate) unsafe fn scan_dir_entries(
-    dir_cluster: u32,
-    needle: &[u8; 11],
-    out_cluster: &mut u32,
-    out_size: &mut u32,
-    is_dir: &mut bool,
-    buf: &mut [u8; 512],
-) -> KResult<()> {
-    // SAFETY: see # Safety; entry offsets are ei*32 with ei < 16, so all
-    // buffer reads stay within the 512-byte sector.
-    unsafe {
-        let mut cluster = dir_cluster;
-        if !is_valid_cluster(cluster) {
-            return Err(Errno::NoEnt);
-        }
-        let mut hop = 0u32;
-        const MAX_HOPS: u32 = 65536;
-        loop {
-            if hop >= MAX_HOPS {
-                return Err(Errno::Io);
-            }
-            hop += 1;
-            for si in 0..G_SPC {
-                read_cluster_sector(cluster, si, buf)?;
-                for ei in 0..ENTRIES_PER_SECTOR {
-                    let off = ei * DIR_ENTRY_SIZE;
-                    let attr = buf[off + 11];
-                    if attr == ATTR_LFN {
-                        continue;
-                    }
-                    if buf[off] == 0 {
-                        return Err(Errno::NoEnt);
-                    }
-                    if buf[off] == 0xE5 {
-                        continue;
-                    }
-                    let mut entry = [0u8; 11];
-                    entry.copy_from_slice(&buf[off..off + 11]);
-                    if &entry == needle {
-                        let cluster_lo = u16::from_le_bytes([buf[off + 26], buf[off + 27]]);
-                        let cluster_hi = u16::from_le_bytes([buf[off + 20], buf[off + 21]]);
-                        *out_cluster = ((cluster_hi as u32) << 16) | cluster_lo as u32;
-                        *out_size = u32::from_le_bytes([
-                            buf[off + 28],
-                            buf[off + 29],
-                            buf[off + 30],
-                            buf[off + 31],
-                        ]);
-                        *is_dir = (attr & ATTR_DIRECTORY) != 0;
-                        return Ok(());
-                    }
-                }
-            }
-            let next = fat_entry(cluster, buf);
-            if is_eoc(next) {
-                return Err(Errno::NoEnt);
-            }
-            if !is_valid_cluster(next) {
-                return Err(Errno::Io);
-            }
-            cluster = next;
-        }
-    }
 }
 
 /// Classify a volume by its data-cluster count (Microsoft FAT spec):
@@ -187,6 +111,9 @@ pub unsafe fn mount(dev: usize) -> KResult<()> {
         if G_FAT_SZ == 0 {
             return Err(Errno::Inval);
         }
+        // BPB_FSInfo points at the free-cluster-count sector; 0/0xFFFF mean
+        // "no FSINFO", in which case the write paths skip the hint update.
+        G_FSINFO = u32::from(u16::from_le_bytes([bpb[48], bpb[49]]));
         G_ROOT_CLUSTER = u32::from_le_bytes([bpb[44], bpb[45], bpb[46], bpb[47]]);
         if G_ROOT_CLUSTER < 2 {
             return Err(Errno::Inval);

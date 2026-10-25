@@ -38,6 +38,12 @@ pub struct VfsFd {
     /// activates this mount's filesystem context before touching the
     /// backend singletons (see `vfs::with_mount`).
     pub mnt: u8,
+    /// Parent-directory identity for filesystems that address files by their
+    /// own location instead of a stable inode number. FAT32 sets this to the
+    /// cluster of the directory holding the dirent, so a growing write can
+    /// update the on-disk size field without re-walking the path. Every
+    /// other backend leaves it 0.
+    pub dir: u32,
 }
 
 impl Default for VfsFd {
@@ -53,6 +59,7 @@ impl Default for VfsFd {
             cloexec: false,
             flags: 0,
             mnt: crate::fs::vfs::mount::MNT_ROOT as u8,
+            dir: 0,
         }
     }
 }

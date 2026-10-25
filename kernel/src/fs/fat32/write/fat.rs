@@ -4,8 +4,16 @@
 use onyx_core::errno::{Errno, KResult};
 
 use super::super::{
-    FAT32_EOC, G_DEV, G_FAT_SZ, G_NUM_FATS, G_RESVD, fat_entry, is_eoc, is_valid_cluster, read_sec,
+    FAT32_EOC, G_DEV, G_FAT_SZ, G_FSINFO, G_NUM_FATS, G_RESVD, fat_entry, is_eoc, is_valid_cluster,
+    read_sec,
 };
+
+/// FSINFO sector lead signature (offset 0).
+const FSINFO_LEAD_SIG: u32 = 0x4161_5252;
+/// FSINFO structure signature (offset 484).
+const FSINFO_STRUCT_SIG: u32 = 0x6141_7272;
+/// "Unknown" value for the FSINFO free-cluster count.
+const FSINFO_UNKNOWN: u32 = 0xFFFF_FFFF;
 
 /// Total number of clusters in the FAT (data region capacity).
 /// Calculated from G_FAT_SZ, G_SPC, and 512-byte sectors.
@@ -130,6 +138,9 @@ pub(super) unsafe fn alloc_cluster() -> KResult<u32> {
                     // Free. Mark as EOC in every FAT copy (write_fat_entry
                     // mirrors across all of them).
                     write_fat_entry(cluster, FAT32_EOC)?;
+                    // FSINFO is only a hint: a failure here must not fail the
+                    // allocation (the FAT itself is already authoritative).
+                    fsinfo_adjust(-1, cluster.saturating_add(1)).ok();
                     return Ok(cluster);
                 }
             }
@@ -147,8 +158,51 @@ pub(super) unsafe fn alloc_cluster() -> KResult<u32> {
 /// write_fat_entry).
 pub(super) unsafe fn free_cluster(cluster: u32) -> KResult<()> {
     // SAFETY: delegates entirely to write_fat_entry, whose contract covers
-    // the raw access for a validated cluster number.
-    unsafe { write_fat_entry(cluster, 0) }
+    // the raw access for a validated cluster number. The FSINFO hint update
+    // is best-effort and must not fail the free.
+    unsafe {
+        write_fat_entry(cluster, 0)?;
+        fsinfo_adjust(1, cluster).ok();
+        Ok(())
+    }
+}
+
+/// Adjust the FSINFO free-cluster count by `delta` and set the next-free hint.
+/// A missing, malformed, or "unknown" count is left as-is: the field is only
+/// a hint, and an unknown value tells checkers to recount instead of trusting
+/// a number this driver did not compute from scratch.
+///
+/// # Safety
+///
+/// Caller must not invoke FAT32 I/O concurrently from multiple harts;
+/// `G_FSINFO` must come from a completed `mount()`.
+unsafe fn fsinfo_adjust(delta: i32, next_free: u32) -> KResult<()> {
+    // SAFETY: single-hart FAT32 exclusion; sector offsets stay inside the
+    // 512-byte buffer and `G_FSINFO` is a validated BPB field.
+    unsafe {
+        let sector = u64::from(G_FSINFO);
+        if G_FSINFO == 0 || G_FSINFO == 0xFFFF {
+            return Ok(());
+        }
+        let mut buf = [0u8; 512];
+        read_sec(sector, &mut buf)?;
+        let lead = u32::from_le_bytes([buf[0], buf[1], buf[2], buf[3]]);
+        let structure = u32::from_le_bytes([buf[484], buf[485], buf[486], buf[487]]);
+        if lead != FSINFO_LEAD_SIG || structure != FSINFO_STRUCT_SIG {
+            return Ok(());
+        }
+        let free = u32::from_le_bytes([buf[488], buf[489], buf[490], buf[491]]);
+        if free != FSINFO_UNKNOWN {
+            let updated = if delta >= 0 {
+                free.saturating_add(delta as u32)
+            } else {
+                free.saturating_sub(delta.unsigned_abs())
+            };
+            buf[488..492].copy_from_slice(&updated.to_le_bytes());
+        }
+        buf[492..496].copy_from_slice(&next_free.to_le_bytes());
+        write_sec(sector, &buf)
+    }
 }
 
 /// Extend the chain starting at `start_cluster` by allocating one new

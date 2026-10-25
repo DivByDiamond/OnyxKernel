@@ -13,7 +13,12 @@
 mod data;
 mod dirent;
 mod fat;
+mod lfn;
 mod ops;
+mod remove;
+mod size;
 
 pub use data::{truncate_chain, write};
-pub use ops::{create, unlink, update_size};
+pub use ops::{create, update_size};
+pub use remove::unlink;
+pub use size::set_size;

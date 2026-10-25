@@ -16,6 +16,8 @@ pub(crate) static mut G_FAT_SZ: u32 = 0;
 /// mirrored to every copy (see write::write_fat_entry).
 pub(crate) static mut G_NUM_FATS: u32 = 0;
 pub(crate) static mut G_ROOT_CLUSTER: u32 = 0;
+/// BPB_FSInfo sector number (0 or 0xFFFF = the volume has no FSINFO sector).
+pub(crate) static mut G_FSINFO: u32 = 0;
 pub(crate) static mut G_DATA_LBA: u32 = 0;
 
 /// # Safety

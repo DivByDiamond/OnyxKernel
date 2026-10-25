@@ -32,6 +32,7 @@ pub(crate) static mut G_KERNEL_FDS: [VfsFd; VFS_MAX_FDS] = [VfsFd {
     cloexec: false,
     flags: 0,
     mnt: crate::fs::vfs::mount::MNT_ROOT as u8,
+    dir: 0,
 }; VFS_MAX_FDS];
 
 /// # Safety

@@ -3,7 +3,9 @@
 //! All fields are BPB geometry derived at mount time and immutable
 //! afterwards, so `with_mount` never writes the cached context back.
 
-use super::{G_DATA_LBA, G_DEV, G_FAT_SZ, G_NUM_FATS, G_RESVD, G_ROOT_CLUSTER, G_SPC, mount};
+use super::{
+    G_DATA_LBA, G_DEV, G_FAT_SZ, G_FSINFO, G_NUM_FATS, G_RESVD, G_ROOT_CLUSTER, G_SPC, mount,
+};
 use onyx_core::errno::KResult;
 
 /// Snapshot of the fat32 singleton geometry for one mounted volume.
@@ -16,6 +18,7 @@ pub struct FatCtx {
     pub num_fats: u32,
     pub root_cluster: u32,
     pub data_lba: u32,
+    pub fsinfo: u32,
 }
 
 /// Capture the current singleton geometry.
@@ -36,6 +39,7 @@ pub unsafe fn save_ctx() -> FatCtx {
             num_fats: G_NUM_FATS,
             root_cluster: G_ROOT_CLUSTER,
             data_lba: G_DATA_LBA,
+            fsinfo: G_FSINFO,
         }
     }
 }
@@ -56,6 +60,7 @@ pub unsafe fn apply_ctx(ctx: &FatCtx) {
         G_NUM_FATS = ctx.num_fats;
         G_ROOT_CLUSTER = ctx.root_cluster;
         G_DATA_LBA = ctx.data_lba;
+        G_FSINFO = ctx.fsinfo;
     }
 }
 

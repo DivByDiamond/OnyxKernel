@@ -33,7 +33,7 @@ pub(crate) unsafe fn fd_get(idx: usize) -> VfsFd {
 ///
 /// Caller contract: idx < VFS_MAX_FDS and is the slot allocated for this
 /// open (allocated by alloc_fd); runs in the fd-owning context.
-pub(crate) unsafe fn fd_set(idx: usize, ino: u32, size: u32, fs: Fs, pos: u32, mnt: u8) {
+pub(crate) unsafe fn fd_set(idx: usize, ino: u32, size: u32, fs: Fs, pos: u32, mnt: u8, dir: u32) {
     // SAFETY: idx is the slot just claimed by alloc_fd in this context;
     // writing it cannot race with any other user of that slot.
     unsafe {
@@ -44,6 +44,7 @@ pub(crate) unsafe fn fd_set(idx: usize, ino: u32, size: u32, fs: Fs, pos: u32, m
             (*p)[idx].fs = fs;
             (*p)[idx].pos = pos;
             (*p)[idx].mnt = mnt;
+            (*p)[idx].dir = dir;
         } else {
             let p = crate::proc::current();
             p.fds[idx].ino = ino;
@@ -51,6 +52,7 @@ pub(crate) unsafe fn fd_set(idx: usize, ino: u32, size: u32, fs: Fs, pos: u32, m
             p.fds[idx].fs = fs;
             p.fds[idx].pos = pos;
             p.fds[idx].mnt = mnt;
+            p.fds[idx].dir = dir;
         }
     }
 }

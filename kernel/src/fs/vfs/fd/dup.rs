@@ -14,7 +14,7 @@ pub unsafe fn dup(token: FdToken) -> KResult<FdToken> {
         let idx = fd_check(token)?;
         let fd = fd_get(idx);
         let new_idx = alloc_fd(fd.perms)?;
-        fd_set(new_idx, fd.ino, fd.size, fd.fs, fd.pos, fd.mnt);
+        fd_set(new_idx, fd.ino, fd.size, fd.fs, fd.pos, fd.mnt, fd.dir);
         // Status flags (O_NONBLOCK/O_APPEND/...) belong to the open file
         // description semantics-wise; our fd table has no shared-OFD concept,
         // so dup copies them into the new slot (POSIX-adjacent behavior).

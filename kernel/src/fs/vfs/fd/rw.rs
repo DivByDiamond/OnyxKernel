@@ -54,6 +54,23 @@ pub unsafe fn write(token: FdToken, buf: *const u8, len: u32) -> KResult<u32> {
         let mnt = fd.mnt as usize;
         let written = match fd.fs {
             Fs::Onyx => with_mount(mnt, || onyxfs::write(fd.ino, buf, fd.pos, len))?,
+            Fs::Fat32 => {
+                // A dirent without a first cluster cannot be located from the
+                // fd alone (it carries parent + cluster, not the name), so
+                // foreign zero-length files stay read-only here. Files created
+                // through this VFS always get a cluster in fat32::create.
+                if fd.ino == 0 {
+                    return Err(Errno::NoSys);
+                }
+                let written = with_mount(mnt, || fat32::write(fd.ino, buf, fd.pos, len))?;
+                // Keep the on-disk dirent size in step with the file's growth;
+                // fd.size itself is updated by the common path below.
+                let grown_to = fd.pos.checked_add(written).ok_or(Errno::NoMem)?;
+                if grown_to > fd.size {
+                    with_mount(mnt, || fat32::set_size(fd.dir, fd.ino, grown_to))?;
+                }
+                written
+            }
             Fs::Proc => return Err(Errno::Perm),
             Fs::Ipc => ipcfs::write(fd.ino, buf, fd.pos, len)?,
             Fs::Devfs => devfs::write(fd.ino, buf, fd.pos, len)?,

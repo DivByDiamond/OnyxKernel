@@ -1,103 +1,24 @@
+//! FAT32 directory operations: path resolution and directory iteration.
+pub(crate) mod lfn;
+mod path;
 mod read;
-use onyx_core::errno::{Errno, KResult};
+mod scan;
 
+use super::lfn::LfnChain;
 use super::{
-    ATTR_LFN, DIR_ENTRY_SIZE, ENTRIES_PER_SECTOR, G_ROOT_CLUSTER, G_SPC, fat_entry, fat32_name_8_3,
-    is_eoc, is_valid_cluster, read_cluster_sector, scan_dir_entries,
+    ATTR_LFN, DIR_ENTRY_SIZE, ENTRIES_PER_SECTOR, G_SPC, fat_entry, is_eoc, is_valid_cluster,
+    read_cluster_sector,
 };
 
-/// Resolve one path component (8.3 name) in the directory at `dir_cluster`.
-///
-/// # Safety
-///
-/// Caller must not invoke FAT32 I/O concurrently from multiple harts;
-/// `dir_cluster` must be a valid data cluster. `component` is a kernel-owned
-/// slice converted to an 8.3 name on the stack.
-unsafe fn lookup_component(
-    dir_cluster: u32,
-    component: &[u8],
-    out_cluster: &mut u32,
-    out_size: &mut u32,
-    out_is_dir: &mut bool,
-) -> KResult<()> {
-    // SAFETY: delegates to scan_dir_entries, whose contract covers all raw
-    // access; the scratch buffer is a valid 512-byte stack allocation.
-    unsafe {
-        let needle = fat32_name_8_3(component);
-        let mut buf = [0u8; 512];
-        scan_dir_entries(
-            dir_cluster,
-            &needle,
-            out_cluster,
-            out_size,
-            out_is_dir,
-            &mut buf,
-        )
-    }
-}
+pub(crate) use scan::scan_dir_entries;
 
-/// Resolve an absolute path from the FAT32 root to (cluster, size).
-///
-/// # Safety
-///
-/// Caller must not invoke FAT32 I/O concurrently from multiple harts.
-/// `path` must be a kernel-owned byte string - the syscall layer parses
-/// user paths (parse_user_path) before reaching fs/.
-pub unsafe fn lookup(path: &[u8], out_cluster: &mut u32, out_size: &mut u32) -> KResult<()> {
-    // SAFETY: single-threaded FAT32 exclusion (see # Safety); all raw access
-    // is delegated to lookup_component/scan_dir_entries (bounds-checked).
-    unsafe {
-        if path.is_empty() || path == b"/" || path == b"." {
-            *out_cluster = G_ROOT_CLUSTER;
-            *out_size = 0;
-            return Ok(());
-        }
-        let mut current_cluster = G_ROOT_CLUSTER;
-        let mut pos = 0usize;
-        let len = path.len();
-        loop {
-            while pos < len && path[pos] == b'/' {
-                pos += 1;
-            }
-            if pos >= len {
-                break;
-            }
-            let start = pos;
-            while pos < len && path[pos] != b'/' {
-                pos += 1;
-            }
-            let component = &path[start..pos];
-            let mut found_cluster = 0u32;
-            let mut found_size = 0u32;
-            let mut is_dir = false;
-            lookup_component(
-                current_cluster,
-                component,
-                &mut found_cluster,
-                &mut found_size,
-                &mut is_dir,
-            )?;
-            if pos >= len {
-                *out_cluster = found_cluster;
-                *out_size = found_size;
-                return Ok(());
-            }
-            if !is_dir {
-                return Err(Errno::NoEnt);
-            }
-            current_cluster = found_cluster;
-        }
-        *out_cluster = current_cluster;
-        *out_size = 0;
-        Ok(())
-    }
-}
-
+pub use path::*;
 pub use read::*;
 
 /// Read one directory entry by index (stateful cursor maintained by VFS).
-/// Writes the 8.3-derived lowercase name (NUL-terminated) into `name_out`
-/// and returns the entry's cluster number, or None past end-of-directory.
+/// Writes the long name when a valid LFN chain precedes the entry, otherwise
+/// the 8.3-derived lowercase name (NUL-terminated), into `name_out`, and
+/// returns the entry's cluster number, or None past end-of-directory.
 ///
 /// # Safety
 ///
@@ -119,6 +40,8 @@ pub unsafe fn readdir_entry(
             return None;
         }
         let mut buf = [0u8; 512];
+        let mut chain = LfnChain::new();
+        let mut long_name = [0u8; 255];
         let mut cluster = dir_cluster;
         let mut cursor = 0u32;
         let mut hop = 0u32;
@@ -136,17 +59,49 @@ pub unsafe fn readdir_entry(
                     let off = ei * DIR_ENTRY_SIZE;
                     let attr = buf[off + 11];
                     if attr == ATTR_LFN {
+                        chain.push(&buf[off..off + DIR_ENTRY_SIZE]);
                         continue;
                     }
                     if buf[off] == 0 {
                         return None;
                     }
                     if buf[off] == 0xE5 {
+                        chain.reset();
                         continue;
                     }
                     if cursor < entry_idx {
                         cursor += 1;
+                        chain.reset();
                         continue;
+                    }
+                    let mut short_name = [0u8; 11];
+                    short_name.copy_from_slice(&buf[off..off + 11]);
+                    let long_len = if chain.belongs_to(&short_name) {
+                        chain.decode(&mut long_name)
+                    } else {
+                        None
+                    };
+                    chain.reset();
+                    if let Some(long_len) = long_len {
+                        let mut out_pos = 0usize;
+                        for &byte in long_name.iter().take(long_len) {
+                            if out_pos >= name_len.saturating_sub(1) {
+                                break;
+                            }
+                            name_out.add(out_pos).write(byte);
+                            out_pos += 1;
+                        }
+                        if out_pos < name_len {
+                            name_out.add(out_pos).write(0);
+                        }
+                        let cluster_lo = u16::from_le_bytes([buf[off + 26], buf[off + 27]]);
+                        let cluster_hi = u16::from_le_bytes([buf[off + 20], buf[off + 21]]);
+                        let cluster_num = ((cluster_hi as u32) << 16) | cluster_lo as u32;
+                        return Some(if cluster_num == 0 {
+                            dir_cluster
+                        } else {
+                            cluster_num
+                        });
                     }
                     let mut out_pos = 0usize;
                     let mut base_end = 8usize;

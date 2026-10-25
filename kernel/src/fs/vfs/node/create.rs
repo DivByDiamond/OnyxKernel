@@ -1,6 +1,6 @@
 //! File creation — `create` (regular file) and `mkdir` (directory).
 use super::split_parent;
-use crate::fs::onyxfs;
+use crate::fs::{fat32, onyxfs};
 use crate::fs::vfs::{
     FdToken, Fs, PERM_READ, PERM_SEEK, PERM_WRITE, alloc_fd, fd_set, fd_token, resolve_path,
     with_mount,
@@ -29,6 +29,25 @@ pub unsafe fn create(path: &[u8], mode: u32) -> KResult<FdToken> {
         match fs {
             Fs::Proc => return Err(Errno::Perm),
             Fs::Onyx => {}
+            Fs::Fat32 => {
+                let (parent_rel, filename) = split_parent(rel);
+                if filename.is_empty() {
+                    return Err(Errno::Inval);
+                }
+                let (cluster, parent) = with_mount(slot, || -> KResult<(u32, u32)> {
+                    let parent = if parent_rel.is_empty() {
+                        fat32::root_cluster()
+                    } else {
+                        fat32::lookup_dir(parent_rel)?
+                    };
+                    let cluster = fat32::create(parent, filename, false)?;
+                    Ok((cluster, parent))
+                })?;
+                let idx = alloc_fd(PERM_READ | PERM_WRITE | PERM_SEEK)?;
+                fd_set(idx, cluster, 0, Fs::Fat32, 0, slot as u8, parent);
+                let fd = crate::fs::vfs::fd_get(idx);
+                return Ok(fd_token(idx, fd.epoch));
+            }
             _ => return Err(Errno::NoSys),
         }
         let (parent_rel, filename) = split_parent(rel);
@@ -51,7 +70,7 @@ pub unsafe fn create(path: &[u8], mode: u32) -> KResult<FdToken> {
             Ok(ino)
         })?;
         let idx = alloc_fd(PERM_READ | PERM_WRITE | PERM_SEEK)?;
-        fd_set(idx, new_ino, 0, Fs::Onyx, 0, slot as u8);
+        fd_set(idx, new_ino, 0, Fs::Onyx, 0, slot as u8, 0);
         let fd = crate::fs::vfs::fd_get(idx);
         Ok(fd_token(idx, fd.epoch))
     }
@@ -71,6 +90,20 @@ pub unsafe fn mkdir(path: &[u8]) -> KResult<()> {
         match fs {
             Fs::Proc => return Err(Errno::Perm),
             Fs::Onyx => {}
+            Fs::Fat32 => {
+                let (parent_rel, dirname) = split_parent(rel);
+                if dirname.is_empty() {
+                    return Err(Errno::Inval);
+                }
+                return with_mount(slot, || -> KResult<()> {
+                    let parent = if parent_rel.is_empty() {
+                        fat32::root_cluster()
+                    } else {
+                        fat32::lookup_dir(parent_rel)?
+                    };
+                    fat32::create(parent, dirname, true).map(|_| ())
+                });
+            }
             _ => return Err(Errno::NoSys),
         }
         let (parent_rel, dirname) = split_parent(rel);
