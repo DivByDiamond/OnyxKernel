@@ -6,6 +6,10 @@ use crate::libfdt::{fdt, periph};
 use crate::module::{self, ModuleType};
 use onyx_core::fmt::Arg;
 
+// Inputs share FDT discovery with disks, serial and network devices. Do not
+// truncate the list at eight before the additional monitor keyboards are seen.
+const MAX_VIRTIO_PROBE_DEVICES: usize = 64;
+
 /// # Safety
 ///
 /// Boot-time device probe: reads MMIO at DTB-derived and hardcoded
@@ -21,12 +25,12 @@ pub(crate) unsafe fn probe_devices() -> usize {
             base: 0,
             irq: 0,
             reg_shift: 0,
-        }; 8];
+        }; MAX_VIRTIO_PROBE_DEVICES];
         // OC2R/sedna now registers DTB providers, so find_virtio returns the real
         // virtio block devices from the device tree. The hardcoded QEMU addresses
         // are only a fallback for when the FDT has no virtio nodes (and must be
         // skipped on OC2R, where they don't exist and probing would fault).
-        let nfound = fdt::find_virtio(&mut virtio_devs, 8);
+        let nfound = fdt::find_virtio(&mut virtio_devs, MAX_VIRTIO_PROBE_DEVICES);
         crate::kinf!("virtio", "fdt nodes=%d", Arg::from(nfound as u32));
         for dev in virtio_devs.iter().take(nfound) {
             let b = dev.base as usize;
@@ -156,8 +160,8 @@ pub(crate) unsafe fn probe_peripherals() {
             base: 0,
             irq: 0,
             reg_shift: 0,
-        }; 8];
-        let nfound = fdt::find_virtio(&mut virtio_devs, 8);
+        }; MAX_VIRTIO_PROBE_DEVICES];
+        let nfound = fdt::find_virtio(&mut virtio_devs, MAX_VIRTIO_PROBE_DEVICES);
         let probe_at = |b: usize| {
             if virtio_rng::probe(b) {
                 if virtio_rng::init(b).is_ok() {

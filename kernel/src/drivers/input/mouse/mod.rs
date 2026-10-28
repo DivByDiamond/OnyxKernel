@@ -16,6 +16,16 @@ const DEFAULT_H: i32 = 480;
 const BTN_LEFT: u8 = 1;
 const BTN_RIGHT: u8 = 2;
 const BTN_MIDDLE: u8 = 4;
+static MOUSE_LOCK: crate::sync::SpinLock = crate::sync::SpinLock::new();
+fn button_bit(button: super::event::MouseButton) -> u8 {
+    match button {
+        super::event::MouseButton::Left => BTN_LEFT,
+        super::event::MouseButton::Right => BTN_RIGHT,
+        super::event::MouseButton::Middle => BTN_MIDDLE,
+        super::event::MouseButton::Other(b) if (3..8).contains(&b) => 1 << b,
+        _ => 0,
+    }
+}
 
 #[derive(Clone, Copy)]
 struct MouseState {
@@ -50,9 +60,9 @@ fn clamp(v: i32, max: i32) -> i32 {
 /// mouse-related are ignored; called from input::dispatch.
 pub fn handle(ev: Event) {
     let (w, h) = bounds();
-    // SAFETY: G_MOUSE is kernel-owned static state; input dispatch runs in
-    // kernel context with SIE clear (no same-hart preemption) and only one
-    // dispatch site exists, so no interleaving occurs.
+    MOUSE_LOCK.lock();
+    // SAFETY: lock serializes cross-hart dispatch and snapshot reads;
+    // callers run with interrupts disabled, as required by sync.rs.
     unsafe {
         let m = &raw mut G_MOUSE;
         match ev {
@@ -65,18 +75,7 @@ pub fn handle(ev: Event) {
                 (*m).y = clamp(y, h);
             }
             Event::MouseButton { btn, down } => {
-                let bit = match btn {
-                    super::event::MouseButton::Left => BTN_LEFT,
-                    super::event::MouseButton::Right => BTN_RIGHT,
-                    super::event::MouseButton::Middle => BTN_MIDDLE,
-                    super::event::MouseButton::Other(b) => {
-                        if b > 0 {
-                            0
-                        } else {
-                            return;
-                        }
-                    }
-                };
+                let bit = button_bit(btn);
                 if down {
                     (*m).buttons |= bit;
                 } else {
@@ -86,13 +85,44 @@ pub fn handle(ev: Event) {
             _ => {}
         }
     }
+    MOUSE_LOCK.unlock();
 }
 
 /// Current pointer snapshot: (x, y, button bits) for SYS_mouse_read.
 pub fn snapshot() -> (i16, i16, u8) {
-    // SAFETY: plain read of kernel-owned static state (see handle()).
-    unsafe {
+    MOUSE_LOCK.lock();
+    // SAFETY: lock excludes all mutations by input dispatch.
+    let value = unsafe {
         let m = &raw const G_MOUSE;
         ((*m).x as i16, (*m).y as i16, (*m).buttons)
+    };
+    MOUSE_LOCK.unlock();
+    value
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn all_eight_buttons_have_distinct_userspace_bits() {
+        use crate::drivers::input::MouseButton;
+        let mut bits = 0;
+        for button in [
+            MouseButton::Left,
+            MouseButton::Right,
+            MouseButton::Middle,
+            MouseButton::Other(3),
+            MouseButton::Other(4),
+            MouseButton::Other(5),
+            MouseButton::Other(6),
+            MouseButton::Other(7),
+        ] {
+            let bit = button_bit(button);
+            assert_eq!(bits & bit, 0);
+            assert_ne!(bit, 0);
+            bits |= bit;
+        }
+        assert_eq!(bits, 255);
+        assert_eq!(button_bit(MouseButton::Other(8)), 0);
     }
 }

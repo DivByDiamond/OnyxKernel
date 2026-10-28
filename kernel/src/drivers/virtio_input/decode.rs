@@ -1,5 +1,5 @@
 //! virtio-input event decode — translate raw events to `input::Event`.
-use super::{G_IN, N_EVENTS, VirtioInputEvent, push};
+use super::{InDev, N_EVENTS, VirtioInputEvent, push};
 use crate::drivers::input::{Event, KeyCode, MouseButton};
 use crate::drivers::virtio::{R_QUEUE_NOTIFY, VIRTQ_SIZE, reg_w};
 use core::ptr;
@@ -27,39 +27,45 @@ pub enum EventType {
     Syn,
 }
 
-/// Poll the virtio-input device for the next event. Returns `None` when
-/// no event is available (including when no virtio-input device was ever
-/// probed — `G_IN.base == 0` — since `G_IN.used` is a dangling pointer
-/// until `init`/`setup_queue` run; without this guard the timer tick's
-/// unconditional `input::event::poll_all()` call dereferences that
-/// dangling pointer on every machine without a virtio-input device, which
-/// only started actually happening once genuine timer interrupts began
-/// firing — see `srv::timer::arm_timer`'s doc comment).
-/// Each call consumes exactly one used-ring entry and recycles its descriptor.
-pub fn poll() -> Option<EventType> {
-    // SAFETY: valid only after init completed: used/ev_buf point at PMM rings/buffer;
-    // slot is masked by VIRTQ_SIZE and buf_idx by N_EVENTS, both in-bounds;
-    // reads are volatile of device-written memory.
+/// Consume one event from one initialized queue. Caller holds INPUT_LOCK.
+pub(super) unsafe fn poll_device(dev: &mut InDev) -> Option<VirtioInputEvent> {
+    // SAFETY: ready implies all queue pages and the event buffer are live.
     unsafe {
-        if !G_IN.ready {
+        if !dev.ready {
             return None;
         }
-        let used_idx = ptr::read_volatile(ptr::addr_of!((*G_IN.used).idx));
-        if used_idx == G_IN.last_used {
+        let used_idx = ptr::read_volatile(ptr::addr_of!((*dev.used).idx));
+        if used_idx == dev.last_used {
             return None;
         }
-        let slot = (G_IN.last_used as usize) % VIRTQ_SIZE;
-        G_IN.last_used = G_IN.last_used.wrapping_add(1);
-        let elem = ptr::read_volatile(ptr::addr_of!((*G_IN.used).ring[slot]));
-        let buf_idx = (elem.idx as usize) % N_EVENTS;
-        let ev = ptr::read_volatile((G_IN.ev_buf as *const VirtioInputEvent).add(buf_idx));
-        push(buf_idx);
-        reg_w(G_IN.base, R_QUEUE_NOTIFY, 0);
-        Some(translate(ev))
+        core::sync::atomic::fence(core::sync::atomic::Ordering::Acquire);
+        let slot = (dev.last_used as usize) % VIRTQ_SIZE;
+        dev.last_used = dev.last_used.wrapping_add(1);
+        let elem = ptr::read_volatile(ptr::addr_of!((*dev.used).ring[slot]));
+        if elem.idx as usize >= N_EVENTS {
+            return Some(VirtioInputEvent {
+                type_: EV_SYN,
+                code: 0,
+                value: 0,
+            });
+        }
+        let index = elem.idx as usize;
+        let event = if elem.len as usize >= core::mem::size_of::<VirtioInputEvent>() {
+            ptr::read_volatile(dev.ev_buf.add(index))
+        } else {
+            VirtioInputEvent {
+                type_: EV_SYN,
+                code: 0,
+                value: 0,
+            }
+        };
+        push(dev, index);
+        reg_w(dev.base, R_QUEUE_NOTIFY, 0);
+        Some(event)
     }
 }
 
-fn translate(ev: VirtioInputEvent) -> EventType {
+pub(super) fn translate(ev: VirtioInputEvent) -> EventType {
     match ev.type_ {
         EV_KEY => {
             if ev.code >= BTN_LEFT {
@@ -154,7 +160,7 @@ pub fn event_type(ev: EventType) -> Option<Event> {
 
 /// Convert a polled virtio event into the unified `input::Event` form.
 pub fn poll_unified() -> Option<Event> {
-    event_type(poll()?)
+    event_type(super::poll()?)
 }
 
 #[cfg(test)]
@@ -162,9 +168,16 @@ mod tests {
     use super::*;
     #[test]
     fn evdev_codes_follow_keyboard_rows_and_ascii_digits() {
-        for (start, row) in [(16, &b"qwertyuiop"[..]), (30, &b"asdfghjkl"[..]), (44, &b"zxcvbnm"[..])] {
+        for (start, row) in [
+            (16, &b"qwertyuiop"[..]),
+            (30, &b"asdfghjkl"[..]),
+            (44, &b"zxcvbnm"[..]),
+        ] {
             for (offset, &letter) in row.iter().enumerate() {
-                assert_eq!(linux_to_keycode(start + offset as u16), KeyCode::Letter(letter));
+                assert_eq!(
+                    linux_to_keycode(start + offset as u16),
+                    KeyCode::Letter(letter)
+                );
             }
         }
         for (offset, &digit) in b"1234567890".iter().enumerate() {
@@ -173,11 +186,8 @@ mod tests {
     }
     #[test]
     fn partially_initialized_device_is_not_polled() {
-        unsafe {
-            super::super::G_IN = super::super::EMPTY;
-            super::super::G_IN.base = 0x10002000;
-            assert!(poll().is_none());
-            super::super::G_IN = super::super::EMPTY;
-        }
+        let mut dev = super::super::EMPTY;
+        dev.base = 0x10002000;
+        assert!(unsafe { poll_device(&mut dev) }.is_none());
     }
 }

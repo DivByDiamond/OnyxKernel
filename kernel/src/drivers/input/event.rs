@@ -77,9 +77,27 @@ pub enum Event {
 pub type Handler = fn(Event);
 
 static mut G_HANDLER: Option<Handler> = None;
-static mut G_SHIFT: bool = false;
-static mut G_CAPS: bool = false;
-static mut G_CTRL: bool = false;
+use core::sync::atomic::{AtomicU8, Ordering};
+// Separate left/right modifier bits keep either held key active across devices.
+static MODIFIERS: AtomicU8 = AtomicU8::new(0);
+fn update_modifiers(flags: &AtomicU8, code: KeyCode, down: bool) {
+    let bit = match code {
+        KeyCode::LeftShift => 1,
+        KeyCode::RightShift => 2,
+        KeyCode::LeftCtrl => 4,
+        KeyCode::RightCtrl => 8,
+        KeyCode::CapsLock if down => {
+            flags.fetch_xor(16, Ordering::AcqRel);
+            return;
+        }
+        _ => return,
+    };
+    if down {
+        flags.fetch_or(bit, Ordering::AcqRel);
+    } else {
+        flags.fetch_and(!bit, Ordering::AcqRel);
+    }
+}
 
 /// Register a single global input handler. Replaces any previous handler.
 pub fn on_event(h: Handler) {
@@ -90,11 +108,10 @@ pub fn on_event(h: Handler) {
 }
 
 fn key_to_byte(code: KeyCode) -> Option<u8> {
-    // SAFETY: G_SHIFT/G_CAPS/G_CTRL are kernel-owned flags; dispatch runs
-    // with SIE=0 and is the only writer, so no races.
-    let shift = unsafe { G_SHIFT };
-    let caps = unsafe { G_CAPS };
-    let ctrl = unsafe { G_CTRL };
+    let flags = MODIFIERS.load(Ordering::Acquire);
+    let shift = flags & 3 != 0;
+    let ctrl = flags & 12 != 0;
+    let caps = flags & 16 != 0;
     match code {
         KeyCode::Letter(b) => {
             let upper = shift ^ caps;
@@ -189,18 +206,7 @@ fn push_key(code: KeyCode) {
 /// Dispatch one event: mouse model, TTY FIFO (for Key down), then handler.
 pub fn dispatch(ev: Event) {
     if let Event::Key { code, down } = ev {
-        match code {
-            KeyCode::LeftShift | KeyCode::RightShift => unsafe {
-                G_SHIFT = down;
-            },
-            KeyCode::LeftCtrl | KeyCode::RightCtrl => unsafe {
-                G_CTRL = down;
-            },
-            KeyCode::CapsLock if down => unsafe {
-                G_CAPS = !G_CAPS;
-            },
-            _ => {}
-        }
+        update_modifiers(&MODIFIERS, code, down);
         if down {
             push_key(code);
         }
@@ -217,16 +223,81 @@ pub fn dispatch(ev: Event) {
 /// Poll every known input source and dispatch any events found.
 /// Drains the virtio-input queue completely so a burst of keystrokes is
 /// not lost between ticks (one tick = 10ms at 100 Hz).
-pub fn poll_all() {
-    while let Some(ev) = virtio_input::poll() {
+static DRAIN_LOCK: crate::sync::SpinLock = crate::sync::SpinLock::new();
+
+fn drain_with(
+    lock: &crate::sync::SpinLock,
+    mut poll: impl FnMut() -> Option<virtio_input::EventType>,
+    mut output: impl FnMut(Event),
+) {
+    // One consumer must dequeue AND dispatch in order. A competing/reentrant
+    // syscall may observe the already published state and retry on its next poll.
+    if !lock.try_lock() {
+        return;
+    }
+    while let Some(ev) = poll() {
         if let Some(ev) = virtio_input::event_type(ev) {
-            dispatch(ev);
+            output(ev);
         }
     }
+    lock.unlock();
+}
+
+pub fn poll_all() {
+    drain_with(&DRAIN_LOCK, virtio_input::poll, dispatch);
 }
 
 /// Was a handler registered?
 pub fn has_handler() -> bool {
     // SAFETY: G_HANDLER is a plain kernel-owned slot; read without concurrency (kernel never runs with SIE set).
     unsafe { G_HANDLER.is_some() }
+}
+
+#[cfg(test)]
+mod modifier_tests {
+    use super::*;
+    #[test]
+    fn a_reentrant_drain_cannot_dispatch_newer_events_before_the_current_one() {
+        let lock = crate::sync::SpinLock::new();
+        let mut events = [
+            virtio_input::EventType::Key(KeyCode::LeftShift, true),
+            virtio_input::EventType::Key(KeyCode::Letter(b'a'), true),
+        ]
+        .into_iter();
+        let mut received = std::vec::Vec::new();
+        drain_with(
+            &lock,
+            || events.next(),
+            |ev| {
+                drain_with(
+                    &lock,
+                    || panic!("reentrant poll must not consume events"),
+                    |_| panic!(),
+                );
+                if let Event::Key { code, .. } = ev {
+                    received.push(code);
+                }
+            },
+        );
+        assert_eq!(received, [KeyCode::LeftShift, KeyCode::Letter(b'a')]);
+        assert!(lock.try_lock());
+        lock.unlock();
+    }
+
+    #[test]
+    fn either_shift_and_ctrl_remain_active_until_both_sides_are_released() {
+        let flags = AtomicU8::new(0);
+        update_modifiers(&flags, KeyCode::LeftShift, true);
+        update_modifiers(&flags, KeyCode::RightShift, true);
+        update_modifiers(&flags, KeyCode::LeftShift, false);
+        assert_ne!(flags.load(Ordering::Acquire) & 3, 0);
+        update_modifiers(&flags, KeyCode::RightShift, false);
+        assert_eq!(flags.load(Ordering::Acquire) & 3, 0);
+        update_modifiers(&flags, KeyCode::LeftCtrl, true);
+        update_modifiers(&flags, KeyCode::RightCtrl, true);
+        update_modifiers(&flags, KeyCode::RightCtrl, false);
+        assert_ne!(flags.load(Ordering::Acquire) & 12, 0);
+        update_modifiers(&flags, KeyCode::LeftCtrl, false);
+        assert_eq!(flags.load(Ordering::Acquire), 0);
+    }
 }
