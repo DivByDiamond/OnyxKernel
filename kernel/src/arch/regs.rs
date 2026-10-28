@@ -117,11 +117,12 @@ pub const USER_TOP: u64 = 0x4000_0000;
 #[cfg(target_pointer_width = "32")]
 pub const USER_TOP: u64 = 0x8000_0000;
 pub const USER_STACK_TOP: u64 = USER_TOP - 4096;
-/// Heap region starts at 16 MiB and grows up to ~256 MiB before colliding
-/// with the mmap region at 0x3000_0000. This gives user programs a generous
-/// arena for sbrk-based malloc implementations.
+/// Demand-mapped heap arena: [0x0100_0000, 0x1100_0000), 256 MiB.
+/// mmap accepts addresses from 0x2000_0000 (initial hint 0x3000_0000),
+/// leaving a 240 MiB virtual gap. The separate global user-page budget
+/// still limits physical allocations across all processes to 128 MiB.
 pub const USER_HEAP_BASE: u64 = 0x0100_0000;
-pub const USER_HEAP_SIZE: u64 = 64 * 1024 * 1024; // 64 MiB ceiling for brk/sbrk
+pub const USER_HEAP_SIZE: u64 = 256 * 1024 * 1024; // Virtual ceiling, not a physical reservation.
 pub const USER_STACK_PAGES: usize = 64; // 256 KiB user stack (was 64 KiB)
 pub const USER_HEAP_PAGES: usize = 16; // initial pre-mapped heap (64 KiB); grows on demand via brk
 pub const ONYXFS_LBA: u32 = 10240;

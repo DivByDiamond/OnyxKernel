@@ -12,11 +12,12 @@
 //!   Fixed constant rather than a RAM fraction: pmm totals are not available
 //!   at compile time and the guest VM is provisioned with >= 256 MiB DRAM,
 //!   so 128 MiB leaves headroom for kernel heap + page tables while still
-//!   bounding any single runaway allocator (per-process brk ceiling is
-//!   already 64 MiB via USER_HEAP_SIZE).
+//!   bounding runaway allocators. The per-process brk/sbrk virtual ceiling
+//!   is 256 MiB via USER_HEAP_SIZE; it reserves no physical memory and does
+//!   not bypass this smaller system-wide budget.
 //!
 //! User-page accounting hooks:
-//! - incremented in `vmm::map_anon_impl` (mmap), `ensure_heap_pages` (brk
+//! - incremented in `vmm::map_anon_impl` (mmap), `map_heap_page` (brk
 //!   growth), `onx::load` stack/heap pre-map and `map_segment_data`
 //!   (executable segments);
 //! - decremented in `vmm::unmap_impl` (munmap / brk shrink) and

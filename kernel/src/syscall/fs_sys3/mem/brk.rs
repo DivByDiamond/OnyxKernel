@@ -21,90 +21,93 @@ pub fn user_range_ok(addr: u64, size: u64) -> bool {
         None => false,
     }
 }
-/// Ensure that all pages in `[heap_brk, new_brk)` are mapped in the current
-/// process's root page table. Used by `brk`/`sbrk` to grow the heap on demand
-/// instead of pre-allocating the entire heap region at load time.
+/// Validate and back a break change before publishing it. The injected page
+/// operations keep the state transition testable without global PMM/process
+/// state. Successfully mapped pages remain owned/accounted after later failure.
+fn change_heap_break(
+    heap_brk: &mut u64,
+    addr: u64,
+    mut map_page: impl FnMut(u64) -> Result<(), Errno>,
+    mut unmap_pages: impl FnMut(u64, usize) -> Result<(), Errno>,
+) -> Result<u64, Errno> {
+    if !(regs::USER_HEAP_BASE..=regs::USER_HEAP_BASE + regs::USER_HEAP_SIZE).contains(&addr) {
+        return Err(Errno::NoMem);
+    }
+    let cur = *heap_brk;
+    if addr > cur {
+        let mut va = page_align_up(cur).ok_or(Errno::Range)?;
+        let end = page_align_up(addr).ok_or(Errno::Range)?;
+        while va < end {
+            map_page(va)?;
+            va += 4096;
+        }
+    } else if addr < cur {
+        // A live partial page must remain mapped. Align both endpoints so
+        // shrinking within one page cannot subtract ceil(addr) from cur.
+        let from = page_align_up(addr).ok_or(Errno::Range)?;
+        let end = page_align_up(cur).ok_or(Errno::Range)?;
+        if from < end {
+            unmap_pages(from, (end - from) as usize)?;
+        }
+    }
+    *heap_brk = addr;
+    Ok(addr)
+}
+
+/// Map one absent heap page, preserving the global user-page budget.
 /// # Safety
-///
-/// `root_pa` must satisfy the vmm translate contract (page-aligned PA of a
-/// live, direct-mapped root table); the caller owns the heap growth for this
-/// address space.
-unsafe fn ensure_heap_pages(root_pa: u64, old_brk: u64, new_brk: u64) -> Result<(), Errno> {
-    // SAFETY: root_pa satisfies the vmm translate contract per the caller;
-    // translate_user is a read-only PTE walk and map_one_pub installs a
-    // freshly allocated zeroed frame into that same table.
+/// `root_pa` is the live current address space's root; the caller exclusively
+/// owns heap growth and runs with interrupts disabled (PMM/VMM lock contract).
+unsafe fn map_heap_page(root_pa: u64, va: u64) -> Result<(), Errno> {
+    // SAFETY: root_pa is a live root per the caller. The frame is zeroed and
+    // private until map_one_pub succeeds; no process/list locks are acquired.
     unsafe {
-        if new_brk <= old_brk {
+        if vmm::translate_user(root_pa, va) != 0 {
             return Ok(());
         }
-        let mut va = page_align_up(old_brk).ok_or(Errno::Range)?;
-        let end = page_align_up(new_brk).ok_or(Errno::Range)?;
+        crate::proc::limits::user_page_take()?;
+        let page_pa = match pmm::alloc_zero() {
+            Ok(pa) => pa,
+            Err(e) => {
+                crate::proc::limits::user_pages_release(1);
+                return Err(e);
+            }
+        };
         let flags =
             regs::PTE_V | regs::PTE_R | regs::PTE_W | regs::PTE_U | regs::PTE_A | regs::PTE_D;
-        while va < end {
-            if vmm::translate_user(root_pa, va) == 0 {
-                // System-wide user-memory budget (ENOMEM on exhaustion).
-                // Pages mapped before the failure stay mapped and accounted;
-                // they are reclaimed by munmap or exit teardown.
-                crate::proc::limits::user_page_take()?;
-                let page_pa = match pmm::alloc_zero() {
-                    Ok(pa) => pa,
-                    Err(e) => {
-                        crate::proc::limits::user_pages_release(1);
-                        return Err(e);
-                    }
-                };
-                if let Err(e) = vmm::map_one_pub(root_pa, va, page_pa, flags, 0) {
-                    // Page never entered the table — release it here so both
-                    // the physical page and its budget slot are reclaimed.
-                    pmm::free(page_pa);
-                    crate::proc::limits::user_pages_release(1);
-                    return Err(e);
-                }
-            }
-            va += 4096;
+        if let Err(e) = vmm::map_one_pub(root_pa, va, page_pa, flags, 0) {
+            pmm::free(page_pa);
+            crate::proc::limits::user_pages_release(1);
+            return Err(e);
         }
         Ok(())
     }
 }
 
 /// # Safety
-///
-/// Call only from handler::handle's syscall path: current process set, ACL
-/// checked; operates exclusively on the current process's own root table.
+/// Call only from the syscall path: current process set, ACL checked, with
+/// exclusive ownership of its heap/root. Mapping operations must not schedule.
 pub unsafe fn sys_brk(addr: u64) -> i64 {
-    // SAFETY: p is this hart's current process and p.root_pa satisfies the
-    // vmm translate contract; unmap only touches that table and only above
-    // the page-aligned new brk, so live mid-page heap stays mapped.
+    // SAFETY: this short Proc borrow does not cross another current() accessor
+    // or a context switch. PMM/VMM leaf locks and accounting only use the root
+    // copied below; unmapped pages release their budget through vmm::unmap.
     unsafe {
         let p = proc::current();
-        let cur = p.heap_brk;
-        let heap_base = regs::USER_HEAP_BASE;
-        let heap_end = heap_base + regs::USER_HEAP_SIZE;
         if addr == 0 {
-            return cur as i64;
+            return p.heap_brk as i64;
         }
-        if addr < heap_base || addr > heap_end {
-            return Errno::NoMem.as_i64();
+        let root_pa = p.root_pa;
+        match change_heap_break(
+            &mut p.heap_brk,
+            addr,
+            |va| map_heap_page(root_pa, va),
+            |from, size| vmm::unmap(root_pa, from, size),
+        ) {
+            Ok(new_brk) => new_brk as i64,
+            Err(e) => e.as_i64(),
         }
-        if addr < cur {
-            // B8: start at the next page boundary — `addr` itself may be
-            // mid-page (it is still live heap memory of the shrinking program),
-            // and rounding down here would unmap the page the program is
-            // actually using.
-            let from = match page_align_up(addr) {
-                Some(f) => f,
-                None => return Errno::Range.as_i64(),
-            };
-            let size = (cur - from) as usize;
-            let _ = vmm::unmap(p.root_pa, from, size);
-        }
-        if addr > cur
-            && let Err(e) = ensure_heap_pages(p.root_pa, cur, addr)
-        {
-            return e.as_i64();
-        }
-        p.heap_brk = addr;
-        addr as i64
     }
 }
+
+#[cfg(test)]
+mod tests;

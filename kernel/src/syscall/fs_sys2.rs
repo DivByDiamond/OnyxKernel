@@ -14,34 +14,36 @@ pub(super) unsafe fn sys_exec(tf: &mut TrapFrame, path: u64, argv: u64) -> i64 {
     unsafe { super::fs_sys3::sys_execve(tf, path, argv, 0) }
 }
 
-/// # Safety: call only from handler::handle's syscall path (current process set, ACL checked); no user pointers dereferenced.
+/// Run a relative break change without publishing an advance before the
+/// absolute-break operation has successfully mapped its backing pages.
+pub(super) fn sbrk_with(cur: u64, incr: i64, set_break: impl FnOnce(u64) -> i64) -> i64 {
+    let Some(new_brk) = cur.checked_add_signed(incr) else {
+        return Errno::NoMem.as_i64();
+    };
+    if !(crate::arch::regs::USER_HEAP_BASE
+        ..=crate::arch::regs::USER_HEAP_BASE + crate::arch::regs::USER_HEAP_SIZE)
+        .contains(&new_brk)
+    {
+        return Errno::NoMem.as_i64();
+    }
+    let result = set_break(new_brk);
+    if result < 0 { result } else { cur as i64 }
+}
+
+/// # Safety
+/// Call only from the syscall path with a live current process, ACL checked,
+/// and exclusive ownership of its heap growth; no scheduling may occur here.
 pub(super) unsafe fn sys_sbrk(incr: i64) -> i64 {
-    // SAFETY: by_pid() takes proc_list_lock for the lookup; heap_brk is only mutated by the owning process's own context.
+    // SAFETY: the current slot belongs to this hart and stays live throughout
+    // this syscall. Copy the break without retaining a Proc borrow across
+    // sys_brk's current() access; mapping/accounting is shared with brk.
     unsafe {
-        let pid = proc::current_pid();
-        // Audit fix (🔴 #8): replace `proc::by_pid(pid).unwrap()` with a
-        // graceful error return. Same rationale as the brk path in
-        // fs_sys3/mem/brk.rs::sys_brk.
-        let p = match proc::by_pid(pid) {
-            Some(proc) => proc,
-            None => return Errno::Inval.as_i64(),
-        };
-        let cur = p.heap_brk;
-        let heap_end = crate::arch::regs::USER_HEAP_BASE + crate::arch::regs::USER_HEAP_SIZE;
-        // Bug (syscall SERIOUS #1): use checked arithmetic for the new brk.
-        // The previous code did `(cur as i64 + incr) as u64` which silently
-        // wraps on signed overflow — e.g. sbrk(i64::MIN) or sbrk(very large)
-        // would produce a tiny new_brk that passes the bounds check and
-        // corrupt the heap.
-        let new_brk = match (cur as i64).checked_add(incr) {
-            Some(v) => v as u64,
-            None => return Errno::NoMem.as_i64(),
-        };
-        if new_brk < crate::arch::regs::USER_HEAP_BASE || new_brk > heap_end {
-            return Errno::NoMem.as_i64();
+        let current = proc::current_for_hart(proc::hart_id());
+        if current.is_null() {
+            return Errno::Inval.as_i64();
         }
-        p.heap_brk = new_brk;
-        cur as i64
+        let cur = (*current).heap_brk;
+        sbrk_with(cur, incr, |new_brk| super::fs_sys3::sys_brk(new_brk))
     }
 }
 
