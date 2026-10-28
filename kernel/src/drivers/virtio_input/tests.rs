@@ -169,3 +169,36 @@ fn device_registry_rejects_duplicates_but_accepts_distinct_endpoints_until_capac
     }
     assert!(matches!(inputs.slot(0x20000000), Err(Errno::NoSpace)));
 }
+
+#[test]
+fn a_full_staged_key_burst_has_buffers_for_every_event() {
+    let mut device = TestDevice::new(30);
+    let codes = [18, 46, 35, 24, 57, 48, 22, 19, 31, 20, 24, 37, 28];
+    let mut index = 0;
+    for code in codes {
+        for (kind, value) in [(1, 1), (0, 0), (1, 0), (0, 0)] {
+            assert!(index < N_EVENTS);
+            device.events[index] = VirtioInputEvent {
+                type_: kind,
+                code: if kind == 1 { code } else { 0 },
+                value,
+            };
+            device.used.ring[index] = VqUsedElem {
+                idx: index as u32,
+                len: 8,
+            };
+            index += 1;
+        }
+    }
+    device.used.idx = index as u16;
+    let mut inputs = InputDevices::new();
+    inputs.devices[0] = device.dev;
+    let mut presses = 0;
+    while let Some(event) = unsafe { inputs.poll() } {
+        if matches!(event, decode::EventType::Key(_, true)) {
+            presses += 1;
+        }
+    }
+    assert_eq!(presses, codes.len());
+    assert_eq!(device.avail.idx as usize, index);
+}

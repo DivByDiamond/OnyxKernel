@@ -15,7 +15,9 @@ use core::ptr;
 use onyx_core::errno::{Errno, KResult};
 
 pub const VIRTIO_ID_INPUT: u32 = 18;
-pub const N_EVENTS: usize = 8;
+// Pre-post the full negotiated queue. Sedna drains a staged event batch before
+// running the guest CPU; posting only eight buffers loses bursts after two keys.
+pub const N_EVENTS: usize = VIRTQ_SIZE;
 
 /// virtio-input event (spec §5.5.5).
 #[repr(C)]
@@ -51,6 +53,7 @@ const EMPTY: InDev = InDev {
     _head: 0,
 };
 
+const _: () = assert!(N_EVENTS * core::mem::size_of::<VirtioInputEvent>() <= pmm::PAGE_SIZE);
 pub const MAX_INPUT_DEVICES: usize = 32;
 
 struct InputDevices {
@@ -239,7 +242,7 @@ unsafe fn init_device(base: usize, dev: &mut InDev) -> KResult<()> {
 /// Must be called from `init` with dev.base set to a probed base, during
 /// single-threaded boot-time probe.
 unsafe fn setup_event_queue(dev: &mut InDev) -> KResult<()> {
-    // SAFETY: called from init on a probed base during single-threaded boot; rings and the N_EVENTS-entry buffer are fresh contiguous PMM pages stored into G_IN and registered before use; desc slots 0..N_EVENTS pre-posted, N_EVENTS < VIRTQ_SIZE.
+    // SAFETY: called from init on a probed base during single-threaded boot; rings and the N_EVENTS-entry buffer are fresh contiguous PMM pages stored into G_IN and registered before use; desc slots 0..N_EVENTS pre-posted, N_EVENTS <= VIRTQ_SIZE.
     unsafe {
         let base = dev.base;
         reg_w(base, R_QUEUE_SEL, 0);
