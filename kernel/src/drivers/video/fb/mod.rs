@@ -1,6 +1,7 @@
 use onyx_core::errno::KResult;
 
 pub mod devices;
+pub mod present_control;
 pub use devices::{Framebuffer, count, get as display};
 
 pub const FB_WIDTH: usize = 1280;
@@ -142,6 +143,7 @@ pub unsafe fn init_device(
     // SAFETY: geometry (non-zero dims, stride >= width*bpp/8) is validated above; G_FB is written once during single-threaded boot init (SIE=0, see crate::sync).
     unsafe {
         let surface = Framebuffer::new(paddr, width, height, stride, bpp)?;
+        present_control::reset_console();
         devices::register(surface)?;
         G_FB = Fb {
             base: paddr as *mut u8,

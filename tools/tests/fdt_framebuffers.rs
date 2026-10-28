@@ -21,6 +21,8 @@ mod fdt {
 }
 
 pub use fdt::{reader, walk};
+#[path = "../../kernel/src/libfdt/fdt/frame_present.rs"]
+mod frame_present;
 #[path = "../../kernel/src/libfdt/fdt/framebuffer.rs"]
 mod framebuffer;
 
@@ -54,6 +56,23 @@ impl Tree {
         self.data.extend(value);
         self.pad();
     }
+    fn companion(
+        &mut self,
+        name: &str,
+        address: u64,
+        size: u64,
+        framebuffer: &[u8],
+        status: &[u8],
+    ) {
+        self.begin(name);
+        self.prop("compatible", b"vendor,extra\0oc2r,frame-present-v1\0");
+        let mut reg = address.to_be_bytes().to_vec();
+        reg.extend(size.to_be_bytes());
+        self.prop("reg", &reg);
+        self.prop("framebuffer-base", framebuffer);
+        self.prop("status", status);
+        self.word(2);
+    }
     fn display(
         &mut self,
         name: &str,
@@ -83,6 +102,16 @@ fn discovers_multiple_surfaces_without_ancestor_duplicates_and_rejects_invalid_n
     let mut t = Tree::default();
     t.begin("");
     t.begin("soc");
+    let target = 0x30000000u64.to_be_bytes();
+    t.companion("present@31000000", 0x31000000, 32, &target, b"okay\0");
+    t.companion("duplicate-target", 0x31000100, 32, &target, b"okay\0");
+    let second = 0x30100000u64.to_be_bytes();
+    t.companion("short", 0x31000200, 16, &second, b"okay\0");
+    t.companion("unaligned", 0x31000201, 32, &second, b"okay\0");
+    t.companion("disabled", 0x31000300, 32, &second, b"disabled\0");
+    t.companion("short-target", 0x31000400, 32, &second[..4], b"okay\0");
+    t.companion("wrapping", u64::MAX - 15, 32, &second, b"okay\0");
+    t.companion("present@31000500", 0x31000500, 32, &second, b"ok\0");
     t.display(
         "framebuffer@30000000",
         0x30000000,
@@ -157,6 +186,23 @@ fn discovers_multiple_surfaces_without_ancestor_duplicates_and_rejects_invalid_n
         fdt::G_STRUCT_SIZE = t.data.len();
         fdt::G_STRINGS = t.strings.as_ptr() as usize;
         fdt::G_STRINGS_SIZE = t.strings.len();
+        let mut companions = [frame_present::FramePresent::default(); 8];
+        assert_eq!(frame_present::find_frame_present(&mut companions), 2);
+        assert_eq!(
+            companions[0],
+            frame_present::FramePresent {
+                base: 0x31000000,
+                framebuffer: 0x30000000
+            }
+        );
+        assert_eq!(
+            companions[1],
+            frame_present::FramePresent {
+                base: 0x31000500,
+                framebuffer: 0x30100000
+            }
+        );
+        assert_eq!(frame_present::find_frame_present(&mut companions[..1]), 1);
         let mut displays = [framebuffer::SimpleFramebuffer::default(); 8];
         assert_eq!(framebuffer::find_simple_framebuffers(&mut displays), 3);
         assert_eq!(

@@ -1,4 +1,5 @@
 mod clint;
+mod frame_present;
 mod framebuffer;
 mod init;
 mod memory;
@@ -17,6 +18,7 @@ pub(crate) use types::{
 };
 
 pub use clint::find_clint;
+pub use frame_present::{FramePresent, find_frame_present};
 pub use framebuffer::{SimpleFramebuffer, find_simple_framebuffer, find_simple_framebuffers};
 pub use init::init;
 #[cfg(test)]

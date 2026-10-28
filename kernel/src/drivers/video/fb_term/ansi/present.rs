@@ -143,6 +143,10 @@ pub fn present_now() {
 /// Copy the back buffer to the front and stamp the cursor onto the
 /// presented frame. Caller must hold the console write lock.
 pub(crate) fn present_locked() {
+    let Some(publication) = crate::drivers::fb::present_control::Publication::begin_console()
+    else {
+        return;
+    };
     // SAFETY: G_ANSI is a kernel-lifetime static; the caller holds the
     // console write lock, excluding concurrent writers/presenters; the
     // borrow does not escape this block.
@@ -156,7 +160,20 @@ pub(crate) fn present_locked() {
             (*t).draw_cursor_front();
         }
     }
-    G_DIRTY.store(false, Ordering::Release);
+    if publication.commit() {
+        G_DIRTY.store(false, Ordering::Release);
+    } else {
+        // Host rejected publication: the consumed dirty region must be retried.
+        unsafe {
+            let t = &raw const super::G_ANSI;
+            super::scale::mark(super::viewport::Rect::new(
+                0,
+                0,
+                (*t).cols * super::state::FONT_W,
+                (*t).rows * super::state::FONT_H,
+            ));
+        }
+    }
 }
 
 #[cfg(test)]

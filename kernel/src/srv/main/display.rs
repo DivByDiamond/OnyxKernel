@@ -45,6 +45,7 @@ pub(crate) unsafe fn init_and_draw() {
                 crate::kwrn!("fb", "simple-framebuffer init failed");
             }
         }
+        fb::present_control::init_from_fdt();
         if !fb::enabled() {
             // Try virtio-gpu (QEMU virt -device virtio-gpu-device) before falling
             // back to invisible RAM. The virtio-mmio bases are the fixed QEMU

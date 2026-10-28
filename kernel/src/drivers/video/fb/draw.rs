@@ -99,6 +99,9 @@ pub fn paint_base() -> *mut u8 {
 /// console presenter with the console write lock held, so a frame is
 /// never copied mid-write.
 pub fn present() {
+    let Some(publication) = super::present_control::Publication::begin_console() else {
+        return;
+    };
     let pa = G_BACK_PA.load(Ordering::Acquire);
     if pa == 0 {
         return;
@@ -110,6 +113,7 @@ pub fn present() {
     unsafe {
         core::ptr::copy_nonoverlapping(pa as *const u8, front_base(), bytes);
     }
+    publication.commit();
 }
 
 /// Publish only a console rectangle. Native applications retain full-surface
