@@ -121,16 +121,24 @@ unsafe fn handle_arp_inner(frame: &[u8]) {
             return;
         }
         let mac = virtio_net::mac();
-        if frame[14..20] != [0,1,8,0,6,4] { return; }
+        if frame[14..20] != [0, 1, 8, 0, 6, 4] {
+            return;
+        }
         let oper = u16::from_be_bytes([frame[20], frame[21]]);
-        if oper != 1 && oper != 2 { return; }
+        if oper != 1 && oper != 2 {
+            return;
+        }
         let spa: [u8; 4] = [frame[28], frame[29], frame[30], frame[31]];
         let sha: [u8; 6] = [
             frame[22], frame[23], frame[24], frame[25], frame[26], frame[27],
         ];
         let tpa: [u8; 4] = [frame[38], frame[39], frame[40], frame[41]];
-        if frame[6..12] != sha || (oper==2 && (frame[32..38]!=mac || tpa!=crate::net::G_IP)) { return; }
-        if spa != [0;4] { arp_insert(spa, sha); }
+        if frame[6..12] != sha || (oper == 2 && (frame[32..38] != mac || tpa != crate::net::G_IP)) {
+            return;
+        }
+        if spa != [0; 4] {
+            arp_insert(spa, sha);
+        }
         if oper == 1 && tpa == crate::net::G_IP {
             let mut pkt = [0u8; 42];
             pkt[0..6].copy_from_slice(&sha);
@@ -190,5 +198,7 @@ pub unsafe fn dispatch(frame: &[u8]) {
 /// Caller holds net_lock while replacing the active interface/address.
 pub unsafe fn clear_arp_cache() {
     // SAFETY: the serialization contract excludes all cache readers/writers.
-    unsafe { ARP_CACHE_LEN = 0; }
+    unsafe {
+        ARP_CACHE_LEN = 0;
+    }
 }

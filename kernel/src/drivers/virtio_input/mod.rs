@@ -3,6 +3,10 @@
 //! Probe/init + event decode. Reads raw input events (keyboard, mouse,
 //! tablet) from the device's event virtqueue and translates them to
 //! the unified `drivers::input::Event` representation.
+
+// `&raw mut` on a `static mut` is deliberate: clippy's suggested bare `STATIC` would
+// create a reference to it and trip `static_mut_refs`.
+#![allow(clippy::deref_addrof)]
 use crate::drivers::virtio::{
     R_DEVICE_ID, R_GUEST_FEATURES, R_GUEST_FEATURES_SEL, R_HOST_FEATURES, R_HOST_FEATURES_SEL,
     R_MAGIC_VALUE, R_QUEUE_AVAIL_HIGH, R_QUEUE_AVAIL_LOW, R_QUEUE_DESC_HIGH, R_QUEUE_DESC_LOW,

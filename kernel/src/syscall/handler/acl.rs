@@ -104,8 +104,9 @@ fn syscall_allowed_uid(nr: u64, ring: u8, uid: Option<u32>) -> bool {
         // default-deny stays — shadow protection is not weakened; only
         // root's ability to modify its own system files from its own shell
         // changes.
-        SYS_net_config | SYS_udp_bind | SYS_udp_sendto | SYS_udp_recv | SYS_udp_close | SYS_net_listen | SYS_net_accept | SYS_net_unlisten | SYS_udp_recvfrom | SYS_udp_sendfrom =>
-            ring <= proc::PROC_RING_ROOT || uid.is_some_and(|u| u == 0),
+        SYS_net_config | SYS_udp_bind | SYS_udp_sendto | SYS_udp_recv | SYS_udp_close
+        | SYS_net_listen | SYS_net_accept | SYS_net_unlisten | SYS_udp_recvfrom
+        | SYS_udp_sendfrom => ring <= proc::PROC_RING_ROOT || uid.is_some_and(|u| u == 0),
         SYS_create | SYS_rename => ring <= proc::PROC_RING_ROOT || uid.is_some_and(|u| u == 0),
         // reboot(2) power-cycles the machine, so it stays root-only — but
         // "root" includes uid 0 in the user ring, the same self-service
@@ -222,7 +223,18 @@ mod tests {
 
     #[test]
     fn test_network_admin_calls_require_root() {
-        for nr in [SYS_net_config, SYS_udp_bind, SYS_udp_sendto, SYS_udp_recv, SYS_udp_close, SYS_net_listen, SYS_net_accept, SYS_net_unlisten, SYS_udp_recvfrom, SYS_udp_sendfrom] {
+        for nr in [
+            SYS_net_config,
+            SYS_udp_bind,
+            SYS_udp_sendto,
+            SYS_udp_recv,
+            SYS_udp_close,
+            SYS_net_listen,
+            SYS_net_accept,
+            SYS_net_unlisten,
+            SYS_udp_recvfrom,
+            SYS_udp_sendfrom,
+        ] {
             assert!(!syscall_allowed_uid(nr, PROC_RING_USER, Some(1000)));
             assert!(!syscall_allowed_uid(nr, PROC_RING_USER, None));
             assert!(syscall_allowed_uid(nr, PROC_RING_USER, Some(0)));

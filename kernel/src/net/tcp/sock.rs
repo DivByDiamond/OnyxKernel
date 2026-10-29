@@ -2,7 +2,9 @@ use crate::net::lock::{net_lock, net_unlock};
 use crate::net::poll;
 use onyx_core::errno::{Errno, KResult};
 
-use super::conn::{CONNS, RECV_BUF_SIZE, SEND_BUF_SIZE, TcpConn, alloc_conn, alloc_local_port, send_tcp_seg_tx};
+use super::conn::{
+    CONNS, RECV_BUF_SIZE, SEND_BUF_SIZE, TcpConn, alloc_conn, alloc_local_port, send_tcp_seg_tx,
+};
 
 /// # Safety: kernel context with SIE clear; the connect (SYN send + ACK
 /// wait loop with poll) runs under net_lock(), serializing concurrent TCP
@@ -31,9 +33,12 @@ unsafe fn tcp_connect_inner(dst_ip: [u8; 4], port: u16) -> KResult<usize> {
         let sport = alloc_local_port();
         let isn = (sport as u32).wrapping_add(1);
         CONNS[cid] = Some(TcpConn {
-            owner_pid:0,
+            owner_pid: 0,
             iface: crate::net::config::route(dst_ip).ok_or(Errno::Io)?,
-            listener:usize::MAX,last_tx_us:super::conn::now_us(),retries:0,peer_window:2048,
+            listener: usize::MAX,
+            last_tx_us: super::conn::now_us(),
+            retries: 0,
+            peer_window: 2048,
             state: 1,
             src_port: sport,
             dst_ip,
@@ -59,7 +64,8 @@ unsafe fn tcp_connect_inner(dst_ip: [u8; 4], port: u16) -> KResult<usize> {
             send_tcp_seg_tx(tx, super::state::SYN, &[]);
         }
         for attempt in 0..50000 {
-            if attempt > 0 && attempt % 10000 == 0
+            if attempt > 0
+                && attempt % 10000 == 0
                 && let Some(conn) = CONNS[cid].as_mut()
             {
                 let mut tx = conn.tx();
@@ -163,24 +169,32 @@ unsafe fn tcp_recv_inner(cid: usize, buf: &mut [u8]) -> KResult<usize> {
 }
 
 pub(super) fn read_received(conn: &mut TcpConn, buf: &mut [u8]) -> KResult<(usize, bool)> {
-    if conn.state == 6 { return Err(Errno::Io); }
+    if conn.state == 6 {
+        return Err(Errno::Io);
+    }
     if conn.recv_len == 0 {
-        return if conn.peer_fin { Ok((0,false)) } else { Err(Errno::NoEnt) };
+        return if conn.peer_fin {
+            Ok((0, false))
+        } else {
+            Err(Errno::NoEnt)
+        };
     }
     let n = buf.len().min(conn.recv_len);
-    for (i,dst) in buf[..n].iter_mut().enumerate() {
-        *dst = conn.recv_buf[(conn.recv_head+i)%RECV_BUF_SIZE];
+    for (i, dst) in buf[..n].iter_mut().enumerate() {
+        *dst = conn.recv_buf[(conn.recv_head + i) % RECV_BUF_SIZE];
     }
-    conn.recv_head = (conn.recv_head+n)%RECV_BUF_SIZE;
+    conn.recv_head = (conn.recv_head + n) % RECV_BUF_SIZE;
     conn.recv_len -= n;
-    Ok((n,n>0 && !conn.peer_fin))
+    Ok((n, n > 0 && !conn.peer_fin))
 }
 
 /// # Safety: indexes CONNS[cid] under net_lock() (net sync fix, todo P1 #4).
 pub unsafe fn tcp_close(cid: usize) {
     // SAFETY: bounded socket table under net_lock; copied before reentrant TX.
     unsafe {
-        if cid>=super::conn::MAX_CONNS{return;}
+        if cid >= super::conn::MAX_CONNS {
+            return;
+        }
         net_lock();
         if let Some(connection) = CONNS[cid].as_mut() {
             if connection.state == 2 || connection.state == 7 {

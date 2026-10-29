@@ -42,15 +42,21 @@ pub unsafe fn send_packet(dst_ip: [u8; 4], protocol: u8, payload: &[u8]) -> KRes
 unsafe fn send_packet_inner(dst_ip: [u8; 4], protocol: u8, payload: &[u8]) -> KResult<()> {
     // SAFETY: header vector sized IP_HLEN + payload.len(); IP_ID RMW and ARP cache accessed under the caller's net_lock().
     unsafe {
-        if payload.len() > 1480 { return Err(Errno::Range); }
+        if payload.len() > 1480 {
+            return Err(Errno::Range);
+        }
         let mask = u32::from_be_bytes(crate::net::G_MASK);
         let local = u32::from_be_bytes(G_IP);
         let destination = u32::from_be_bytes(dst_ip);
-        let broadcast = dst_ip == [255;4] || (mask != 0 && destination == (local | !mask));
+        let broadcast = dst_ip == [255; 4] || (mask != 0 && destination == (local | !mask));
         let next_hop = if !broadcast && (destination & mask) != (local & mask) {
-            if crate::net::G_GW == [0;4] { return Err(Errno::Io); }
+            if crate::net::G_GW == [0; 4] {
+                return Err(Errno::Io);
+            }
             crate::net::G_GW
-        } else { dst_ip };
+        } else {
+            dst_ip
+        };
         let dst_mac = if broadcast {
             [0xFF; 6]
         } else {
@@ -106,12 +112,18 @@ unsafe fn send_packet_inner(dst_ip: [u8; 4], protocol: u8, payload: &[u8]) -> KR
 /// RX dispatcher: requires the net single-poller contract; protocol
 /// dispatches to sub-handlers that validate their own offsets.
 pub unsafe fn handle_ip(frame: &[u8]) {
-    let Some(packet) = super::ipv4::parse(frame) else { return; };
+    let Some(packet) = super::ipv4::parse(frame) else {
+        return;
+    };
     // SAFETY: context selected under net_lock; validated sizes bound every slice.
     unsafe {
         let mask = u32::from_be_bytes(crate::net::G_MASK);
-        let broadcast = packet.destination == [255;4] || (mask != 0 && u32::from_be_bytes(packet.destination) == (u32::from_be_bytes(G_IP) | !mask));
-        if packet.destination != G_IP && !broadcast { return; }
+        let broadcast = packet.destination == [255; 4]
+            || (mask != 0
+                && u32::from_be_bytes(packet.destination) == (u32::from_be_bytes(G_IP) | !mask));
+        if packet.destination != G_IP && !broadcast {
+            return;
+        }
         let frame = &frame[..eth::ETH_HLEN + packet.total_len];
         match packet.protocol {
             IP_PROTO_ICMP if !broadcast => {
@@ -119,10 +131,15 @@ pub unsafe fn handle_ip(frame: &[u8]) {
                 if let Some(reply) = super::ipv4::echo_reply(payload) {
                     let _ = send_packet(packet.source, IP_PROTO_ICMP, &reply);
                 }
-            },
-            IP_PROTO_TCP if !broadcast => crate::net::tcp::handle_tcp(frame, eth::ETH_HLEN, packet.header_len, packet.total_len),
+            }
+            IP_PROTO_TCP if !broadcast => crate::net::tcp::handle_tcp(
+                frame,
+                eth::ETH_HLEN,
+                packet.header_len,
+                packet.total_len,
+            ),
             IP_PROTO_UDP => crate::net::udp::handle_udp(frame, eth::ETH_HLEN),
-            _ => {},
+            _ => {}
         }
     }
 }

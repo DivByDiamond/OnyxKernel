@@ -190,8 +190,12 @@ fn test_net_tables_concurrent_exclusivity() {
             match alloc_conn() {
                 Some(cid) => {
                     CONNS[cid] = Some(crate::net::tcp::conn::TcpConn {
-                        owner_pid:0,
-            iface: 0, listener: usize::MAX, last_tx_us: 0, retries: 0, peer_window: 2048,
+                        owner_pid: 0,
+                        iface: 0,
+                        listener: usize::MAX,
+                        last_tx_us: 0,
+                        retries: 0,
+                        peer_window: 2048,
                         state: 2,
                         src_port: 5100 + cids_used as u16,
                         dst_ip: [10, 9, 9, 1],

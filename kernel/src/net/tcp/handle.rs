@@ -87,8 +87,11 @@ unsafe fn handle_tcp_inner(frame: &[u8], ip_start: usize, ihl: usize, total_len:
         }
         let payload = &frame[payload_start..payload_start + payload_len];
         let iface = crate::drivers::virtio_net::active_device();
-        if let Some(cid) = CONNS.iter().position(|slot| slot.as_ref().is_some_and(|c|
-            c.iface == iface && c.src_port == dport && c.dst_port == sport && c.dst_ip == sip)) {
+        if let Some(cid) = CONNS.iter().position(|slot| {
+            slot.as_ref().is_some_and(|c| {
+                c.iface == iface && c.src_port == dport && c.dst_port == sport && c.dst_ip == sip
+            })
+        }) {
             // Mutate the slot in place (no ~10 KB `TcpConn` copies: see
             // `TcpTx`) and only hand scalar snapshots to the TX path, which
             // can re-enter this function through a nested poll.
@@ -99,12 +102,16 @@ unsafe fn handle_tcp_inner(frame: &[u8], ip_start: usize, ihl: usize, total_len:
                     connection.tw_deadline_us = now_us() + 5_000_000;
                     return;
                 }
-                connection.peer_window = u16::from_be_bytes([frame[tcp_off + 14], frame[tcp_off + 15]]);
+                connection.peer_window =
+                    u16::from_be_bytes([frame[tcp_off + 14], frame[tcp_off + 15]]);
                 let commands = tcp_transition(connection, seq, ack, flags, payload, now_us());
                 if before == 5 && (connection.state == 2 || connection.state == 7) {
                     super::listen::established(cid, connection.listener);
                 }
-                if before == 5 && flags & super::state::SYN != 0 && seq.wrapping_add(1) == connection.rcv_nxt {
+                if before == 5
+                    && flags & super::state::SYN != 0
+                    && seq.wrapping_add(1) == connection.rcv_nxt
+                {
                     let mut tx = connection.tx();
                     tx.snd_nxt = tx.snd_una;
                     send_tcp_seg_tx(tx, super::state::SYN | ACK, &[]);
@@ -114,12 +121,18 @@ unsafe fn handle_tcp_inner(frame: &[u8], ip_start: usize, ihl: usize, total_len:
                     match command {
                         SEG_ACK => send_tcp_seg_tx(tx, ACK, &[]),
                         SEG_FIN_ACK => send_tcp_seg_tx(tx, FIN | ACK, &[]),
-                        _ => {},
+                        _ => {}
                     }
                 }
             }
-        } else if flags & (super::state::SYN|ACK) == super::state::SYN {
-            super::listen::incoming_syn(dport,sip,sport,seq,u16::from_be_bytes([frame[tcp_off+14],frame[tcp_off+15]]));
+        } else if flags & (super::state::SYN | ACK) == super::state::SYN {
+            super::listen::incoming_syn(
+                dport,
+                sip,
+                sport,
+                seq,
+                u16::from_be_bytes([frame[tcp_off + 14], frame[tcp_off + 15]]),
+            );
         }
     }
 }

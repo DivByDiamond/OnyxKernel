@@ -17,13 +17,21 @@ pub const DEVFS_HVC0_INO: u32 = 49;
 const DEVFS_EXTRA_FB_BASE_INO: u32 = 64;
 
 pub fn fb_ino(index: usize) -> u32 {
-    if index == 0 { DEVFS_FB0_INO } else { DEVFS_EXTRA_FB_BASE_INO + index as u32 - 1 }
+    if index == 0 {
+        DEVFS_FB0_INO
+    } else {
+        DEVFS_EXTRA_FB_BASE_INO + index as u32 - 1
+    }
 }
 
-pub fn is_framebuffer_ino(ino: u32) -> bool { framebuffer(ino).is_some() }
+pub fn is_framebuffer_ino(ino: u32) -> bool {
+    framebuffer(ino).is_some()
+}
 
 fn framebuffer(ino: u32) -> Option<fb::Framebuffer> {
-    let index = if ino == DEVFS_FB0_INO { 0 } else {
+    let index = if ino == DEVFS_FB0_INO {
+        0
+    } else {
         ino.checked_sub(DEVFS_EXTRA_FB_BASE_INO)? as usize + 1
     };
     fb::display(index)
@@ -31,10 +39,14 @@ fn framebuffer(ino: u32) -> Option<fb::Framebuffer> {
 
 fn fb_index(name: &[u8]) -> Option<usize> {
     let digits = name.strip_prefix(b"fb")?;
-    if digits.is_empty() { return None; }
+    if digits.is_empty() {
+        return None;
+    }
     let mut index = 0usize;
     for &c in digits {
-        if !c.is_ascii_digit() { return None; }
+        if !c.is_ascii_digit() {
+            return None;
+        }
         index = index.checked_mul(10)?.checked_add((c - b'0') as usize)?;
     }
     (index < fb::count()).then_some(index)
@@ -57,8 +69,12 @@ pub fn lookup(name: &[u8]) -> KResult<u32> {
     if let Some(ino) = pty_nodes::lookup_name(name) {
         return Ok(ino);
     }
-    if name == b"hvc0" && crate::drivers::virtio_console::present() { return Ok(DEVFS_HVC0_INO); }
-    if let Some(index) = fb_index(name) { return Ok(fb_ino(index)); }
+    if name == b"hvc0" && crate::drivers::virtio_console::present() {
+        return Ok(DEVFS_HVC0_INO);
+    }
+    if let Some(index) = fb_index(name) {
+        return Ok(fb_ino(index));
+    }
     if let Some(idx) = blk::parse_name(name) {
         if idx < crate::drivers::virtio::count() {
             return Ok(blk_ino(idx));
@@ -84,8 +100,12 @@ pub fn stat(ino: u32) -> KResult<DevfsStat> {
     }
     match ino {
         DEVFS_ROOT_INO => Ok(st(ino, 0, 0o040755)),
-        DEVFS_HVC0_INO if crate::drivers::virtio_console::present() => Ok(st(ino, u32::MAX, 0o100600)),
-        ino if is_framebuffer_ino(ino) => Ok(st(ino, framebuffer(ino).unwrap().size as u32, 0o100666)),
+        DEVFS_HVC0_INO if crate::drivers::virtio_console::present() => {
+            Ok(st(ino, u32::MAX, 0o100600))
+        }
+        ino if is_framebuffer_ino(ino) => {
+            Ok(st(ino, framebuffer(ino).unwrap().size as u32, 0o100666))
+        }
         _ => Err(Errno::NoEnt),
     }
 }
@@ -175,8 +195,14 @@ pub fn readdir_entry(idx: u32, name_out: *mut u8, name_len: usize) -> Option<u32
     if index < fb::count() {
         let mut name = [0u8; 4];
         name[..2].copy_from_slice(b"fb");
-        let length = if index < 10 { name[2] = b'0' + index as u8; 3 }
-            else { name[2] = b'0' + (index / 10) as u8; name[3] = b'0' + (index % 10) as u8; 4 };
+        let length = if index < 10 {
+            name[2] = b'0' + index as u8;
+            3
+        } else {
+            name[2] = b'0' + (index / 10) as u8;
+            name[3] = b'0' + (index % 10) as u8;
+            4
+        };
         copy_name(&name[..length], name_out, name_len);
         return Some(fb_ino(index));
     }

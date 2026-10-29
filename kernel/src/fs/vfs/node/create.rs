@@ -1,10 +1,10 @@
 //! File creation — `create` (regular file) and `mkdir` (directory).
 use super::split_parent;
-use crate::fs::{fat32, onyxfs};
 use crate::fs::vfs::{
     FdToken, Fs, PERM_READ, PERM_SEEK, PERM_WRITE, alloc_fd, fd_set, fd_token, resolve_path,
     with_mount,
 };
+use crate::fs::{fat32, onyxfs};
 use crate::proc;
 use onyx_core::errno::{Errno, KResult};
 use onyx_core::formats::ONYFS_ROOT_INO;

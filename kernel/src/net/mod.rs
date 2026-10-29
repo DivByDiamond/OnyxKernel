@@ -1,4 +1,3 @@
-pub mod ownership;
 pub mod checksum;
 pub mod config;
 pub mod dhcp;
@@ -7,6 +6,7 @@ pub mod eth;
 pub mod ip;
 pub mod ipv4;
 pub mod lock;
+pub mod ownership;
 pub mod tcp;
 
 #[cfg(test)]
@@ -93,7 +93,7 @@ unsafe fn drain_current() {
             let mut buf = [0u8; 2048];
             match virtio_net::xfer::recv_into(&mut buf) {
                 Ok(n) if n >= 14 => eth::dispatch(&buf[..n]),
-                Ok(_) => {},
+                Ok(_) => {}
                 Err(_) => break,
             }
         }

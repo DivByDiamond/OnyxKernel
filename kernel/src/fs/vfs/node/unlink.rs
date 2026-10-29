@@ -1,6 +1,6 @@
 use super::split_parent;
-use crate::fs::{fat32, onyxfs};
 use crate::fs::vfs::{Fs, rel_to_abs, resolve_path, with_mount};
+use crate::fs::{fat32, onyxfs};
 use onyx_core::errno::{Errno, KResult};
 
 /// # Safety

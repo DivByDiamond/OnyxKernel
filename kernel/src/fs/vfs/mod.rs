@@ -39,5 +39,5 @@ pub(crate) use unlink::*;
 pub(crate) use utimens::*;
 pub(crate) use vnode::*;
 
+pub(crate) use fd::stdio::{bind_stdio, resolve_stdio};
 pub(crate) use table::{fd_clear, fd_get, fd_set, fd_set_cloexec, fd_set_flags, fd_update_pos};
-pub(crate) use fd::stdio::{resolve_stdio, bind_stdio};

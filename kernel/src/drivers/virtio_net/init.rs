@@ -1,6 +1,9 @@
 //! virtio-net device probe and virtqueue setup.
 use super::queue::push_avail;
-use super::{G_NET, HDR_LEN, NET_MTU, RX_DESCS, VIRTIO_ID_NET, DEVICES, DEVICE_COUNT, EMPTY_NET, MAX_NET_DEVICES};
+use super::{
+    DEVICE_COUNT, DEVICES, EMPTY_NET, G_NET, HDR_LEN, MAX_NET_DEVICES, NET_MTU, RX_DESCS,
+    VIRTIO_ID_NET,
+};
 use crate::arch::mmio::Mmio;
 use crate::drivers::virtio::{
     R_DEVICE_ID, R_GUEST_FEATURES, R_GUEST_FEATURES_SEL, R_GUEST_PAGE_SIZE, R_HOST_FEATURES,
@@ -109,11 +112,7 @@ unsafe fn init_device(base: usize) -> KResult<()> {
         setup_tx_queue(base, modern)?;
         G_NET.base = base;
         G_NET.modern = modern;
-        reg_w(
-            base,
-            R_STATUS,
-            driver_ready_status(modern),
-        );
+        reg_w(base, R_STATUS, driver_ready_status(modern));
         Ok(())
     }
 }
@@ -230,7 +229,10 @@ unsafe fn setup_queue_rings(base: usize, modern: bool) -> KResult<(usize, usize,
 }
 
 fn driver_ready_status(modern: bool) -> u32 {
-    VIRTIO_S_ACK | VIRTIO_S_DRIVER | VIRTIO_S_DRIVER_OK | if modern { VIRTIO_S_FEATURES_OK } else { 0 }
+    VIRTIO_S_ACK
+        | VIRTIO_S_DRIVER
+        | VIRTIO_S_DRIVER_OK
+        | if modern { VIRTIO_S_FEATURES_OK } else { 0 }
 }
 
 #[cfg(test)]

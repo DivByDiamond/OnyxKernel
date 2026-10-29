@@ -138,10 +138,6 @@ pub(crate) fn tcp_checksum_ok(src_ip: &[u8; 4], dst_ip: &[u8; 4], segment: &[u8]
     segment.len() >= TCP_HLEN && tcp_checksum(src_ip, dst_ip, segment) == 0
 }
 
-pub(super) fn send_tcp_seg(c: &TcpConn, flags: u8, data: &[u8]) {
-    send_tcp_seg_tx(c.tx(), flags, data)
-}
-
 /// TX with an already-snapshotted `TcpTx`. Owners of a `&mut TcpConn` into
 /// `CONNS` use this so no ~10 KB `TcpConn` value ever lands on the kernel
 /// stack (see `TcpTx` for the overflow this fixes).
@@ -170,7 +166,8 @@ pub(super) fn send_tcp_seg_tx(c: TcpTx, flags: u8, data: &[u8]) {
             let cksum = tcp_checksum(&G_IP, &c.dst_ip, &seg);
             seg[16..18].copy_from_slice(&cksum.to_be_bytes());
             ip::send_packet(c.dst_ip, 6, &seg)
-        }).ok();
+        })
+        .ok();
     }
 }
 
@@ -208,7 +205,11 @@ pub(super) fn sweep_timewait(now_us: u64) {
         net_lock();
         for slot in CONNS.iter_mut() {
             let expired = match slot {
-                Some(c) => ((c.state == 4 && c.recv_len == 0) || c.state == 5 || c.state==6) && now_us >= c.tw_deadline_us && c.tw_deadline_us != 0,
+                Some(c) => {
+                    ((c.state == 4 && c.recv_len == 0) || c.state == 5 || c.state == 6)
+                        && now_us >= c.tw_deadline_us
+                        && c.tw_deadline_us != 0
+                }
                 None => false,
             };
             if expired {

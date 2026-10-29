@@ -1,13 +1,18 @@
 use super::conn::{
-    CONNS, RECV_BUF_SIZE, SEND_BUF_SIZE, TIMEWAIT_US, TcpConn, alloc_conn, alloc_local_port, sweep_timewait,
+    CONNS, RECV_BUF_SIZE, SEND_BUF_SIZE, TIMEWAIT_US, TcpConn, alloc_conn, alloc_local_port,
+    sweep_timewait,
 };
 use super::state::{SEG_ACK, drain_acked, tcp_transition};
 
 pub(super) fn test_conn() -> TcpConn {
     // State 1 = SYN_SENT, as left by tcp_connect().
     TcpConn {
-        owner_pid:0,
-        iface: 0, listener: usize::MAX, last_tx_us: 0, retries: 0, peer_window: 2048,
+        owner_pid: 0,
+        iface: 0,
+        listener: usize::MAX,
+        last_tx_us: 0,
+        retries: 0,
+        peer_window: 2048,
         state: 1,
         src_port: 40000,
         dst_ip: [10, 0, 0, 1],
@@ -110,7 +115,7 @@ fn test_state3_ack_to_timewait_and_unexpected_segments() {
     c.snd_nxt = 1011; // Ten data bytes plus the FIN sequence number.
     assert_eq!(tcp_transition(&mut c, 0, 1005, 0x10, &[], 41), [0, 0]);
     assert_eq!(c.state, 3);
-    assert_eq!(c.send_len,5);
+    assert_eq!(c.send_len, 5);
     assert_eq!(tcp_transition(&mut c, 0, 1011, 0x10, &[], 42), [0, 0]);
     assert_eq!(c.state, 4);
     // Active close never sets peer_fin: recv keeps reporting "no data",
@@ -160,8 +165,12 @@ fn test_conn_table_alloc_port_sweep() {
         let cid = alloc_conn().expect("a free slot exists");
         let sport = alloc_local_port();
         CONNS[cid] = Some(TcpConn {
-            owner_pid:0,
-            iface: 0, listener: usize::MAX, last_tx_us: 0, retries: 0, peer_window: 2048,
+            owner_pid: 0,
+            iface: 0,
+            listener: usize::MAX,
+            last_tx_us: 0,
+            retries: 0,
+            peer_window: 2048,
             state: 2,
             src_port: sport,
             dst_ip: [10, 0, 0, 1],
@@ -197,36 +206,54 @@ fn test_conn_table_alloc_port_sweep() {
 #[test]
 fn test_passive_handshake_requires_matching_ack_and_can_receive_immediate_data() {
     let _serial = crate::net::lock::test_serial();
-    let mut connection=test_conn();connection.state=5;connection.rcv_nxt=5001;
-    assert_eq!(tcp_transition(&mut connection,5001,999,0x10,&[],0),[0,0]);
-    assert_eq!(connection.state,5);
-    assert_eq!(tcp_transition(&mut connection,5001,1001,0x18,b"hello",0),[SEG_ACK,0]);
-    assert_eq!(connection.state,2);assert_eq!(connection.recv_len,5);
-    assert_eq!(&connection.recv_buf[..5],b"hello");
+    let mut connection = test_conn();
+    connection.state = 5;
+    connection.rcv_nxt = 5001;
+    assert_eq!(
+        tcp_transition(&mut connection, 5001, 999, 0x10, &[], 0),
+        [0, 0]
+    );
+    assert_eq!(connection.state, 5);
+    assert_eq!(
+        tcp_transition(&mut connection, 5001, 1001, 0x18, b"hello", 0),
+        [SEG_ACK, 0]
+    );
+    assert_eq!(connection.state, 2);
+    assert_eq!(connection.recv_len, 5);
+    assert_eq!(&connection.recv_buf[..5], b"hello");
 }
 #[test]
 fn test_active_handshake_rejects_wrong_ack() {
     let _serial = crate::net::lock::test_serial();
-    let mut connection=test_conn();
-    assert_eq!(tcp_transition(&mut connection,5000,999,0x12,&[],0),[0,0]);
-    assert_eq!(connection.state,1);
+    let mut connection = test_conn();
+    assert_eq!(
+        tcp_transition(&mut connection, 5000, 999, 0x12, &[], 0),
+        [0, 0]
+    );
+    assert_eq!(connection.state, 1);
 }
 
 #[test]
 fn reading_a_full_receive_window_requests_an_ack_and_handles_persist_probe() {
     let _serial = crate::net::lock::test_serial();
     let mut c = test_conn();
-    c.state=2; c.rcv_nxt=5000;
-    let payload=[b'x';RECV_BUF_SIZE];
-    tcp_transition(&mut c,5000,1001,0x10,&payload,0);
-    assert_eq!(c.recv_len,RECV_BUF_SIZE);
-    let mut output=[0;512];
-    let (n,notify)=super::sock::read_received(&mut c,&mut output).unwrap();
-    assert_eq!(n,512);assert!(notify);assert_eq!(RECV_BUF_SIZE-c.recv_len,512);
-    assert_eq!(output,[b'x';512]);
-    let seq=c.rcv_nxt.wrapping_sub(1);
-    assert_eq!(tcp_transition(&mut c,seq,1001,0x10,b"x",0),[SEG_ACK,0]);
-    assert_eq!(c.recv_len,RECV_BUF_SIZE-512);
+    c.state = 2;
+    c.rcv_nxt = 5000;
+    let payload = [b'x'; RECV_BUF_SIZE];
+    tcp_transition(&mut c, 5000, 1001, 0x10, &payload, 0);
+    assert_eq!(c.recv_len, RECV_BUF_SIZE);
+    let mut output = [0; 512];
+    let (n, notify) = super::sock::read_received(&mut c, &mut output).unwrap();
+    assert_eq!(n, 512);
+    assert!(notify);
+    assert_eq!(RECV_BUF_SIZE - c.recv_len, 512);
+    assert_eq!(output, [b'x'; 512]);
+    let seq = c.rcv_nxt.wrapping_sub(1);
+    assert_eq!(
+        tcp_transition(&mut c, seq, 1001, 0x10, b"x", 0),
+        [SEG_ACK, 0]
+    );
+    assert_eq!(c.recv_len, RECV_BUF_SIZE - 512);
 }
 
 #[test]
@@ -234,11 +261,18 @@ fn timewait_does_not_discard_unread_response_bytes() {
     let _serial = crate::net::lock::test_serial();
     unsafe {
         crate::net::lock::net_lock();
-        let saved=CONNS;
-        let mut c=test_conn();c.state=4;c.peer_fin=true;c.recv_len=1;c.recv_buf[0]=b'x';c.tw_deadline_us=1;
-        CONNS[0]=Some(c);sweep_timewait(2);
+        let saved = CONNS;
+        let mut c = test_conn();
+        c.state = 4;
+        c.peer_fin = true;
+        c.recv_len = 1;
+        c.recv_buf[0] = b'x';
+        c.tw_deadline_us = 1;
+        CONNS[0] = Some(c);
+        sweep_timewait(2);
         assert!(CONNS[0].is_some());
-        CONNS=saved;crate::net::lock::net_unlock();
+        CONNS = saved;
+        crate::net::lock::net_unlock();
     }
 }
 
@@ -247,12 +281,18 @@ fn zero_window_send_does_not_postpone_outstanding_data_retries() {
     let _serial = crate::net::lock::test_serial();
     unsafe {
         crate::net::lock::net_lock();
-        let saved=CONNS;
-        let mut c=test_conn();c.state=2;c.peer_window=0;c.send_len=1;c.last_tx_us=123;c.retries=2;
-        CONNS[0]=Some(c);
-        assert_eq!(super::sock::tcp_send(0,b"more"),Ok(0));
-        assert_eq!(CONNS[0].unwrap().last_tx_us,123);
-        assert_eq!(CONNS[0].unwrap().retries,2);
-        CONNS=saved;crate::net::lock::net_unlock();
+        let saved = CONNS;
+        let mut c = test_conn();
+        c.state = 2;
+        c.peer_window = 0;
+        c.send_len = 1;
+        c.last_tx_us = 123;
+        c.retries = 2;
+        CONNS[0] = Some(c);
+        assert_eq!(super::sock::tcp_send(0, b"more"), Ok(0));
+        assert_eq!(CONNS[0].unwrap().last_tx_us, 123);
+        assert_eq!(CONNS[0].unwrap().retries, 2);
+        CONNS = saved;
+        crate::net::lock::net_unlock();
     }
 }

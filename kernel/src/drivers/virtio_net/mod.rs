@@ -83,7 +83,9 @@ pub unsafe fn select_device(index: usize) -> onyx_core::errno::KResult<()> {
 pub fn device_mac(index: usize) -> onyx_core::errno::KResult<[u8; 6]> {
     // SAFETY: caller holds net_lock; MACs are boot-initialized and immutable.
     unsafe {
-        if index >= DEVICE_COUNT { return Err(onyx_core::errno::Errno::Inval); }
+        if index >= DEVICE_COUNT {
+            return Err(onyx_core::errno::Errno::Inval);
+        }
         Ok(DEVICES[index].mac)
     }
 }

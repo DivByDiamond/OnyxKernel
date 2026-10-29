@@ -9,7 +9,9 @@ use super::brk::page_align_up;
 const MMAP_BASE: u64 = 0x2000_0000;
 
 fn mapping_size(length: u64, prefix: u64) -> Option<u64> {
-    length.checked_add(prefix).and_then(|len| page_align_up(len.max(4096)))
+    length
+        .checked_add(prefix)
+        .and_then(|len| page_align_up(len.max(4096)))
 }
 
 /// Pick a virtual address for an anonymous/devfs mapping. The `mmap_brk`

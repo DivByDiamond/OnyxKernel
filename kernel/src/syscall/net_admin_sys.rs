@@ -9,7 +9,9 @@ unsafe fn copyin<const N: usize>(ptr: u64) -> KResult<[u8; N]> {
     }
     let mut data = [0; N];
     // SAFETY: helper validates each user page before copying into the sized array.
-    unsafe { vmm::copy_from_user(proc::current().root_pa, data.as_mut_ptr(), ptr, N)?; }
+    unsafe {
+        vmm::copy_from_user(proc::current().root_pa, data.as_mut_ptr(), ptr, N)?;
+    }
     Ok(data)
 }
 
@@ -28,8 +30,11 @@ pub(super) unsafe fn sys_net_config(ptr: u64, write: u64) -> i64 {
     let result = unsafe {
         match write {
             0 => net::config::snapshot(None).and_then(|data| copyout(ptr, &data)),
-            2 => copyin::<4>(ptr).and_then(|index| net::config::snapshot(Some(u32::from_le_bytes(index) as usize))).and_then(|data| copyout(ptr, &data)),
-            1 => copyin::<{ net::config::CONFIG_SIZE }>(ptr).and_then(|data| net::config::apply(&data)),
+            2 => copyin::<4>(ptr)
+                .and_then(|index| net::config::snapshot(Some(u32::from_le_bytes(index) as usize)))
+                .and_then(|data| copyout(ptr, &data)),
+            1 => copyin::<{ net::config::CONFIG_SIZE }>(ptr)
+                .and_then(|data| net::config::apply(&data)),
             _ => Err(Errno::Inval),
         }
     };
@@ -43,7 +48,8 @@ pub(super) unsafe fn sys_udp_bind(port: u64) -> i64 {
         return Errno::Inval.as_i64();
     }
     // ownership::bind_udp takes the NET lock itself and touches no user pointer.
-    net::ownership::bind_udp(port as u16, proc::current_pid()).map_or_else(Errno::as_i64, |id| id as i64)
+    net::ownership::bind_udp(port as u16, proc::current_pid())
+        .map_or_else(Errno::as_i64, |id| id as i64)
 }
 
 /// # Safety
@@ -60,10 +66,16 @@ pub(super) unsafe fn sys_udp_sendto(ip: u64, port: u64, ptr: u64, len: u64) -> i
             Err(error) => return error.as_i64(),
         };
         let mut data = [0; 1024];
-        if let Err(error) = vmm::copy_from_user(proc::current().root_pa, data.as_mut_ptr(), ptr, len as usize) {
+        if let Err(error) = vmm::copy_from_user(
+            proc::current().root_pa,
+            data.as_mut_ptr(),
+            ptr,
+            len as usize,
+        ) {
             return error.as_i64();
         }
-        net::udp::udp_sendto(ip, port as u16, &data[..len as usize]).map_or_else(Errno::as_i64, |()| len as i64)
+        net::udp::udp_sendto(ip, port as u16, &data[..len as usize])
+            .map_or_else(Errno::as_i64, |()| len as i64)
     }
 }
 
@@ -77,7 +89,9 @@ pub(super) unsafe fn sys_udp_recv(id: u64, ptr: u64, len: u64) -> i64 {
     unsafe {
         let mut data = [0; 1024];
         net::poll();
-        match net::ownership::udp(id as usize,proc::current_pid(),||net::udp::udp_recv(id as usize, &mut data[..len as usize])) {
+        match net::ownership::udp(id as usize, proc::current_pid(), || {
+            net::udp::udp_recv(id as usize, &mut data[..len as usize])
+        }) {
             Ok(n) => copyout(ptr, &data[..n]).map_or_else(Errno::as_i64, |()| n as i64),
             Err(Errno::NoEnt) => 0,
             Err(error) => error.as_i64(),
@@ -92,5 +106,11 @@ pub(super) unsafe fn sys_udp_close(id: u64) -> i64 {
         return Errno::Inval.as_i64();
     }
     // SAFETY: udp_close serializes the bounded slot table.
-    unsafe { net::ownership::udp(id as usize,proc::current_pid(),||{net::udp::udp_close(id as usize);Ok(())}).map_or_else(Errno::as_i64,|()|0) }
+    unsafe {
+        net::ownership::udp(id as usize, proc::current_pid(), || {
+            net::udp::udp_close(id as usize);
+            Ok(())
+        })
+        .map_or_else(Errno::as_i64, |()| 0)
+    }
 }

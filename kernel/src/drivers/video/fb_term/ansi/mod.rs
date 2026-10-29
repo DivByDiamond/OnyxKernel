@@ -36,9 +36,9 @@
 pub(crate) mod parse;
 pub(crate) mod present;
 pub(crate) mod render;
+pub(crate) mod scale;
 pub(crate) mod state;
 pub(crate) mod viewport;
-pub(crate) mod scale;
 
 pub use state::AnsiTerm;
 
@@ -284,18 +284,27 @@ mod pipeline_tests {
         // not execute the boot-time VFS font loader; its default glyph is blank.
         static FONT: [u8; 4 + 256 * 16] = {
             let mut data = [0; 4 + 256 * 16];
-            data[0] = 0x36; data[1] = 0x04; data[3] = 16;
+            data[0] = 0x36;
+            data[1] = 0x04;
+            data[3] = 16;
             let mut glyph = 33;
             while glyph < 127 {
                 let mut row = 0;
-                while row < 16 { data[4 + glyph * 16 + row] = 0x42; row += 1; }
+                while row < 16 {
+                    data[4 + glyph * 16 + row] = 0x42;
+                    row += 1;
+                }
                 glyph += 1;
             }
             data
         };
-        unsafe { crate::font::init(&FONT).unwrap(); }
+        unsafe {
+            crate::font::init(&FONT).unwrap();
+        }
         crate::drivers::fb_term::set_serial_mirror(true);
-        for (width, height, cols, rows) in [(1920, 1080, 80, 24), (640, 480, 80, 24), (320, 200, 40, 12)] {
+        for (width, height, cols, rows) in
+            [(1920, 1080, 80, 24), (640, 480, 80, 24), (320, 200, 40, 12)]
+        {
             let mut front = vec![0x1234u16; width * height];
             let mut back = vec![0u16; width * height];
             unsafe {
@@ -304,28 +313,48 @@ mod pipeline_tests {
                 G_ANSI = super::AnsiTerm::new();
             }
             let output = format!("\x1b[2J\x1b[?25l\x1b[{};{}HFOOT", rows, cols - 5);
-            for byte in output.bytes() { console_putc(byte); }
+            for byte in output.bytes() {
+                console_putc(byte);
+            }
             present_locked();
             let view = super::viewport::Viewport::fit(width, height, cols * 8, rows * 16).unwrap();
-            let footer = view.mapped(super::viewport::Rect::new((cols - 6) * 8, (rows - 1) * 16, (cols - 2) * 8, rows * 16));
-            assert!((footer.y0..footer.y1).any(|y| (footer.x0..footer.x1).any(|x| front[y * width + x] != 0)), "last-row TUI footer was not rendered");
+            let footer = view.mapped(super::viewport::Rect::new(
+                (cols - 6) * 8,
+                (rows - 1) * 16,
+                (cols - 2) * 8,
+                rows * 16,
+            ));
+            assert!(
+                (footer.y0..footer.y1)
+                    .any(|y| (footer.x0..footer.x1).any(|x| front[y * width + x] != 0)),
+                "last-row TUI footer was not rendered"
+            );
             // Every visible pixel must be the expected nearest logical pixel,
             // while letterbox pixels are black. Native geometry stays unchanged.
             assert_eq!((fb::width(), fb::height()), (width, height));
-            for y in 0..height { for x in 0..width {
-                let expected = if x >= view.x && x < view.x + view.width && y >= view.y && y < view.y + view.height {
-                    let sx = (x - view.x) * view.logical_width / view.width;
-                    let sy = (y - view.y) * view.logical_height / view.height;
-                    back[sy * width + sx]
-                } else { 0 };
-                assert_eq!(front[y * width + x], expected, "scaled pixel {x},{y}");
-            }}
+            for y in 0..height {
+                for x in 0..width {
+                    let expected = if x >= view.x
+                        && x < view.x + view.width
+                        && y >= view.y
+                        && y < view.y + view.height
+                    {
+                        let sx = (x - view.x) * view.logical_width / view.width;
+                        let sy = (y - view.y) * view.logical_height / view.height;
+                        back[sy * width + sx]
+                    } else {
+                        0
+                    };
+                    assert_eq!(front[y * width + x], expected, "scaled pixel {x},{y}");
+                }
+            }
             front.fill(0x1234);
-            for byte in b"\x1b[2;2HA" { console_putc(*byte); }
+            for byte in b"\x1b[2;2HA" {
+                console_putc(*byte);
+            }
             present_locked();
             let published = front.iter().filter(|&&pixel| pixel != 0x1234).count();
             assert!(published <= 1100, "one glyph published {published} pixels");
         }
     }
-
 }

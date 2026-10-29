@@ -3,11 +3,11 @@
 pub(crate) mod conn;
 mod handle;
 pub mod listen;
-mod sock;
-mod state;
-mod retry;
 #[cfg(test)]
 mod recv_tests;
+mod retry;
+mod sock;
+mod state;
 #[cfg(test)]
 mod tests;
 
@@ -19,7 +19,9 @@ pub use sock::{tcp_close, tcp_connect, tcp_recv, tcp_send};
 pub fn tick() {
     conn::sweep_timewait(conn::now_us());
     // SAFETY: tick is called only by net::poll while the network lock is held.
-    unsafe { retry::tick(conn::now_us()); }
+    unsafe {
+        retry::tick(conn::now_us());
+    }
 }
 
 /// # Safety
@@ -28,7 +30,9 @@ pub unsafe fn clear_interface(index: usize) {
     // SAFETY: socket table is exclusively accessed under the network lock.
     unsafe {
         for slot in conn::CONNS.iter_mut() {
-            if slot.as_ref().is_some_and(|socket| socket.iface == index) { *slot = None; }
+            if slot.as_ref().is_some_and(|socket| socket.iface == index) {
+                *slot = None;
+            }
         }
     }
 }

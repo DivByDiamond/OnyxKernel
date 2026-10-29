@@ -13,8 +13,8 @@ pub use stat::*;
 
 use crate::fs::vfs;
 use crate::syscall::abi::{
-    F_BIND_STDIO, F_DUPFD, F_GETFD, F_GETFL, F_SETFD, F_SETFL, FD_CLOEXEC, O_APPEND, O_NONBLOCK, O_RDONLY,
-    O_WRONLY,
+    F_BIND_STDIO, F_DUPFD, F_GETFD, F_GETFL, F_SETFD, F_SETFL, FD_CLOEXEC, O_APPEND, O_NONBLOCK,
+    O_RDONLY, O_WRONLY,
 };
 use onyx_core::errno::Errno;
 
@@ -58,7 +58,9 @@ pub(in super::super) unsafe fn sys_fcntl(fd: u64, cmd: u32, arg: u64) -> i64 {
     // the unsafe-fn dispatch convention.
     unsafe {
         if cmd == F_BIND_STDIO {
-            return vfs::bind_stdio(fd, arg).map(|t| t as i64).unwrap_or_else(|e| e.as_i64());
+            return vfs::bind_stdio(fd, arg)
+                .map(|t| t as i64)
+                .unwrap_or_else(|e| e.as_i64());
         }
         let fd = vfs::resolve_stdio(fd);
         match cmd {

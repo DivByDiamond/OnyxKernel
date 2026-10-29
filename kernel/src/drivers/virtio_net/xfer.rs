@@ -21,7 +21,9 @@ pub fn recv_into(out: &mut [u8]) -> KResult<usize> {
         G_NET.rx_last_used = next;
         let elem = ptr::read_volatile(ptr::addr_of!((*G_NET.rx_used).ring[slot]));
         let buf_idx = elem.idx as usize;
-        if buf_idx >= RX_DESCS || elem.len as usize > HDR_LEN + NET_MTU { return Err(Errno::Io); }
+        if buf_idx >= RX_DESCS || elem.len as usize > HDR_LEN + NET_MTU {
+            return Err(Errno::Io);
+        }
         let frame_len = (elem.len as usize).saturating_sub(HDR_LEN).min(out.len());
         let src = G_NET.rx_bufs[buf_idx].add(HDR_LEN);
         ptr::copy_nonoverlapping(src, out.as_mut_ptr(), frame_len);
@@ -101,18 +103,25 @@ pub fn send(frame: &[u8]) -> KResult<()> {
 
 // Used-ring positions wrap at queue capacity, independently of posted buffers.
 fn receive_cursor(last: u16, used: u16) -> Option<(usize, u16)> {
-    if last == used { None } else { Some((last as usize % crate::drivers::virtio::VIRTQ_SIZE, last.wrapping_add(1))) }
+    if last == used {
+        None
+    } else {
+        Some((
+            last as usize % crate::drivers::virtio::VIRTQ_SIZE,
+            last.wrapping_add(1),
+        ))
+    }
 }
 #[cfg(test)]
 mod tests {
     use super::*;
     #[test]
     fn receive_consumes_each_entry_and_wraps_at_queue_size() {
-        assert_eq!(receive_cursor(0, 3), Some((0,1)));
-        assert_eq!(receive_cursor(1, 3), Some((1,2)));
-        assert_eq!(receive_cursor(16, 17), Some((16,17)));
-        assert_eq!(receive_cursor(255, 256), Some((255,256)));
-        assert_eq!(receive_cursor(u16::MAX, 0), Some((255,0)));
+        assert_eq!(receive_cursor(0, 3), Some((0, 1)));
+        assert_eq!(receive_cursor(1, 3), Some((1, 2)));
+        assert_eq!(receive_cursor(16, 17), Some((16, 17)));
+        assert_eq!(receive_cursor(255, 256), Some((255, 256)));
+        assert_eq!(receive_cursor(u16::MAX, 0), Some((255, 0)));
         assert_eq!(receive_cursor(3, 3), None);
     }
 }

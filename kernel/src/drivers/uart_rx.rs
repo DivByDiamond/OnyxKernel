@@ -22,6 +22,10 @@
 //! with `sstatus.SIE` clear, so neither the handler nor a reader can be
 //! preempted while holding it.
 
+// `&raw mut` on a `static mut` is deliberate: clippy's suggested bare `STATIC` would
+// create a reference to it and trip `static_mut_refs`.
+#![allow(clippy::deref_addrof)]
+
 use crate::drivers::uart;
 use crate::sync::SpinLock;
 

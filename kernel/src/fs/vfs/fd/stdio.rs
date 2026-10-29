@@ -7,7 +7,9 @@ pub unsafe fn resolve_stdio(token: u64) -> u64 {
     unsafe {
         if token <= 2 {
             let fd = fd_get(token as usize);
-            if fd.used { return fd_token(token as usize, fd.epoch); }
+            if fd.used {
+                return fd_token(token as usize, fd.epoch);
+            }
         }
         token
     }
@@ -17,7 +19,9 @@ pub unsafe fn resolve_stdio(token: u64) -> u64 {
 /// Called only from the owning process's syscall, with preemption disabled.
 pub unsafe fn bind_stdio(source: u64, target: u64) -> KResult<u64> {
     unsafe {
-        if target > 2 { return Err(Errno::Inval); }
+        if target > 2 {
+            return Err(Errno::Inval);
+        }
         if source == u64::MAX {
             crate::proc::current().fds[target as usize].used = false;
             return Ok(target);
