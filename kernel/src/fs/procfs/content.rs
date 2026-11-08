@@ -142,11 +142,16 @@ unsafe fn generate_content(ino: u32) -> KResult<&'static [u8]> {
             PROCFS_STAT_INO => {
                 let buf = &mut *pb;
                 let mut pos = 0;
-                let us = timer::uptime_us();
-                let secs = us / 1_000_000;
                 let _harts = crate::arch::smp::online_harts();
                 let procs = proc::count();
-                pos += fmt::format_line(b"btime ", secs, b"\n", buf, pos);
+                // btime is the wall-clock epoch second of boot, not uptime.
+                pos += fmt::format_line(
+                    b"btime ",
+                    crate::srv::wallclock::boot_epoch_secs(),
+                    b"\n",
+                    buf,
+                    pos,
+                );
                 pos += fmt::format_line_raw(b"cpu 0 0 0 0 0 0 0 0 0 0\n", buf, pos);
                 pos += fmt::format_line(b"processes ", procs as u64, b"\n", buf, pos);
                 pos += fmt::format_line(b"procs_running ", 1, b"\n", buf, pos);

@@ -115,13 +115,21 @@ pub(crate) unsafe fn probe_peripherals() {
     // SAFETY: single-threaded boot probe; every MMIO base comes from the FDT or is platform-gated.
     unsafe {
         if let Some(rtc_info) = periph::find_rtc() {
-            rtc::probe(rtc_info.base as usize);
-            crate::kinf!(
-                "rtc",
-                "base=%p src=%s",
-                Arg::from(rtc_info.base),
-                Arg::from(hwrand::source_name())
-            );
+            if rtc::probe(rtc_info.base as usize) {
+                // Establish the wall-clock base: uptime stays monotonic,
+                // gettimeofday/clock_gettime(CLOCK_REALTIME) get the epoch.
+                let ns = rtc::now_nanos();
+                crate::srv::wallclock::set_rtc_base(ns);
+                crate::kinf!(
+                    "rtc",
+                    "base=%p src=%s epoch_us=%d",
+                    Arg::from(rtc_info.base),
+                    Arg::from(hwrand::source_name()),
+                    Arg::from(crate::srv::wallclock::realtime_us())
+                );
+            } else {
+                crate::kwrn!("rtc", "probe failed at %p", Arg::from(rtc_info.base));
+            }
         }
         // USB EHCI/OHCI are hardcoded SG2000 (Milk-V Duos) addresses. On
         // QEMU virt and OC2R/sedna they are not mapped, and probing them would

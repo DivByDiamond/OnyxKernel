@@ -39,10 +39,10 @@ unsafe fn put_time_pair(out_va: u64, a: u64, b: u64) -> i64 {
 /// validated inside put_time_pair before any write.
 pub unsafe fn sys_gettimeofday(tv: u64) -> i64 {
     // SAFETY: the only unsafe operation is put_time_pair, which validates
-    // `tv` (range + per-page mapping) internally; uptime_us is a safe timer
-    // read.
+    // `tv` (range + per-page mapping) internally; realtime_us is a safe
+    // atomic read of the wall-clock base plus the tick counter.
     unsafe {
-        let us = crate::srv::timer::uptime_us();
+        let us = crate::srv::wallclock::realtime_us();
         put_time_pair(tv, us / 1_000_000, us % 1_000_000)
     }
 }
@@ -160,22 +160,27 @@ pub unsafe fn sys_nanosleep(req: u64, _rem: u64) -> i64 {
 }
 
 /// clock_gettime(clk_id, *ts) — POSIX clock query. Fills `ts` with
-/// `{tv_sec, tv_nsec}`. CLOCK_REALTIME and CLOCK_MONOTONIC both return the
-/// kernel uptime for now (no RTC synchronization yet).
+/// `{tv_sec, tv_nsec}`. CLOCK_REALTIME is the wall clock (RTC epoch base +
+/// uptime, falling back to uptime when no RTC was probed);
+/// CLOCK_MONOTONIC is the raw kernel uptime.
 /// # Safety
 ///
 /// Call only from the syscall path with a current process set; `ts` is
 /// validated inside before any write.
 pub unsafe fn sys_clock_gettime(clk_id: u64, ts: u64) -> i64 {
     // SAFETY: the only unsafe operation is put_time_pair, which validates
-    // `ts` (range + per-page mapping) internally; uptime_us is a safe timer
-    // read.
+    // `ts` (range + per-page mapping) internally; realtime_us/uptime_us are
+    // safe atomic reads.
     unsafe {
         if !user_ptr_ok(ts, 16) {
             return Errno::Fault.as_i64();
         }
         match clk_id {
-            CLOCK_REALTIME | CLOCK_MONOTONIC => {
+            CLOCK_REALTIME => {
+                let us = crate::srv::wallclock::realtime_us();
+                put_time_pair(ts, us / 1_000_000, (us % 1_000_000) * 1_000)
+            }
+            CLOCK_MONOTONIC => {
                 let us = crate::srv::timer::uptime_us();
                 put_time_pair(ts, us / 1_000_000, (us % 1_000_000) * 1_000)
             }

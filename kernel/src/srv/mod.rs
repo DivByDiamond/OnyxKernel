@@ -7,3 +7,4 @@ pub mod syscall_dispatch;
 pub mod timer;
 mod timer_arm;
 pub mod trap;
+pub mod wallclock;
