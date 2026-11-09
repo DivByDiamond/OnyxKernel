@@ -202,4 +202,5 @@ pub mod virtio_rng;
 
 pub use queue::{init, probe};
 
-pub mod test;
+#[cfg(test)]
+mod tests;
