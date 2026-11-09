@@ -142,8 +142,21 @@ pub unsafe fn set_input_ctx_slot(input: *mut u8, port: u8, speed: u8, mps0: u16)
         // SAFETY: offset 64 = EP0 context, in bounds per contract.
         let ep0 = &mut *(input.add(64) as *mut EpCtx);
         ep0.dw0 = (mps0 as u32) << 16 | (EP_TYPE_CONTROL as u32) << 3 | (3 << 1);
-        ep0.dw1 = 0;
-        ep0.dw2 = 0;
+        // EP0 dequeue comes from the transfer ring `init` allocated
+        // (xfer_rings[0]): Address Device copies it into the output
+        // context, so control transfers can run before any Configure
+        // Endpoint. DCS (bit 0) mirrors the ring's current cycle state.
+        let ctx = &raw const super::G_XHCI;
+        let ring_ptr = (*ctx).xfer_rings[0];
+        if ring_ptr.is_null() {
+            ep0.dw1 = 0;
+            ep0.dw2 = 0;
+        } else {
+            // SAFETY: init published a fully initialized TrbRing here.
+            let r = &*ring_ptr;
+            ep0.dw1 = (r.phys as u32 & !0xF) | r.cycle as u32;
+            ep0.dw2 = (r.phys >> 32) as u32;
+        }
         ep0.dw3 = 0;
     }
 }

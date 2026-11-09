@@ -1,6 +1,17 @@
+// TODO(2026-11-09): URB/HCD-слой без потребителя — подключить USB core
+// enumeration (дескрипторы, адресация, mass-storage) или удалить при ревизии.
 use onyx_core::errno::{Errno, KResult};
 
 use super::core::{Urb, UrbStatus, UrbTransferType, UsbHcd};
+
+/// Publish a finished transfer on the URB: byte count, status, callback.
+fn finish_urb(urb: &mut Urb, transferred: u32) {
+    urb.actual_length = transferred;
+    urb.status = UrbStatus::NoError;
+    if let Some(cb) = urb.complete {
+        cb(urb);
+    }
+}
 
 pub struct EhciHcd;
 
@@ -31,11 +42,7 @@ impl UsbHcd for EhciHcd {
                         max_pkt,
                     )?
                 };
-                urb.actual_length = n;
-                urb.status = UrbStatus::NoError;
-                if let Some(cb) = urb.complete {
-                    cb(urb as *mut Urb);
-                }
+                finish_urb(urb, n);
                 Ok(())
             }
             UrbTransferType::Bulk => {
@@ -49,11 +56,7 @@ impl UsbHcd for EhciHcd {
                         512,
                     )?
                 };
-                urb.actual_length = n;
-                urb.status = UrbStatus::NoError;
-                if let Some(cb) = urb.complete {
-                    cb(urb as *mut Urb);
-                }
+                finish_urb(urb, n);
                 Ok(())
             }
             _ => Err(Errno::NoSys),
@@ -117,11 +120,7 @@ impl UsbHcd for OhciHcd {
                         speed,
                     )?
                 };
-                urb.actual_length = n;
-                urb.status = UrbStatus::NoError;
-                if let Some(cb) = urb.complete {
-                    cb(urb as *mut Urb);
-                }
+                finish_urb(urb, n);
                 Ok(())
             }
             UrbTransferType::Bulk => {
@@ -136,11 +135,7 @@ impl UsbHcd for OhciHcd {
                         0,
                     )?
                 };
-                urb.actual_length = n;
-                urb.status = UrbStatus::NoError;
-                if let Some(cb) = urb.complete {
-                    cb(urb as *mut Urb);
-                }
+                finish_urb(urb, n);
                 Ok(())
             }
             _ => Err(Errno::NoSys),
@@ -168,5 +163,77 @@ impl UsbHcd for OhciHcd {
 
     fn n_ports(&self) -> u8 {
         crate::drivers::usb::ohci::ohci_n_ports()
+    }
+}
+
+pub struct XhciHcd;
+
+impl XhciHcd {
+    /// # Safety
+    ///
+    /// The xHCI controller must already be initialized via
+    /// `crate::drivers::usb::init_usb`; the handle itself holds no state.
+    pub unsafe fn new() -> Self {
+        XhciHcd
+    }
+}
+
+impl UsbHcd for XhciHcd {
+    fn submit_urb(&mut self, urb: &mut Urb) -> KResult<()> {
+        match urb.transfer_type {
+            UrbTransferType::Control => {
+                let setup = urb.setup_packet.ok_or(Errno::Inval)?;
+                let data_in = (setup[0] & 0x80) != 0;
+                let max_pkt = urb.buffer_length.max(8);
+                // SAFETY: xHCI initialized per the XhciHcd::new contract (init_usb ran); setup_packet is validated above and the urb buffer is a valid caller-provided slice.
+                let n = unsafe {
+                    crate::drivers::usb::control_transfer(
+                        urb.dev_addr,
+                        setup,
+                        urb.buffer.as_deref_mut(),
+                        data_in,
+                        max_pkt,
+                    )?
+                };
+                finish_urb(urb, n);
+                Ok(())
+            }
+            UrbTransferType::Bulk => {
+                // SAFETY: xHCI initialized per the XhciHcd::new contract; the urb buffer is a valid caller-provided slice for the bulk transfer.
+                let n = unsafe {
+                    crate::drivers::usb::bulk_transfer(
+                        urb.dev_addr,
+                        urb.endpoint,
+                        urb.buffer.as_deref_mut(),
+                    )?
+                };
+                finish_urb(urb, n);
+                Ok(())
+            }
+            _ => Err(Errno::NoSys),
+        }
+    }
+
+    fn cancel_urb(&mut self, _urb: &mut Urb) -> KResult<()> {
+        Err(Errno::NoSys)
+    }
+
+    fn port_reset(&mut self, port: u8) -> KResult<()> {
+        // SAFETY: forwards to usb::port_reset under the same controller-initialized contract as XhciHcd::new.
+        unsafe { crate::drivers::usb::port_reset(port) }
+    }
+
+    fn port_enable(&mut self, port: u8) -> KResult<()> {
+        // SAFETY: forwards to usb::port_enable under the same controller-initialized contract as XhciHcd::new.
+        unsafe { crate::drivers::usb::port_enable(port) }
+    }
+
+    fn port_status(&mut self, port: u8) -> KResult<u32> {
+        // SAFETY: forwards to usb::port_status under the same controller-initialized contract as XhciHcd::new.
+        unsafe { crate::drivers::usb::port_status(port) }
+    }
+
+    fn n_ports(&self) -> u8 {
+        crate::drivers::usb::n_ports()
     }
 }

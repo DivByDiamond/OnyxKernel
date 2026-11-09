@@ -136,8 +136,10 @@ pub unsafe fn enqueue_trb(ring: &mut TrbRing, trb: &Trb) {
 pub unsafe fn setup_trb(trb: &mut Trb, req: u8, req_type: u8, val: u16, idx: u16, len: u16) {
     trb.params[0] = (req_type as u32) | ((req as u32) << 8) | ((val as u32) << 16);
     trb.params[1] = (idx as u32) | ((len as u32) << 16);
-    trb.params[2] = 0;
-    trb.params[3] = trb_type_flags(TRB_SETUP);
+    // Spec 6.4.1.2.1: length=8 (the packet itself), IDT=immediate data, TRT (bits 17:16) from request bit 7.
+    let trt = if len == 0 { 0 } else if req_type & 0x80 != 0 { 3 } else { 2 };
+    trb.params[2] = 8;
+    trb.params[3] = trb_type_flags(TRB_SETUP) | (1 << 6) | (trt << 16);
 }
 
 /// # Safety
@@ -183,7 +185,8 @@ pub unsafe fn alloc_event_ring(nentries: u16) -> KResult<EventRing> {
             phys: pa as u64,
             size: nentries,
             dequeue: 0,
-            cycle: false,
+            // Consumer and producer both start at cycle 1 after HC reset.
+            cycle: true,
         })
     }
 }
@@ -221,8 +224,7 @@ pub unsafe fn poll_event(er: &mut EventRing) -> Option<Trb> {
 /// # Safety
 ///
 /// Controller initialized and operational (cmd/event rings allocated by
-/// init); must be called from the single-owner driver path (single-threaded
-/// single-owner driver path) since it mutates G_XHCI rings.
+/// init); single-owner driver path only — it mutates G_XHCI rings.
 pub unsafe fn submit_command(trb: &Trb) -> KResult<Trb> {
     // SAFETY: exclusive access to G_XHCI on this path; cmd_ring and
     // event_ring were allocated by init with size-sized contiguous

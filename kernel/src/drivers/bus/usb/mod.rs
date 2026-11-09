@@ -11,6 +11,7 @@ enum ControllerType {
     None,
     Ehci,
     Ohci,
+    Xhci,
 }
 static mut G_ACTIVE: ControllerType = ControllerType::None;
 
@@ -37,6 +38,33 @@ pub unsafe fn control_transfer(
             ControllerType::Ohci => {
                 ohci::ohci_control_transfer(dev_addr, setup_pkt, data, data_in, max_pkt, 0)
             }
+            ControllerType::Xhci => {
+                xhci::xhci_control_transfer(dev_addr, setup_pkt, data, data_in, max_pkt)
+            }
+            ControllerType::None => Err(Errno::NoSys),
+        }
+    }
+}
+
+/// Direction bit of a USB endpoint address: bit 7 set means an IN endpoint
+/// (device → host). Shared by the bulk dispatch paths.
+fn endpoint_is_in(endpoint: u8) -> bool {
+    (endpoint & 0x80) != 0
+}
+
+/// # Safety
+///
+/// Requires a prior successful `init_usb`; `dev_addr`/`endpoint` must name a
+/// device the active controller has already configured, and `data` must stay
+/// valid and DMA-addressable for the duration of the transfer.
+pub unsafe fn bulk_transfer(dev_addr: u8, endpoint: u8, data: Option<&mut [u8]>) -> KResult<u32> {
+    let data_in = endpoint_is_in(endpoint);
+    // SAFETY: G_ACTIVE is written once by init_usb during single-threaded boot init; here it is only read to dispatch to the active controller.
+    unsafe {
+        match G_ACTIVE {
+            ControllerType::Ehci => ehci::ehci_bulk_transfer(dev_addr, data, data_in, 512),
+            ControllerType::Ohci => ohci::ohci_bulk_transfer(dev_addr, data, data_in, 512, 0),
+            ControllerType::Xhci => xhci::xhci_bulk_transfer(dev_addr, endpoint, data),
             ControllerType::None => Err(Errno::NoSys),
         }
     }
@@ -48,6 +76,7 @@ pub fn n_ports() -> u8 {
         match G_ACTIVE {
             ControllerType::Ehci => ehci::ehci_n_ports(),
             ControllerType::Ohci => ohci::ohci_n_ports(),
+            ControllerType::Xhci => xhci::xhci_n_ports(),
             ControllerType::None => 0,
         }
     }
@@ -63,6 +92,7 @@ pub unsafe fn port_status(idx: u8) -> KResult<u32> {
         match G_ACTIVE {
             ControllerType::Ehci => ehci::ehci_port_status(idx),
             ControllerType::Ohci => ohci::ohci_port_status(idx),
+            ControllerType::Xhci => xhci::xhci_port_status(idx),
             ControllerType::None => Err(Errno::NoSys),
         }
     }
@@ -78,6 +108,7 @@ pub unsafe fn port_reset(idx: u8) -> KResult<()> {
         match G_ACTIVE {
             ControllerType::Ehci => ehci::ehci_port_reset(idx),
             ControllerType::Ohci => ohci::ohci_port_reset(idx),
+            ControllerType::Xhci => xhci::xhci_port_reset(idx),
             ControllerType::None => Err(Errno::NoSys),
         }
     }
@@ -93,6 +124,7 @@ pub unsafe fn port_enable(idx: u8) -> KResult<()> {
         match G_ACTIVE {
             ControllerType::Ehci => ehci::ehci_port_enable(idx),
             ControllerType::Ohci => ohci::ohci_port_enable(idx),
+            ControllerType::Xhci => xhci::xhci_port_enable(idx),
             ControllerType::None => Err(Errno::NoSys),
         }
     }
@@ -113,5 +145,23 @@ pub unsafe fn init_usb() -> KResult<()> {
         } else {
             Err(Errno::NoEnt)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::endpoint_is_in;
+
+    #[test]
+    fn endpoint_direction_follows_address_bit_7() {
+        // OUT endpoints: EP0, EP1, EP15 — host → device.
+        assert!(!endpoint_is_in(0x00));
+        assert!(!endpoint_is_in(0x01));
+        assert!(!endpoint_is_in(0x0F));
+        // IN endpoints: EP1..EP15 with the direction bit set — device → host.
+        assert!(endpoint_is_in(0x81));
+        assert!(endpoint_is_in(0x8F));
+        // Only bit 7 matters: the endpoint number must not leak into direction.
+        assert!(!endpoint_is_in(0x7F));
     }
 }

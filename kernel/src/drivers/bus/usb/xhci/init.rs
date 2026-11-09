@@ -108,6 +108,15 @@ pub unsafe fn init(base: usize) -> KResult<()> {
         let cmd_ring = ring::alloc_ring(32)?;
         let cmd_phys = cmd_ring.phys;
         G_XHCI.cmd_ring = cmd_ring;
+        // EP0 transfer ring: control transfers enqueue here, and
+        // set_input_ctx_slot programs its dequeue pointer into the input
+        // context before Address Device.
+        let ep0_ring = ring::alloc_ring(32)?;
+        // SAFETY: fresh page-sized zeroed PMM allocation; ptr::write fully
+        // initializes the TrbRing before it is published in xfer_rings.
+        let ep0_ptr = pmm::alloc_zero()? as *mut ring::TrbRing;
+        ptr::write(ep0_ptr, ep0_ring);
+        G_XHCI.xfer_rings[0] = ep0_ptr;
         regs::op_w64(
             obase,
             regs::OP_CRCR,
@@ -133,6 +142,9 @@ pub unsafe fn init(base: usize) -> KResult<()> {
             return Err(Errno::Io);
         }
         G_XHCI.operational = true;
+        // Same publication step as init_ehci/init_ohci: the usb:: dispatch
+        // (control_transfer, port_*) routes to whichever controller won.
+        crate::drivers::usb::G_ACTIVE = crate::drivers::usb::ControllerType::Xhci;
         Ok(())
     }
 }

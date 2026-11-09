@@ -5,6 +5,10 @@ pub mod device;
 pub mod init;
 pub mod regs;
 pub use regs::ring;
+mod xfer;
+
+pub(super) use xfer::bulk::xhci_bulk_transfer;
+pub(super) use xfer::xhci_control_transfer;
 
 pub struct XhciCtx {
     pub base: usize,
@@ -152,6 +156,81 @@ pub unsafe fn irq_handler() {
             // SAFETY: same validated rtsoff; writing IMAN_IP clears the
             // pending bit per the xHCI spec.
             regs::rt_w32((*ctx).rtsoff, 0, regs::RTS_IMAN, regs::IMAN_IP);
+        }
+    }
+}
+
+/// Root-hub port count (0 until `init` runs).
+pub(super) fn xhci_n_ports() -> u8 {
+    // SAFETY: plain read of G_XHCI, written once by single-threaded init.
+    unsafe {
+        if G_XHCI.operational {
+            G_XHCI.max_ports
+        } else {
+            0
+        }
+    }
+}
+
+/// # Safety
+///
+/// Requires `init` to have run (obase valid); `idx` is 0-based and
+/// bounds-checked against `max_ports` below (PORTSC stride is 0x10).
+pub(super) unsafe fn xhci_port_status(idx: u8) -> KResult<u32> {
+    // SAFETY: obase from init; the bound check keeps the PORTSC offset
+    // within the operational register file.
+    unsafe {
+        if !G_XHCI.operational || idx >= G_XHCI.max_ports {
+            return Err(Errno::Range);
+        }
+        Ok(regs::op_r32(
+            G_XHCI.obase,
+            regs::OP_PORTSC + (idx as u32) * 0x10,
+        ))
+    }
+}
+
+/// # Safety
+///
+/// Same contract as [`xhci_port_status`].
+pub(super) unsafe fn xhci_port_reset(idx: u8) -> KResult<()> {
+    // SAFETY: same as xhci_port_status — validated obase, checked offset.
+    unsafe {
+        if !G_XHCI.operational || idx >= G_XHCI.max_ports {
+            return Err(Errno::Range);
+        }
+        let reg = regs::OP_PORTSC + (idx as u32) * 0x10;
+        // Set PR; the read-back write also acknowledges any pending change
+        // (those bits are RW1C). Poll until the controller clears PR.
+        let v = regs::op_r32(G_XHCI.obase, reg);
+        regs::op_w32(G_XHCI.obase, reg, v | regs::PORT_PR);
+        let mut timeout = 100_000u32;
+        while timeout > 0 && (regs::op_r32(G_XHCI.obase, reg) & regs::PORT_PR) != 0 {
+            timeout -= 1;
+        }
+        if timeout == 0 {
+            return Err(Errno::Io);
+        }
+        Ok(())
+    }
+}
+
+/// # Safety
+///
+/// Same contract as [`xhci_port_status`].
+pub(super) unsafe fn xhci_port_enable(idx: u8) -> KResult<()> {
+    // SAFETY: same as xhci_port_status — validated obase, checked offset.
+    unsafe {
+        if !G_XHCI.operational || idx >= G_XHCI.max_ports {
+            return Err(Errno::Range);
+        }
+        // xHCI has no software port-enable: the controller enables the port
+        // itself when a reset completes (PED bit) — verify that it did.
+        let v = regs::op_r32(G_XHCI.obase, regs::OP_PORTSC + (idx as u32) * 0x10);
+        if v & regs::PORT_PED != 0 {
+            Ok(())
+        } else {
+            Err(Errno::Io)
         }
     }
 }
