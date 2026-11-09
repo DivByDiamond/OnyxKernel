@@ -1,6 +1,6 @@
 //! Input device syscalls (mouse, keyboard events).
 //!
-//! SYS_mouse_read (todo P3 #1): returns the current cursor snapshot from
+//! SYS_mouse_read (todo P3 #1): returns unread button transitions, then current cursor state from
 //! the kernel mouse model (drivers/input/mouse.rs). The virtio-input queue
 //! is pumped first (same pattern as sys_net_recv calling net::poll) so a
 //! poll-free mouse_read still reports fresh state.
@@ -10,8 +10,8 @@ use crate::syscall::handler::user_ptr_ok;
 use crate::{mm::vmm, proc};
 use onyx_core::errno::Errno;
 
-/// Mouse event structure (matches userspace ABI): 8 bytes, packed as
-/// {u16 x, u16 y, u8 buttons, u8 pad, u16 pad}.
+/// Mouse event structure (matches userspace ABI): six bytes,
+/// {u16 x, u16 y, u8 buttons, u8 pad}.
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct MouseEvent {
@@ -22,11 +22,11 @@ pub struct MouseEvent {
     pub _pad: u8,
 }
 
-/// SYS_mouse_read — read the pointer snapshot.
+/// SYS_mouse_read — read the next button edge or current pointer snapshot.
 ///
 /// # Safety
 ///
-/// `event_ptr` must be a valid user pointer to an 8-byte MouseEvent; it is
+/// `event_ptr` must be a valid user pointer to a six-byte MouseEvent; it is
 /// validated here (range + per-page writable mapping) before any write.
 pub unsafe fn sys_mouse_read(event_ptr: *mut MouseEvent) -> i64 {
     // SAFETY: event_ptr passed user_ptr_ok and the per-page writable

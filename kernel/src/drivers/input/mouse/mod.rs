@@ -1,5 +1,5 @@
 //! Mouse cursor state (todo P3 #1): accumulates unified input events into
-//! the single pointer snapshot SYS_mouse_read exposes to userland.
+//! the bounded button history and current state SYS_mouse_read exposes.
 //!
 //! The kernel tracks exactly one logical cursor: relative moves integrate
 //! into absolute coordinates clamped to the visible framebuffer (or the
@@ -34,11 +34,63 @@ struct MouseState {
     buttons: u8,
 }
 
-static mut G_MOUSE: MouseState = MouseState {
+const EMPTY: MouseState = MouseState {
     x: 0,
     y: 0,
     buttons: 0,
 };
+const EDGES: usize = 32;
+struct PointerQueue {
+    latest: MouseState,
+    edges: [MouseState; EDGES],
+    head: usize,
+    len: usize,
+    overflow: bool,
+}
+impl PointerQueue {
+    const fn new() -> Self {
+        Self {
+            latest: EMPTY,
+            edges: [EMPTY; EDGES],
+            head: 0,
+            len: 0,
+            overflow: false,
+        }
+    }
+    fn handle(&mut self, ev: Event, w: i32, h: i32) {
+        let previous = self.latest.buttons;
+        apply(&mut self.latest, ev, w, h);
+        if previous != self.latest.buttons {
+            if self.len == EDGES {
+                // Cancel an incomplete gesture rather than inventing a click
+                // after bounded input history is exhausted.
+                self.head = 0;
+                self.len = 0;
+                self.overflow = true;
+            }
+            self.edges[(self.head + self.len) % EDGES] = self.latest;
+            self.len += 1;
+        }
+    }
+    fn read(&mut self) -> MouseState {
+        if self.overflow {
+            self.overflow = false;
+            return MouseState {
+                x: -1,
+                y: -1,
+                buttons: 0,
+            };
+        }
+        if self.len == 0 {
+            return self.latest;
+        }
+        let edge = self.edges[self.head];
+        self.head = (self.head + 1) % EDGES;
+        self.len -= 1;
+        edge
+    }
+}
+static mut G_MOUSE: PointerQueue = PointerQueue::new();
 
 /// Visible extents for clamping (fb geometry when available).
 fn bounds() -> (i32, i32) {
@@ -65,7 +117,7 @@ pub fn handle(ev: Event) {
     // callers run with interrupts disabled, as required by sync.rs.
     unsafe {
         let m = &raw mut G_MOUSE;
-        apply(&mut *m, ev, w, h);
+        (*m).handle(ev, w, h);
     }
     MOUSE_LOCK.unlock();
 }
@@ -94,13 +146,14 @@ fn apply(m: &mut MouseState, ev: Event, w: i32, h: i32) {
     }
 }
 
-/// Current pointer snapshot: (x, y, button bits) for SYS_mouse_read.
+/// Oldest unread button edge, otherwise current pointer state. Motion is
+/// coalesced; captured press/release coordinates survive slow guest redraws.
 pub fn snapshot() -> (i16, i16, u8) {
     MOUSE_LOCK.lock();
     // SAFETY: lock excludes all mutations by input dispatch.
     let value = unsafe {
-        let m = &raw const G_MOUSE;
-        ((*m).x as i16, (*m).y as i16, (*m).buttons)
+        let m = (&mut *(&raw mut G_MOUSE)).read();
+        (m.x as i16, m.y as i16, m.buttons)
     };
     MOUSE_LOCK.unlock();
     value
@@ -109,6 +162,50 @@ pub fn snapshot() -> (i16, i16, u8) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn short_click_survives_motion_and_two_edges_between_reads() {
+        let mut q = PointerQueue::new();
+        q.handle(Event::MouseAbs { x: 30, y: 98 }, 256, 160);
+        q.handle(
+            Event::MouseButton {
+                btn: super::super::event::MouseButton::Left,
+                down: true,
+            },
+            256,
+            160,
+        );
+        q.handle(Event::MouseAbsX(31), 256, 160);
+        q.handle(
+            Event::MouseButton {
+                btn: super::super::event::MouseButton::Left,
+                down: false,
+            },
+            256,
+            160,
+        );
+        let press = q.read();
+        let release = q.read();
+        assert_eq!((press.x, press.y, press.buttons), (30, 98, 1));
+        assert_eq!((release.x, release.y, release.buttons), (31, 98, 0));
+        assert_eq!(q.read().buttons, 0);
+    }
+    #[test]
+    fn overflow_is_bounded_and_cancels_partial_gesture() {
+        let mut q = PointerQueue::new();
+        for i in 0..=EDGES {
+            q.handle(
+                Event::MouseButton {
+                    btn: super::super::event::MouseButton::Left,
+                    down: i % 2 == 0,
+                },
+                256,
+                160,
+            );
+        }
+        assert!(q.len <= EDGES);
+        let cancel = q.read();
+        assert_eq!((cancel.x, cancel.y, cancel.buttons), (-1, -1, 0));
+    }
     #[test]
     fn absolute_axes_preserve_each_other_and_clamp_to_tablet() {
         let mut m = MouseState {
