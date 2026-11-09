@@ -10,15 +10,13 @@
 //! with respect to virtio_blk requests at the time of writing. When SMP
 //! is fully wired for FS I/O, callers must hold a global FAT32 lock.
 
+mod alloc;
 mod data;
-mod dirent;
-mod fat;
+mod entry;
 mod lfn;
 mod ops;
-mod remove;
-mod size;
 
+pub use alloc::size::set_size;
 pub use data::{truncate_chain, write};
+pub use entry::remove::unlink;
 pub use ops::{create, update_size};
-pub use remove::unlink;
-pub use size::set_size;

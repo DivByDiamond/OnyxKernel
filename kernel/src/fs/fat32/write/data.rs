@@ -4,7 +4,8 @@ use core::ptr;
 use onyx_core::errno::KResult;
 
 use super::super::{FAT32_EOC, G_SPC, fat_entry, is_eoc, is_valid_cluster, read_cluster_sector};
-use super::fat::{alloc_cluster, extend_chain, free_chain, write_cluster_sector};
+use super::alloc::chain::{extend_chain, free_chain};
+use super::alloc::fat::{alloc_cluster, write_cluster_sector};
 
 /// Write `len` bytes from `buf` into the file starting at offset `off`.
 /// The file's first cluster is `first_cluster` (must already exist —
@@ -138,6 +139,6 @@ pub unsafe fn truncate_chain(first_cluster: u32, keep_bytes: u64) -> KResult<()>
             free_chain(after)?;
         }
         // Mark `cur` as EOC.
-        super::fat::write_fat_entry(cur, FAT32_EOC)
+        super::alloc::fat::write_fat_entry(cur, FAT32_EOC)
     }
 }

@@ -1,9 +1,13 @@
 //! Namespace node operations: creation, removal, links and the vnode core.
-pub mod create;
+//!
+//! `ops` holds the namespace mutations (create/unlink); the remaining
+//! modules cover directories, symlinks and the vnode representation.
 pub mod dir;
+pub(crate) mod ops;
 pub mod symlink;
-pub mod unlink;
 pub mod vnode;
+
+pub(crate) use ops::{create, unlink};
 
 /// Split a path like "/foo/bar/baz" (or its mount-relative form
 /// "foo/bar/baz") into ("foo/bar", "baz"). A leading '/' is stripped;

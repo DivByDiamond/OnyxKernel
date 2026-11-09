@@ -1,6 +1,6 @@
 use onyx_core::errno::{Errno, KResult};
 
-use super::consts::*;
+use super::fmt::consts::*;
 
 /// # Safety
 ///

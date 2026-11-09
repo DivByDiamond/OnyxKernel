@@ -8,7 +8,7 @@ use super::super::super::{
     ATTR_DIRECTORY, ATTR_LFN, DIR_ENTRY_SIZE, ENTRIES_PER_SECTOR, G_SPC, fat_entry, is_eoc,
     is_valid_cluster, read_cluster_sector,
 };
-use super::super::fat::{alloc_cluster, write_cluster_sector, write_fat_entry};
+use super::super::alloc::fat::{alloc_cluster, write_cluster_sector, write_fat_entry};
 use super::name::unique_short;
 use super::utf16::utf16_units;
 

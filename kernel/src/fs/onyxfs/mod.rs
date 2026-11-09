@@ -10,38 +10,20 @@
 //! legacy `mkimage` tool is preserved: the detected version is stored in
 //! `G_VERSION` and the per-version inode/dirent sizes are used throughout.
 pub mod alloc;
-pub mod compress;
-pub mod context;
 pub mod inode;
 pub mod journal;
 pub mod lookup;
-pub mod mkdir;
 pub mod mount;
-pub mod read;
-pub mod readdir;
-pub mod rename;
+pub mod ops;
 pub mod snapshot;
-mod snapshot_access;
-mod snapshot_engine;
-mod snapshot_format;
-pub mod snapshot_io;
-pub mod symlink;
-pub mod unlink;
 pub mod write;
 
-pub use context::*;
 pub use inode::*;
 pub use journal::*;
 pub use lookup::*;
-pub use mkdir::*;
 pub use mount::*;
-pub use read::*;
-pub use readdir::*;
-pub use rename::*;
+pub use ops::*;
 pub use snapshot::*;
-pub use snapshot_io::*;
-pub use symlink::*;
-pub use unlink::*;
 pub use write::*;
 
 use crate::drivers::virtio_req;
@@ -106,7 +88,7 @@ pub(super) static mut G_JOURNAL_HEAD: u32 = 0;
 pub(super) unsafe fn read_block(blk: u32, buf: &mut [u8; ONYFS_BLOCK_SIZE]) -> KResult<()> {
     // SAFETY: all accesses are under root mount exclusion, including this gate.
     unsafe {
-        snapshot_access::access(G_SNAPSHOT_QUARANTINED)?;
+        snapshot::access::access(G_SNAPSHOT_QUARANTINED)?;
         raw_read_block(blk, buf)
     }
 }
@@ -130,7 +112,7 @@ pub(super) unsafe fn raw_read_block(blk: u32, buf: &mut [u8; ONYFS_BLOCK_SIZE]) 
 pub(super) unsafe fn write_block(blk: u32, buf: &[u8; ONYFS_BLOCK_SIZE]) -> KResult<()> {
     // SAFETY: all accesses are under root mount exclusion, including this gate.
     unsafe {
-        snapshot_access::access(G_SNAPSHOT_QUARANTINED)?;
+        snapshot::access::access(G_SNAPSHOT_QUARANTINED)?;
         raw_write_block(blk, buf)
     }
 }
