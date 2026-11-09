@@ -21,7 +21,7 @@ pub unsafe fn readdir_entry(
     entry_idx: u32,
     name_out: *mut u8,
     name_len: usize,
-) -> KResult<Option<u32>> {
+) -> KResult<Option<(u32, u8)>> {
     // SAFETY: see # Safety for name_out validity; copy length is clamped to
     // name_len - 1 and dirent slots are bounds-checked in parse_dirent.
     unsafe {
@@ -89,7 +89,9 @@ pub unsafe fn readdir_entry(
             if copy_n < name_len {
                 *name_out.add(copy_n) = 0;
             }
-            return Ok(Some(d.inode));
+            // d.dtype already stores the Linux DT_* kind on disk (written by
+            // create/mkdir/symlink); 0 means an older dirent without one.
+            return Ok(Some((d.inode, d.dtype)));
         }
 
         Ok(None)

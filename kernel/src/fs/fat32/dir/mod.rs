@@ -6,8 +6,8 @@ mod scan;
 
 use super::lfn::LfnChain;
 use super::{
-    ATTR_LFN, DIR_ENTRY_SIZE, ENTRIES_PER_SECTOR, G_SPC, fat_entry, is_eoc, is_valid_cluster,
-    read_cluster_sector,
+    ATTR_DIRECTORY, ATTR_LFN, DIR_ENTRY_SIZE, ENTRIES_PER_SECTOR, G_SPC, fat_entry, is_eoc,
+    is_valid_cluster, read_cluster_sector,
 };
 
 pub(crate) use scan::scan_dir_entries;
@@ -18,7 +18,8 @@ pub use read::*;
 /// Read one directory entry by index (stateful cursor maintained by VFS).
 /// Writes the long name when a valid LFN chain precedes the entry, otherwise
 /// the 8.3-derived lowercase name (NUL-terminated), into `name_out`, and
-/// returns the entry's cluster number, or None past end-of-directory.
+/// returns the entry's cluster number plus its d_type (DT_DIR/DT_REG from
+/// the attribute byte), or None past end-of-directory.
 ///
 /// # Safety
 ///
@@ -31,7 +32,7 @@ pub unsafe fn readdir_entry(
     entry_idx: u32,
     name_out: *mut u8,
     name_len: usize,
-) -> Option<u32> {
+) -> Option<(u32, u8)> {
     // SAFETY: see # Safety for name_out validity - out_pos is checked against
     // name_len before each byte write; cluster numbers are validated via
     // is_valid_cluster before each chain hop.
@@ -58,6 +59,11 @@ pub unsafe fn readdir_entry(
                 for ei in 0..ENTRIES_PER_SECTOR {
                     let off = ei * DIR_ENTRY_SIZE;
                     let attr = buf[off + 11];
+                    let dtype = if attr & ATTR_DIRECTORY != 0 {
+                        crate::fs::DT_DIR
+                    } else {
+                        crate::fs::DT_REG
+                    };
                     if attr == ATTR_LFN {
                         chain.push(&buf[off..off + DIR_ENTRY_SIZE]);
                         continue;
@@ -97,11 +103,14 @@ pub unsafe fn readdir_entry(
                         let cluster_lo = u16::from_le_bytes([buf[off + 26], buf[off + 27]]);
                         let cluster_hi = u16::from_le_bytes([buf[off + 20], buf[off + 21]]);
                         let cluster_num = ((cluster_hi as u32) << 16) | cluster_lo as u32;
-                        return Some(if cluster_num == 0 {
-                            dir_cluster
-                        } else {
-                            cluster_num
-                        });
+                        return Some((
+                            if cluster_num == 0 {
+                                dir_cluster
+                            } else {
+                                cluster_num
+                            },
+                            dtype,
+                        ));
                     }
                     let mut out_pos = 0usize;
                     let mut base_end = 8usize;
@@ -154,11 +163,14 @@ pub unsafe fn readdir_entry(
                     let cluster_lo = u16::from_le_bytes([buf[off + 26], buf[off + 27]]);
                     let cluster_hi = u16::from_le_bytes([buf[off + 20], buf[off + 21]]);
                     let cluster_num = ((cluster_hi as u32) << 16) | cluster_lo as u32;
-                    return Some(if cluster_num == 0 {
-                        dir_cluster
-                    } else {
-                        cluster_num
-                    });
+                    return Some((
+                        if cluster_num == 0 {
+                            dir_cluster
+                        } else {
+                            cluster_num
+                        },
+                        dtype,
+                    ));
                 }
             }
             let next = fat_entry(cluster, &mut buf);

@@ -16,5 +16,14 @@ pub mod vfs;
 /// `SpinLock` interrupt invariant (see `crate::sync`).
 pub(crate) static FS_LOCK: SpinLock = SpinLock::new();
 
+/// Linux-compatible `dirent.d_type` values returned by the readdir backends
+/// and written into getdents64 records. Only the four kinds OnyxFS devices
+/// and directories can currently be are defined; symlink/socket support
+/// adds its own here.
+pub const DT_DIR: u8 = 4;
+pub const DT_REG: u8 = 8;
+pub const DT_CHR: u8 = 2;
+pub const DT_BLK: u8 = 6;
+
 #[cfg(test)]
 mod tests;

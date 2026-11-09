@@ -113,7 +113,7 @@ pub unsafe fn write(ino: u32, buf: *const u8, _offset: u32, len: u32) -> KResult
 /// and translated by the syscall layer for user callers); idx is a plain
 /// cursor; the named-channel table walk is bounds-checked by ipc::
 /// named_by_index.
-pub unsafe fn readdir_entry(idx: u32, name_out: *mut u8, name_len: usize) -> Option<u32> {
+pub unsafe fn readdir_entry(idx: u32, name_out: *mut u8, name_len: usize) -> Option<(u32, u8)> {
     // SAFETY: name writes go through copy_name, which clamps to
     // name_len - 1 and NUL-terminates within name_len bytes.
     unsafe {
@@ -121,18 +121,18 @@ pub unsafe fn readdir_entry(idx: u32, name_out: *mut u8, name_len: usize) -> Opt
             0 => {
                 let name = b".";
                 copy_name(name, name_out, name_len);
-                Some(IPCFS_ROOT_INO)
+                Some((IPCFS_ROOT_INO, crate::fs::DT_DIR))
             }
             1 => {
                 let name = b"..";
                 copy_name(name, name_out, name_len);
-                Some(IPCFS_ROOT_INO)
+                Some((IPCFS_ROOT_INO, crate::fs::DT_DIR))
             }
             _ => {
                 let entry_idx = idx - 2;
                 if let Some((name, chan_id)) = ipc::named_by_index(entry_idx) {
                     copy_name(name, name_out, name_len);
-                    Some(chan_id + 2)
+                    Some((chan_id + 2, crate::fs::DT_REG))
                 } else {
                     None
                 }

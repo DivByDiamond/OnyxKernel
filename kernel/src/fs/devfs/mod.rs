@@ -186,10 +186,10 @@ pub unsafe fn write(ino: u32, buf: *const u8, offset: u32, len: u32) -> KResult<
     }
 }
 
-pub fn readdir_entry(idx: u32, name_out: *mut u8, name_len: usize) -> Option<u32> {
+pub fn readdir_entry(idx: u32, name_out: *mut u8, name_len: usize) -> Option<(u32, u8)> {
     if idx < 2 {
         copy_name(if idx == 0 { b"." } else { b".." }, name_out, name_len);
-        return Some(DEVFS_ROOT_INO);
+        return Some((DEVFS_ROOT_INO, crate::fs::DT_DIR));
     }
     let index = (idx - 2) as usize;
     if index < fb::count() {
@@ -204,17 +204,17 @@ pub fn readdir_entry(idx: u32, name_out: *mut u8, name_len: usize) -> Option<u32
             4
         };
         copy_name(&name[..length], name_out, name_len);
-        return Some(fb_ino(index));
+        return Some((fb_ino(index), crate::fs::DT_CHR));
     }
     let dev_idx = index - fb::count();
     if dev_idx < crate::drivers::virtio::count() {
         copy_name(blk::name(dev_idx), name_out, name_len);
-        return Some(blk_ino(dev_idx));
+        return Some((blk_ino(dev_idx), crate::fs::DT_BLK));
     }
     if crate::drivers::virtio_console::present() {
         if dev_idx == crate::drivers::virtio::count() {
             copy_name(b"hvc0", name_out, name_len);
-            return Some(DEVFS_HVC0_INO);
+            return Some((DEVFS_HVC0_INO, crate::fs::DT_CHR));
         }
         pty_nodes::readdir_entry(idx - 1, name_out, name_len)
     } else {

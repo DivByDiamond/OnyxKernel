@@ -184,6 +184,7 @@ pub unsafe fn readdir(dir_path: &[u8], name_out: *mut u8, name_len: usize) -> KR
 /// Used by getdents64 for fd-based directory iteration. `mnt` is the fd's
 /// mount-slot byte (`VfsFd::mnt`); block-fs entries are read through
 /// `with_mount` so the correct volume context is active.
+/// Returns `(d_ino, d_type)` — the Linux `DT_*` kind for `dirent.d_type`.
 ///
 /// # Safety
 ///
@@ -197,7 +198,7 @@ pub unsafe fn readdir_entry_by_ino(
     name_out: *mut u8,
     name_len: usize,
     mnt: u8,
-) -> KResult<Option<u32>> {
+) -> KResult<Option<(u32, u8)>> {
     // SAFETY: only forwards name_out to per-fs readdir_entry helpers that
     // bound their writes to name_len; ino/idx validity is checked by each
     // backend (bounds-checked table walks); with_mount fences the block-fs

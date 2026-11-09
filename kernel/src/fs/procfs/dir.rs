@@ -25,17 +25,17 @@ pub unsafe fn lookup(name: &[u8]) -> KResult<u32> {
 /// Caller contract: name_out must be writable for name_len bytes (validated
 /// and translated by the syscall layer for user callers); idx is a plain
 /// cursor rejected for values past the table.
-pub unsafe fn readdir_entry(idx: u32, name_out: *mut u8, name_len: usize) -> Option<u32> {
-    let (name, ino): (&[u8], u32) = match idx {
-        0 => (b"." as &[u8], PROCFS_ROOT_INO),
-        1 => (b".." as &[u8], PROCFS_ROOT_INO),
-        2 => (b"version" as &[u8], PROCFS_VERSION_INO),
-        3 => (b"cpuinfo" as &[u8], PROCFS_CPUINFO_INO),
-        4 => (b"meminfo" as &[u8], PROCFS_MEMINFO_INO),
-        5 => (b"uptime" as &[u8], PROCFS_UPTIME_INO),
-        6 => (b"load" as &[u8], PROCFS_LOAD_INO),
-        7 => (b"stat" as &[u8], PROCFS_STAT_INO),
-        8 => (b"modules" as &[u8], PROCFS_MODULES_INO),
+pub unsafe fn readdir_entry(idx: u32, name_out: *mut u8, name_len: usize) -> Option<(u32, u8)> {
+    let (name, ino, dtype): (&[u8], u32, u8) = match idx {
+        0 => (b"." as &[u8], PROCFS_ROOT_INO, crate::fs::DT_DIR),
+        1 => (b".." as &[u8], PROCFS_ROOT_INO, crate::fs::DT_DIR),
+        2 => (b"version" as &[u8], PROCFS_VERSION_INO, crate::fs::DT_REG),
+        3 => (b"cpuinfo" as &[u8], PROCFS_CPUINFO_INO, crate::fs::DT_REG),
+        4 => (b"meminfo" as &[u8], PROCFS_MEMINFO_INO, crate::fs::DT_REG),
+        5 => (b"uptime" as &[u8], PROCFS_UPTIME_INO, crate::fs::DT_REG),
+        6 => (b"load" as &[u8], PROCFS_LOAD_INO, crate::fs::DT_REG),
+        7 => (b"stat" as &[u8], PROCFS_STAT_INO, crate::fs::DT_REG),
+        8 => (b"modules" as &[u8], PROCFS_MODULES_INO, crate::fs::DT_REG),
         _ => return None,
     };
     let n = name.len().min(name_len.saturating_sub(1));
@@ -45,5 +45,5 @@ pub unsafe fn readdir_entry(idx: u32, name_out: *mut u8, name_len: usize) -> Opt
         core::ptr::copy_nonoverlapping(name.as_ptr(), name_out, n);
         *name_out.add(n) = 0;
     }
-    Some(ino)
+    Some((ino, dtype))
 }

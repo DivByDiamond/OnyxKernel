@@ -149,12 +149,12 @@ pub unsafe fn pty_poll(ino: u32) -> Option<(bool, bool)> {
 }
 
 /// devfs::readdir_entry hook: ptmx sits right after the block devices,
-/// then one entry per live pts/N. Returns the inode for name_out.
-pub fn readdir_entry(idx: u32, name_out: *mut u8, name_len: usize) -> Option<u32> {
+/// then one entry per live pts/N. Returns (inode, d_type) for name_out.
+pub fn readdir_entry(idx: u32, name_out: *mut u8, name_len: usize) -> Option<(u32, u8)> {
     let ptmx_slot = 2 + crate::drivers::fb::count() as u32 + crate::drivers::virtio::count() as u32;
     if idx == ptmx_slot {
         copy_name(b"ptmx", name_out, name_len);
-        return Some(DEVFS_PTMX_INO);
+        return Some((DEVFS_PTMX_INO, crate::fs::DT_CHR));
     }
     let pts_base = ptmx_slot + 1;
     if idx >= pts_base {
@@ -164,7 +164,7 @@ pub fn readdir_entry(idx: u32, name_out: *mut u8, name_len: usize) -> Option<u32
             // bounds and liveness internally.
             if unsafe { pty::is_used(n) } {
                 copy_name(&pts_name(n), name_out, name_len);
-                return Some(DEVFS_PTYS_BASE_INO + n);
+                return Some((DEVFS_PTYS_BASE_INO + n, crate::fs::DT_CHR));
             }
         }
     }
