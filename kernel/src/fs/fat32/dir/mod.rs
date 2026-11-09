@@ -6,10 +6,12 @@ mod scan;
 
 use super::lfn::LfnChain;
 use super::{
-    ATTR_DIRECTORY, ATTR_LFN, DIR_ENTRY_SIZE, ENTRIES_PER_SECTOR, G_SPC, fat_entry, is_eoc,
-    is_valid_cluster, read_cluster_sector,
+    ATTR_DIRECTORY, ATTR_LFN, DIR_ENTRY_SIZE, ENTRIES_PER_SECTOR, G_DATA_LBA, G_DEV, G_SPC,
+    fat_entry, is_eoc, is_valid_cluster, read_cluster_sector,
 };
+use scan::{G_WALK, WalkPos};
 
+pub(crate) use scan::invalidate_walk;
 pub(crate) use scan::scan_dir_entries;
 
 pub use path::*;
@@ -45,6 +47,31 @@ pub unsafe fn readdir_entry(
         let mut long_name = [0u8; 255];
         let mut cluster = dir_cluster;
         let mut cursor = 0u32;
+        let mut si_from = 0u32;
+        let mut ei_from = 0usize;
+        let mut first = true;
+        // Sequential-access fast path: resume where the previous call for
+        // this directory stopped instead of re-walking the whole prefix
+        // (the common getdents/SYS_readdir loop). The bounds checks make a
+        // stale or cross-volume entry fall back to a full walk rather than
+        // an out-of-range sector read.
+        // SAFETY: G_WALK/G_DEV/G_DATA_LBA are only read under FAT32_LOCK
+        // (with_mount), the same exclusion guarding every fat32 global.
+        let (walk, volume, lba) = (G_WALK, G_DEV, G_DATA_LBA);
+        if let Some(w) = walk.filter(|w| {
+            w.volume == volume
+                && w.lba == lba
+                && w.dir == dir_cluster
+                && entry_idx >= w.cursor
+                && is_valid_cluster(w.cluster)
+                && w.si < G_SPC
+                && w.ei < ENTRIES_PER_SECTOR
+        }) {
+            cluster = w.cluster;
+            si_from = w.si;
+            ei_from = w.ei;
+            cursor = w.cursor;
+        }
         let mut hop = 0u32;
         const MAX_HOPS: u32 = 65536;
         loop {
@@ -52,11 +79,13 @@ pub unsafe fn readdir_entry(
                 return None;
             }
             hop += 1;
-            for si in 0..G_SPC {
+            let si_start = if first { si_from } else { 0 };
+            for si in si_start..G_SPC {
                 if read_cluster_sector(cluster, si, &mut buf).is_err() {
                     return None;
                 }
-                for ei in 0..ENTRIES_PER_SECTOR {
+                let ei_start = if first && si == si_from { ei_from } else { 0 };
+                for ei in ei_start..ENTRIES_PER_SECTOR {
                     let off = ei * DIR_ENTRY_SIZE;
                     let attr = buf[off + 11];
                     let dtype = if attr & ATTR_DIRECTORY != 0 {
@@ -103,14 +132,20 @@ pub unsafe fn readdir_entry(
                         let cluster_lo = u16::from_le_bytes([buf[off + 26], buf[off + 27]]);
                         let cluster_hi = u16::from_le_bytes([buf[off + 20], buf[off + 21]]);
                         let cluster_num = ((cluster_hi as u32) << 16) | cluster_lo as u32;
-                        return Some((
+                        return save_resume(
+                            &mut buf,
+                            dir_cluster,
+                            cluster,
+                            si,
+                            ei,
+                            entry_idx,
                             if cluster_num == 0 {
                                 dir_cluster
                             } else {
                                 cluster_num
                             },
                             dtype,
-                        ));
+                        );
                     }
                     let mut out_pos = 0usize;
                     let mut base_end = 8usize;
@@ -163,16 +198,23 @@ pub unsafe fn readdir_entry(
                     let cluster_lo = u16::from_le_bytes([buf[off + 26], buf[off + 27]]);
                     let cluster_hi = u16::from_le_bytes([buf[off + 20], buf[off + 21]]);
                     let cluster_num = ((cluster_hi as u32) << 16) | cluster_lo as u32;
-                    return Some((
+                    return save_resume(
+                        &mut buf,
+                        dir_cluster,
+                        cluster,
+                        si,
+                        ei,
+                        entry_idx,
                         if cluster_num == 0 {
                             dir_cluster
                         } else {
                             cluster_num
                         },
                         dtype,
-                    ));
+                    );
                 }
             }
+            first = false;
             let next = fat_entry(cluster, &mut buf);
             if is_eoc(next) {
                 return None;
@@ -182,5 +224,54 @@ pub unsafe fn readdir_entry(
             }
             cluster = next;
         }
+    }
+}
+
+/// Record the resume point after a successful decode of the entry at
+/// (`cluster`, `si`, `ei`) with cursor `entry_idx`, then hand the entry
+/// back. The next slot is computed eagerly — including the FAT hop when
+/// the entry closed out a cluster — so the resume filter in
+/// `readdir_entry` stays a plain bounds check; when the chain ends right
+/// there the cache is cleared instead of pointing past the directory.
+fn save_resume(
+    buf: &mut [u8; 512],
+    dir: u32,
+    cluster: u32,
+    si: u32,
+    ei: usize,
+    entry_idx: u32,
+    ino: u32,
+    dtype: u8,
+) -> Option<(u32, u8)> {
+    // SAFETY: FAT32_LOCK (with_mount) serializes all G_WALK/G_* access —
+    // the same exclusion as every other fat32 entry point; fat_entry
+    // re-validates the cluster it returns and the resume filter in
+    // readdir_entry bounds-checks si/ei before they are used.
+    unsafe {
+        let next = if ei + 1 < ENTRIES_PER_SECTOR {
+            Some((cluster, si, ei + 1))
+        } else if si + 1 < G_SPC {
+            Some((cluster, si + 1, 0))
+        } else {
+            // Chain hop: this FAT read reuses buf, which the caller is done
+            // with at this point (it is returning the entry).
+            let n = fat_entry(cluster, buf);
+            if is_eoc(n) || !is_valid_cluster(n) {
+                None
+            } else {
+                Some((n, 0, 0))
+            }
+        };
+        // The volume key stops this entry from matching a different mount.
+        G_WALK = next.map(|(cluster, si, ei)| WalkPos {
+            volume: G_DEV,
+            lba: G_DATA_LBA,
+            dir,
+            cluster,
+            si,
+            ei,
+            cursor: entry_idx + 1,
+        });
+        Some((ino, dtype))
     }
 }

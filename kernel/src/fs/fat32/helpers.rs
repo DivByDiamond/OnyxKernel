@@ -78,6 +78,8 @@ pub unsafe fn mount(dev: usize) -> KResult<()> {
     // SAFETY: single-threaded boot init is the exclusion guarantee for the
     // module globals written here.
     unsafe {
+        // New geometry: any readdir resume point belongs to the old volume.
+        super::dir::invalidate_walk();
         G_DEV = dev;
         let mut bpb = [0u8; 512];
         read_sec(0, &mut bpb)?;

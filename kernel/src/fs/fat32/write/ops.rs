@@ -27,6 +27,9 @@ pub unsafe fn create(dir_cluster: u32, name: &[u8], is_dir: bool) -> KResult<u32
     // SAFETY: single-threaded FAT32 exclusion (see # Safety); all raw access
     // is delegated to the bounds-checked scan/alloc/dirent helpers.
     unsafe {
+        // The new dirent (and any LFN run) shifts slot positions: drop any
+        // readdir resume point so the next sequential read re-walks.
+        super::super::dir::invalidate_walk();
         // Long names are allowed here; the LFN path below rejects anything
         // over 255 bytes (20 fragments) and 8.3 aliases are truncated.
         if name.is_empty() || name.len() > 255 {

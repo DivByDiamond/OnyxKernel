@@ -33,6 +33,9 @@ pub unsafe fn unlink(dir_cluster: u32, name: &[u8]) -> KResult<()> {
     // SAFETY: single-threaded FAT32 exclusion (see # Safety); entry offsets
     // are ei*32 with ei < 16, staying inside the 512-byte sector buffer.
     unsafe {
+        // Clearing slots shifts every later position: drop the readdir
+        // resume point before mutating the directory.
+        super::super::dir::invalidate_walk();
         if name.is_empty() {
             return Err(Errno::Inval);
         }

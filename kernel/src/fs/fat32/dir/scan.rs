@@ -93,3 +93,43 @@ pub(crate) unsafe fn scan_dir_entries(
         }
     }
 }
+
+/// Sequential-readdir resume point: the slot right after the entry the
+/// previous `readdir_entry` call returned, plus that entry's cursor index.
+/// FAT32 directories are cluster chains with no random access, so without
+/// this every restart re-walked the whole prefix from the first cluster —
+/// listing N entries cost O(N²) sector reads (each skip re-read the FAT
+/// and every passed-over data sector from disk).
+///
+/// Keyed by volume geometry (`G_DEV` + `G_DATA_LBA`) as well as the
+/// directory cluster: secondary mounts swap those globals in and out under
+/// `FAT32_LOCK`, and two volumes may legitimately reuse the same cluster
+/// numbers.
+#[derive(Clone, Copy)]
+pub(super) struct WalkPos {
+    pub(super) volume: usize,
+    pub(super) lba: u32,
+    pub(super) dir: u32,
+    pub(super) cluster: u32,
+    pub(super) si: u32,
+    pub(super) ei: usize,
+    pub(super) cursor: u32,
+}
+
+/// Resume cache for sequential readdir; guarded by `FAT32_LOCK` (taken by
+/// `vfs::with_mount` around every runtime FAT32 operation, boot paths are
+/// single-hart).
+pub(super) static mut G_WALK: Option<WalkPos> = None;
+
+/// Drop the readdir resume cache. Every operation that changes directory
+/// contents or volume geometry (`mount`, `create`, `unlink`) must call
+/// this: a resumed position would otherwise point into a shifted layout.
+/// A missed invalidation can only mis-list entries for one iteration —
+/// the walk still bounds-checks every cluster and sector it reads.
+pub(crate) fn invalidate_walk() {
+    // SAFETY: all FAT32 I/O runs under FAT32_LOCK, the same exclusion that
+    // guards the G_WALK reads in readdir_entry.
+    unsafe {
+        G_WALK = None;
+    }
+}
