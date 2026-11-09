@@ -7,7 +7,7 @@ use onyx_core::errno::{Errno, KResult};
 /// secondary harts start; `data` must remain valid for the kernel's
 /// lifetime since G_FONT stores pointers into it. Glyph/unicode offsets are
 /// bounds-checked against data.len() before each as_ptr().add().
-pub(super) unsafe fn init_psf1(data: &[u8]) -> KResult<()> {
+pub(in crate::font) unsafe fn init_psf1(data: &[u8]) -> KResult<()> {
     unsafe {
         if data.len() < 4 {
             return Err(Errno::Io);

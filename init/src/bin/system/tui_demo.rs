@@ -10,6 +10,7 @@
 #![no_std]
 #![no_main]
 
+#[path = "../../libtui/mod.rs"]
 mod libtui;
 use onyx_init::syscalls;
 

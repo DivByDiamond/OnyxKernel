@@ -1,7 +1,7 @@
 //! Syscall bindings for Lua (minimal MVP)
 
-use super::value::{Value, ValueKey};
-use super::vm::VM;
+use super::super::value::{Value, ValueKey};
+use super::super::vm::VM;
 use crate::syscalls;
 use alloc::collections::BTreeMap;
 

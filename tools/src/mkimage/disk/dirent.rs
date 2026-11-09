@@ -2,7 +2,7 @@ use onyx_core::formats::{ONYFS_BLOCK_SIZE, ONYFS_DIRECT_BLKS, ONYFS_NAME_MAX, On
 
 const V1_DIRENT_SIZE: usize = 36;
 
-use super::tree::{DirNode, Entry};
+use crate::tree::{DirNode, Entry};
 
 fn write_v1(img: &mut [u8], off: usize, name: &str, inode: u32) {
     let bytes = name.as_bytes();

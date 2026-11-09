@@ -196,10 +196,10 @@ pub unsafe fn blk_capacity(dev_idx: usize) -> u64 {
     }
 }
 
+pub mod dev;
 pub mod queue;
-pub mod virtio_req;
-pub mod virtio_rng;
 
+pub use dev::{virtio_req, virtio_rng};
 pub use queue::{init, probe};
 
 #[cfg(test)]

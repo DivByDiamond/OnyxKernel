@@ -3,7 +3,7 @@
 //! is the same code path as glibc's `crypt(3)`), so matching them proves
 //! `$5$` interoperability rather than self-consistency.
 
-use super::*;
+use super::super::sha256crypt::*;
 
 /// Format `password`/`salt`/`rounds` and compare with the reference string.
 fn assert_hash(password: &[u8], salt: &[u8], rounds: u32, expected: &str) {

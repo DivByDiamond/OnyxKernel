@@ -214,6 +214,3 @@ pub fn classify_field(password: &[u8], stored: &[u8]) -> HashScheme {
     }
 }
 
-#[cfg(test)]
-#[path = "kdf_tests.rs"]
-mod tests;

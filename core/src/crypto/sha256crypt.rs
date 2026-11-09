@@ -23,7 +23,8 @@ pub const MAX_SALT: usize = 16;
 pub const HASH_CHARS: usize = 43;
 
 /// crypt-base64 alphabet: `.` `/` digits, uppercase, lowercase.
-const B64: &[u8; 64] = b"./0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+/// Crypt base64 alphabet (crypt(3) `./0-9A-Za-z`).
+pub(super) const B64: &[u8; 64] = b"./0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
 /// Scheme marker.
 const SALT_PREFIX: &[u8] = b"$5$";
 /// Optional rounds tag.
@@ -246,6 +247,3 @@ pub fn hash_into(password: &[u8], salt: &[u8], rounds: u32, out: &mut [u8]) -> O
     Some(pos + HASH_CHARS)
 }
 
-#[cfg(test)]
-#[path = "sha256crypt_tests.rs"]
-mod tests;

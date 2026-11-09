@@ -1,4 +1,4 @@
-use super::G_GMAC;
+use super::super::G_GMAC;
 use super::regs;
 use onyx_core::errno::{Errno, KResult};
 
@@ -34,7 +34,7 @@ pub struct PhyInfo {
 
 /// # Safety
 ///
-/// `G_GMAC.base` must be initialised by `super::init` (valid mapped GMAC
+/// `G_GMAC.base` must be initialised by `super::super::init` (valid mapped GMAC
 /// base); `phy`/`reg` are masked to 5 bits internally.
 unsafe fn mdio_read(phy: u8, reg: u8) -> KResult<u16> {
     // SAFETY: MMIO at G_GMAC.base + MII datasheet offsets; base was validated by gmac::init.
@@ -56,7 +56,7 @@ unsafe fn mdio_read(phy: u8, reg: u8) -> KResult<u16> {
 
 /// # Safety
 ///
-/// `G_GMAC.base` must be initialised by `super::init` (valid mapped GMAC
+/// `G_GMAC.base` must be initialised by `super::super::init` (valid mapped GMAC
 /// base); `phy`/`reg` are masked to 5 bits internally.
 unsafe fn mdio_write(phy: u8, reg: u8, data: u16) -> KResult<()> {
     // SAFETY: MMIO at G_GMAC.base + MII datasheet offsets; base was validated by gmac::init.

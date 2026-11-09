@@ -11,3 +11,6 @@ pub mod sha256crypt;
 
 pub use kdf::*;
 pub use sha256::*;
+
+#[cfg(test)]
+mod tests;

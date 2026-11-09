@@ -2,7 +2,7 @@
 //! cases). Kept in a sibling file so the implementation stays within the
 //! project's 250-line file limit.
 
-use super::*;
+use super::super::sha256::*;
 
 /// Decode 64 lowercase hex chars into a digest (no_std-friendly: avoids
 /// `format!`/`String` in tests).

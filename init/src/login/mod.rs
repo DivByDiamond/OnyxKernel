@@ -5,12 +5,14 @@
 mod auth;
 use onyx_init::{syscalls, term};
 
-mod backoff;
 mod password;
-mod proc;
 mod seed;
+mod session;
 
-use proc::{drain_stdin, exec_shell};
+use session::{
+    backoff,
+    proc::{drain_stdin, exec_shell},
+};
 
 #[unsafe(no_mangle)]
 /// # Safety

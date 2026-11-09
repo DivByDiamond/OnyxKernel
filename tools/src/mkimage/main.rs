@@ -1,7 +1,7 @@
-mod dirent;
-mod inode;
-mod superblock;
+mod disk;
 mod tree;
+
+use disk::{dirent, inode, superblock};
 
 use std::env;
 use std::fs::File;

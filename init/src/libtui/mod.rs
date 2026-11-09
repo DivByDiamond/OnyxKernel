@@ -5,10 +5,12 @@
 //! and a simple vertical layout (layout).
 
 pub mod event;
-pub mod font;
-pub mod layout;
+pub mod render;
 pub mod widget;
 
 pub use event::Event;
-pub use layout::Layout;
+pub use render::layout::Layout;
 pub use widget::{Button, Label, TextBox, Widget};
+
+// Preserve the pre-`render/` public path (`libtui::font`).
+pub use render::font;

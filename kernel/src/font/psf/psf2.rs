@@ -23,7 +23,7 @@ fn read_u32(data: &[u8], off: usize) -> KResult<u32> {
 /// lifetime since G_FONT stores pointers into it. hdr_size/num_glyphs/
 /// charsize are sanity-capped and the glyph area is length- and
 /// overflow-checked before any as_ptr().add().
-pub(super) unsafe fn init_psf2(data: &[u8]) -> KResult<()> {
+pub(in crate::font) unsafe fn init_psf2(data: &[u8]) -> KResult<()> {
     unsafe {
         if data.len() < 32 {
             return Err(Errno::Io);

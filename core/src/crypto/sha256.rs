@@ -170,6 +170,3 @@ pub fn sha256(data: &[u8]) -> [u8; 32] {
     sha256_final(state)
 }
 
-#[cfg(test)]
-#[path = "sha256_tests.rs"]
-mod tests;

@@ -2,7 +2,7 @@
 //! classification, malformed-input rejection and the empty-password edge
 //! case. Sibling file keeps kdf.rs within the 250-line file limit.
 
-use super::*;
+use super::super::*;
 
 #[test]
 fn hex_roundtrip() {

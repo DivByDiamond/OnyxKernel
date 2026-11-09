@@ -4,7 +4,9 @@
 //! Supports basic Lua features: tables, functions, closures.
 
 pub mod lib;
-pub mod repl;
-pub mod syscall;
+pub mod runtime;
 pub mod value;
 pub mod vm;
+
+// Preserve the pre-`runtime/` public path (`luavm::repl`).
+pub use runtime::repl;

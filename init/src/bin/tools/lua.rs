@@ -6,6 +6,7 @@
 extern crate alloc;
 
 mod kalloc_lua;
+#[path = "../../luavm/mod.rs"]
 mod luavm;
 use onyx_init::syscalls;
 

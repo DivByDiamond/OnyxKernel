@@ -1,7 +1,7 @@
 mod glyph;
-mod psf1;
-mod psf2;
-mod shared;
+mod psf;
+
+use psf::{psf1, psf2, shared};
 
 pub use glyph::{
     GlyphData, glyph_bitmap, glyph_bitmap_unicode, glyph_for_cp, glyph_for_unicode,

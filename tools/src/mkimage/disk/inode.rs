@@ -4,7 +4,7 @@ use onyx_core::formats::{
 
 const V1_INODE_SIZE: usize = 64;
 
-use super::tree::{DirNode, Entry};
+use crate::tree::{DirNode, Entry};
 
 fn write_v1(img: &mut [u8], inode_off: usize, mode: u32, size: u32, blocks: &[u32]) {
     img[inode_off..inode_off + 4].copy_from_slice(&mode.to_le_bytes());

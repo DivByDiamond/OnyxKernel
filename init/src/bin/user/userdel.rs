@@ -3,6 +3,7 @@
 
 use core::arch::asm;
 
+#[path = "../../auth/mod.rs"]
 mod auth;
 use onyx_init::syscalls;
 

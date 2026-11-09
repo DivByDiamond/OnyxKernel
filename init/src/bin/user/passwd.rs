@@ -3,7 +3,9 @@
 
 use core::arch::asm;
 
+#[path = "../../auth/mod.rs"]
 mod auth;
+#[path = "../../passwd_flow/mod.rs"]
 mod passwd_flow;
 use onyx_init::syscalls;
 

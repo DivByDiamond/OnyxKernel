@@ -21,49 +21,48 @@ path = "src/login/mod.rs"
 
 [[bin]]
 name = "onyx-passwd"
-path = "src/passwd.rs"
+path = "src/bin/user/passwd.rs"
 
 [[bin]]
 name = "onyx-useradd"
-path = "src/useradd.rs"
+path = "src/bin/user/useradd.rs"
 
 [[bin]]
 name = "onyx-userdel"
-path = "src/userdel.rs"
+path = "src/bin/user/userdel.rs"
 
 [[bin]]
 name = "onyx-hello"
-path = "src/hello.rs"
+path = "src/bin/tools/hello.rs"
 
 [[bin]]
 name = "onyx-argv-test"
-path = "src/argv_test.rs"
+path = "src/bin/smoke/argv_test.rs"
 
 [[bin]]
 name = "onyx-fb-draw"
-path = "src/fb_draw.rs"
+path = "src/bin/system/fb_draw.rs"
 
 [[bin]]
 name = "onyx-lsblk"
-path = "src/lsblk.rs"
+path = "src/bin/system/lsblk.rs"
 
 [[bin]]
 name = "onyx-groups"
-path = "src/groups.rs"
+path = "src/bin/system/groups.rs"
 
 [[bin]]
 name = "onyx-su"
-path = "src/su.rs"
+path = "src/bin/user/su.rs"
 
 [[bin]]
 name = "onyx-lua"
-path = "src/lua.rs"
+path = "src/bin/tools/lua.rs"
 
 [[bin]]
 name = "onyx-tui-demo"
-path = "src/tui_demo.rs"
+path = "src/bin/system/tui_demo.rs"
 
 [[bin]]
 name = "onyx-sleep-test"
-path = "src/sleep_test.rs"
-
+path = "src/bin/smoke/sleep_test.rs"

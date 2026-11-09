@@ -1,5 +1,5 @@
 use super::regs;
-use super::{G_GMAC, RX_RING_SIZE, TX_RING_SIZE};
+use super::super::{G_GMAC, RX_RING_SIZE, TX_RING_SIZE};
 use crate::mm::pmm;
 use core::ptr;
 use onyx_core::errno::KResult;
@@ -66,7 +66,7 @@ pub unsafe fn init_rx_rings() -> KResult<usize> {
                 regs::RDES1_OWN
                     | ter
                     | regs::RDES1_RCH
-                    | (super::GMAC_BUF_SIZE as u32 & regs::RDES1_BS1_MASK),
+                    | (super::super::GMAC_BUF_SIZE as u32 & regs::RDES1_BS1_MASK),
             );
         }
         regs::reg_w(G_GMAC.base, regs::DMA_RX_BASE_ADDR, desc_pa as u32);

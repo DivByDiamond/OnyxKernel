@@ -4,6 +4,7 @@
 
 use core::arch::asm;
 
+#[path = "bin/smoke/boottest.rs"]
 mod boottest;
 mod pid1;
 use onyx_init::syscalls;

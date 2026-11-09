@@ -1,6 +1,6 @@
-pub mod dma;
-pub mod phy;
-pub mod regs;
+pub mod hw;
+
+pub use hw::{dma, phy, regs};
 
 use crate::arch::mmio::Mmio;
 use core::ptr;

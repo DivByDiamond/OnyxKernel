@@ -1,9 +1,9 @@
 //! Lua REPL (Read-Eval-Print Loop) - MVP version
 
-use super::lib;
+use super::super::lib;
 use super::syscall;
-use super::value::{Function, Instruction, Value};
-use super::vm::VM;
+use super::super::value::{Function, Instruction, Value};
+use super::super::vm::VM;
 use alloc::string::String;
 use alloc::vec::Vec;
 
