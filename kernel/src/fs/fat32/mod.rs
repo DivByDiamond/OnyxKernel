@@ -1,6 +1,18 @@
 //! FAT32 read-only driver.
 use crate::drivers::virtio_req;
+use crate::sync::SpinLock;
 use onyx_core::errno::KResult;
+
+/// Per-filesystem lock for FAT32: serializes the unsynchronized module
+/// globals (`G_*`) and volume I/O across harts, turning the module's
+/// "single-hart FAT32 I/O" contract into an enforced invariant instead of
+/// a caller promise.
+///
+/// Lock order (see `docs/CONCURRENCY.md`): `FS_LOCK` → `FAT32_LOCK` →
+/// `G_QLOCK`/heap leaves. `vfs::with_mount` takes it inside `FS_LOCK` for
+/// every Fat32 mount operation; boot-time `mount`/`mount_secondary` run
+/// single-hart before secondary harts start (see `context.rs`).
+pub(crate) static FAT32_LOCK: SpinLock = SpinLock::new();
 
 const ATTR_DIRECTORY: u8 = 0x10;
 const ATTR_LFN: u8 = 0x0F;

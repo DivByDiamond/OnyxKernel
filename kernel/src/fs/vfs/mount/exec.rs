@@ -5,6 +5,9 @@
 //! activating its cached context around each filesystem operation while
 //! `FS_LOCK` is held, so the singleton switch and the I/O it protects are
 //! atomic with respect to every other filesystem operation in the kernel.
+//! FAT32 additionally takes its per-FS `fat32::FAT32_LOCK` inside
+//! `FS_LOCK` (order: `FS_LOCK` → `FAT32_LOCK` → `G_QLOCK`), enforcing the
+//! module's single-hart I/O contract at this funnel point.
 
 use crate::fs::fat32;
 use crate::fs::onyxfs;
@@ -37,7 +40,17 @@ pub(crate) unsafe fn with_mount<T>(slot: usize, f: impl FnOnce() -> T) -> T {
     unsafe {
         crate::fs::FS_LOCK.lock();
         let result = if slot >= MAX_MOUNTS {
-            f()
+            // The root volume may itself be FAT32: its singleton context is
+            // already active, but the per-FS single-hart contract applies
+            // just the same (MNT_ROOT never carries a mount-entry ctx).
+            if super::root_fs() == Fs::Fat32 {
+                fat32::FAT32_LOCK.lock();
+                let r = f();
+                fat32::FAT32_LOCK.unlock();
+                r
+            } else {
+                f()
+            }
         } else {
             let pm = &raw mut G_MOUNTS;
             match (*pm)[slot].ctx {
@@ -50,10 +63,16 @@ pub(crate) unsafe fn with_mount<T>(slot: usize, f: impl FnOnce() -> T) -> T {
                     r
                 }
                 Some(MountFs::Fat32(ref ctx)) => {
+                    // Per-FS lock nested inside FS_LOCK (order: FS_LOCK →
+                    // FAT32_LOCK → G_QLOCK): FAT32's globals are unsynchro-
+                    // nized by design, so the module's single-hart I/O
+                    // contract is enforced here, at the one funnel point.
+                    fat32::FAT32_LOCK.lock();
                     let saved = fat32::save_ctx();
                     fat32::apply_ctx(ctx);
                     let r = f();
                     fat32::apply_ctx(&saved);
+                    fat32::FAT32_LOCK.unlock();
                     r
                 }
                 None => f(),

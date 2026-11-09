@@ -11,6 +11,8 @@
 | `G_PROC_LIST_LOCK` | `G_ALL_PROCS` (список всех Proc), публикация состояний, unlink/reap | `proc/process/globals.rs` | Внешний лок. try_lock-варианты в `dump_all`/`count()` — вызываются из panic-пути |
 | `NET_LOCK` (рекурсивный) | `UDP_SOCKS`, `NEXT_UDP_PORT`, `CONNS`, `NEXT_PORT`, ARP-кэш, `IP_ID`, доступ к TX/RX-кольцам virtio-net | `net/lock.rs` | Рекурсивный per-hart: владелец может входить повторно |
 | `G_QLOCK[dev]` | Очереди virtio (blk и др. через `virtio_req::request`) | `drivers/virtio/mod.rs` | Leaf-лок драйвера |
+| `FS_LOCK` | Таблица `G_MOUNTS` + переключение синглтонов `onyxfs`/`fat32` вокруг одной операции (`vfs::with_mount`) | `fs/mod.rs` | Берётся только в SIE=0 (trap/syscall/boot); не рекурсивен |
+| `FAT32_LOCK` | Синглтон-глобалы `fat32::G_*` и I/O объёма — принудительный контракт «single-hart» модуля | `fs/fat32/mod.rs` | Всегда вкладывается **внутрь** `FS_LOCK` (см. порядок ниже) |
 | `UART_RX` (`uart_rx::LOCK`) | Software-кольцо входных байт консоли (4 KiB) | `drivers/uart_rx.rs` | Leaf. Писатель — PLIC-обработчик на hart 0, читатели — любой харт; с `UART_LOCK` не вкладывается |
 | Локи pmm / heap / vmm | Физические страницы, куча, таблицы страниц | `mm/` | Leaf-локи, берутся внутри NET_LOCK (аллокации в TX-пути) |
 | rq-локи (`rq_lock(hart)`) | Per-hart runqueue | `proc/scheduler/runqueue.rs` | Вложенный внутрь `PROC_LIST_LOCK` (порядок см. ниже) |
@@ -30,6 +32,7 @@
 ```text
 PROC_LIST_LOCK  →  rq_lock(hart)      (exit.rs, spawn::publish_ready)
 NET_LOCK        →  (heap/pmm)         (внутри virtio_net::send)
+FS_LOCK         →  FAT32_LOCK  →  G_QLOCK / heap   (FAT32-операции в with_mount)
 ```
 
 Хорошо:
