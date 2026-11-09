@@ -1,6 +1,6 @@
 use crate::drivers::{
-    entropy, gpio, hwrand, i2c, led, rtc, sdhci, spi, usb, virtio, virtio_console, virtio_input,
-    virtio_net, virtio_rng, watchdog,
+    entropy, gpio, hwrand, i2c, led, pcie, rtc, sdhci, spi, usb, virtio, virtio_console,
+    virtio_input, virtio_net, virtio_rng, watchdog,
 };
 use crate::libfdt::{fdt, periph};
 use crate::module::{self, ModuleType};
@@ -131,10 +131,20 @@ pub(crate) unsafe fn probe_peripherals() {
                 crate::kwrn!("rtc", "probe failed at %p", Arg::from(rtc_info.base));
             }
         }
-        // USB EHCI/OHCI are hardcoded SG2000 (Milk-V Duos) addresses. On
-        // QEMU virt and OC2R/sedna they are not mapped, and probing them would
-        // raise a load access fault on unmapped MMIO.
-        if !crate::libfdt::fdt::is_sedna() && !crate::libfdt::fdt::is_qemu() {
+        // USB: QEMU exposes xHCI over PCIe (`-device qemu-xhci`) — there is
+        // no generic-xhci platform node; OC2R/sedna's ECAM is garbage.
+        if crate::libfdt::fdt::is_qemu() {
+            match pcie::find_xhci() {
+                Some(base) => match usb::xhci::init(base as usize) {
+                    Ok(()) => crate::kinf!("usb", "xhci bar0=%p", Arg::from(base)),
+                    Err(_) => {
+                        crate::kwrn!("usb", "xhci init failed at bar0=%p", Arg::from(base))
+                    }
+                },
+                None => crate::kwrn!("usb", "no xhci PCI function found"),
+            }
+        } else if !crate::libfdt::fdt::is_sedna() {
+            // SG2000 (Milk-V Duos) EHCI/OHCI bases; unmapped elsewhere.
             if usb::init_usb().is_ok() {
                 crate::kinf!("usb", "host controller initialized");
             } else {

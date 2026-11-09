@@ -1,6 +1,7 @@
 use crate::mm::pmm;
 use core::ptr;
 use onyx_core::errno::{Errno, KResult};
+use onyx_core::fmt::Arg;
 
 use super::G_XHCI;
 use super::XhciCtx;
@@ -25,7 +26,7 @@ pub unsafe fn init(base: usize) -> KResult<()> {
         let sparams1 = regs::read_hcsparams1(base);
         let max_slots = (sparams1 & 0xFF) as u8;
         let max_intrs = ((sparams1 >> 8) & 0xFF) as u8;
-        let max_ports = ((sparams1 >> 16) & 0xFF) as u8;
+        let max_ports = ((sparams1 >> 24) & 0xFF) as u8;
         let hccparams1 = regs::read_hccparams1(base);
         let dboff = regs::read_dboff(base) as usize;
         let rtsoff = regs::read_rtsoff(base) as usize;
@@ -142,6 +143,14 @@ pub unsafe fn init(base: usize) -> KResult<()> {
             return Err(Errno::Io);
         }
         G_XHCI.operational = true;
+        crate::kinf!(
+            "xhci",
+            "initialized base=%p hci=%x max_slots=%d max_ports=%d",
+            Arg::from(base),
+            Arg::from(hci_ver as u32),
+            Arg::from(max_slots as u32),
+            Arg::from(max_ports as u32)
+        );
         // Same publication step as init_ehci/init_ohci: the usb:: dispatch
         // (control_transfer, port_*) routes to whichever controller won.
         crate::drivers::usb::G_ACTIVE = crate::drivers::usb::ControllerType::Xhci;

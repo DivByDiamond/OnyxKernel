@@ -38,7 +38,7 @@ QEMU slirp (`N2`: рендер → переход по ссылке → back) и
 ### ФС
 - Динамическая загрузка модулей (сейчас `/proc/modules` показывает только встроенные).
 - [x] FAT32: per-FS лок, write-пути сериализованы (`b1270dc`, 2026-11-09).
-- [~] xHCI: URB transfer — control/bulk, диспетчеризация и `XhciHcd` готовы (`9d83db4`, `f99101e`); в работе PCI-обнаружение контроллера и QEMU-проверка.
+- [x] xHCI: URB transfer, диспетчеризация и PCI-обнаружение (`9d83db4`, `f99101e`, `7790fdf`, 2026-11-09). В QEMU с `-device qemu-xhci` контроллер инициализируется: base 0x4000_0000, 64 слота, 8 портов. Smoke: `OnyxOS/scripts/qemu-xhci-smoke.sh` (`8c5ad8f`).
 
 ### Платформа / время
 - [x] RTC → `gettimeofday`: epoch-база из RTC, fallback на uptime (`1d94693`, 2026-11-09).

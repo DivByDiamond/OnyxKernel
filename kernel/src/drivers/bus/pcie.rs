@@ -6,6 +6,10 @@
 use crate::arch::mmio::Mmio;
 use onyx_core::errno::{Errno, KResult};
 
+mod xhci;
+
+pub use xhci::find_xhci;
+
 pub const ECAM_BASE: usize = 0x3000_0000;
 pub const MAX_BUSES: u8 = 16;
 pub const MAX_DEVS: u8 = 32;
@@ -19,7 +23,10 @@ pub struct PciDev {
     pub func: u8,
     pub vendor: u16,
     pub device: u16,
+    /// `(class << 8) | subclass`, i.e. PCI config 0x08 bits 31:16.
     pub class: u16,
+    /// Programming interface, PCI config 0x08 bits 15:8.
+    pub prog_if: u8,
     pub bar0: u64,
 }
 
@@ -30,6 +37,7 @@ static mut G_DEVS: [PciDev; MAX_RESULTS] = [PciDev {
     vendor: 0,
     device: 0,
     class: 0,
+    prog_if: 0,
     bar0: 0,
 }; MAX_RESULTS];
 static mut G_N: usize = 0;
@@ -115,7 +123,7 @@ pub unsafe fn scan() -> usize {
                             continue;
                         }
                     }
-                    let class_raw = cfg_rd(bus, dev, func, 0x08) >> 16;
+                    let class_rev = cfg_rd(bus, dev, func, 0x08);
                     let bar0 = read_bar(bus, dev, func, 0);
                     if G_N < MAX_RESULTS {
                         G_DEVS[G_N] = PciDev {
@@ -124,7 +132,8 @@ pub unsafe fn scan() -> usize {
                             func,
                             vendor,
                             device: (v >> 16) as u16,
-                            class: class_raw as u16,
+                            class: (class_rev >> 16) as u16,
+                            prog_if: ((class_rev >> 8) & 0xFF) as u8,
                             bar0,
                         };
                         G_N += 1;

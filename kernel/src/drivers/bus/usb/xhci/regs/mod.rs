@@ -79,14 +79,6 @@ unsafe fn cap_r8(base: usize, off: u32) -> u8 {
 /// # Safety
 ///
 /// `base` must lie within the xHCI capability register file of a controller base validated at driver init; `off` must be a valid register offset.
-unsafe fn cap_r16(base: usize, off: u32) -> u16 {
-    // SAFETY: caller-validated MMIO base; offset within cap register file.
-    unsafe { Mmio::<u16>::at(base + off as usize).read() }
-}
-
-/// # Safety
-///
-/// `base` must lie within the xHCI capability register file of a controller base validated at driver init; `off` must be a valid register offset.
 unsafe fn cap_r32(base: usize, off: u32) -> u32 {
     // SAFETY: caller-validated MMIO base; offset within cap register file.
     unsafe { Mmio::<u32>::at(base + off as usize).read() }
@@ -106,8 +98,11 @@ pub unsafe fn read_caplength(base: usize) -> u8 {
 /// `base` must be the MMIO base of an xHCI controller validated at driver init and identity-mapped at boot; the offset is a fixed register-file offset per the constants in this file.
 pub unsafe fn read_hciversion(base: usize) -> u16 {
     // SAFETY: same contract as cap_r*: caller-validated base, fixed
-    // register-file offset.
-    unsafe { cap_r16(base, HCIVERSION) }
+    // register-file offset. CAPLENGTH and HCIVERSION share the first dword;
+    // QEMU implements only 4-byte accesses to the capability block (a 2-byte
+    // read at 0x02 lands in its "unimplemented" path and returns 0), so read
+    // the dword and take the upper half.
+    unsafe { (cap_r32(base, CAPLENGTH) >> 16) as u16 }
 }
 
 /// # Safety
