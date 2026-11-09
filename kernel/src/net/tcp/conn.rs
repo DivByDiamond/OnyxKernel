@@ -145,13 +145,9 @@ pub(crate) fn tcp_checksum_ok(src_ip: &[u8; 4], dst_ip: &[u8; 4], segment: &[u8]
 /// stack (see `TcpTx` for the overflow this fixes).
 pub(super) fn send_tcp_seg_tx(c: TcpTx, flags: u8, data: &[u8]) {
     // SYN/SYN-ACK segments carry our MSS option (kind=2, len=4) so the peer
-    // can stop assuming the RFC 1122 fallback of 536 bytes.
-    let opt_len = if flags & super::state::SYN != 0 {
-        super::mss::MSS_OPT_LEN
-    } else {
-        0
-    };
-    let hdr_len = TCP_HLEN + opt_len;
+    // can stop assuming the RFC 1122 fallback of 536 bytes; tcp_hdr_len()
+    // is 24 bytes for those and the bare 20-byte header for everything else.
+    let hdr_len = super::mss::tcp_hdr_len(flags);
     let tcp_len = hdr_len + data.len();
     let mut seg = alloc::vec![0u8; tcp_len];
     seg[0..2].copy_from_slice(&c.src_port.to_be_bytes());
@@ -167,7 +163,7 @@ pub(super) fn send_tcp_seg_tx(c: TcpTx, flags: u8, data: &[u8]) {
     seg[14..16].copy_from_slice(&window.to_be_bytes());
     seg[16..18].copy_from_slice(&[0, 0]);
     seg[18..20].copy_from_slice(&[0, 0]);
-    if opt_len > 0 {
+    if hdr_len > TCP_HLEN {
         seg[TCP_HLEN..hdr_len].copy_from_slice(&super::mss::mss_option(super::mss::TCP_MSS as u16));
     }
     if !data.is_empty() {
