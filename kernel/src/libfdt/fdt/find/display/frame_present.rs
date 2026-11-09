@@ -1,6 +1,6 @@
 //! Optional OC2R frame-publication companion. Pixel framebuffer ABI is unchanged.
-use super::reader::{cstr_at, rd64};
-use super::walk;
+use crate::libfdt::fdt::reader::{cstr_at, rd64};
+use crate::libfdt::fdt::walk;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct FramePresent {

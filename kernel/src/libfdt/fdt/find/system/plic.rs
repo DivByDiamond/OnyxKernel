@@ -1,5 +1,5 @@
-use super::reader::{cstr_at, reg_base};
-use super::walk::walk;
+use crate::libfdt::fdt::reader::{cstr_at, reg_base};
+use crate::libfdt::fdt::walk::walk;
 
 /// # Safety
 ///

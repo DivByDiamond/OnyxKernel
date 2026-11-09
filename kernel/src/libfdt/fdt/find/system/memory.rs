@@ -1,6 +1,6 @@
-use super::FdtMemory;
-use super::reader::{cstr_at, rd64, rd64_hi};
-use super::walk::walk;
+use crate::libfdt::fdt::FdtMemory;
+use crate::libfdt::fdt::reader::{cstr_at, rd64, rd64_hi};
+use crate::libfdt::fdt::walk::walk;
 
 /// # Safety
 ///

@@ -1,5 +1,5 @@
-use super::reader::cstr_at;
-use super::walk::walk;
+use crate::libfdt::fdt::reader::cstr_at;
+use crate::libfdt::fdt::walk::walk;
 
 static mut G_MODEL: [u8; 64] = [0; 64];
 
@@ -82,7 +82,7 @@ unsafe fn scan_blob(needle: &[u8]) -> bool {
         // SAFETY: G_DTB was set by init() (magic-validated, in mapped RAM);
         // the scan is bounded by the header's totalsize so it cannot run
         // past the blob.
-        let dtb = super::G_DTB;
+        let dtb = crate::libfdt::fdt::G_DTB;
         if dtb == 0 || needle.is_empty() {
             return false;
         }
@@ -117,7 +117,7 @@ unsafe fn scan_blob(needle: &[u8]) -> bool {
 /// inside the 40-byte header.
 unsafe fn rd32(base: usize, offset: usize) -> u32 {
     // SAFETY: header read per the caller contract (init validated the blob).
-    unsafe { super::reader::rd32((base + offset) as *const u8) }
+    unsafe { crate::libfdt::fdt::reader::rd32((base + offset) as *const u8) }
 }
 
 /// Detect the OC2R/sedna platform. The device tree carries the root

@@ -4,6 +4,9 @@ use onyx_core::errno::KResult;
 
 use super::ring;
 
+mod ctx;
+use ctx::{EpCtx, InputCtx, SlotCtx};
+
 pub const EP_TYPE_INVALID: u8 = 0;
 pub const EP_TYPE_ISO_OUT: u8 = 1;
 pub const EP_TYPE_BULK_OUT: u8 = 2;
@@ -19,29 +22,6 @@ pub const SPEED_HS: u8 = 3;
 pub const SPEED_SS: u8 = 4;
 
 const CTX_SIZE: usize = 32;
-
-#[repr(C)]
-struct SlotCtx {
-    dw0: u32,
-    dw1: u32,
-    dw2: u32,
-    dw3: u32,
-}
-
-#[repr(C)]
-struct EpCtx {
-    dw0: u32,
-    dw1: u32,
-    dw2: u32,
-    dw3: u32,
-}
-
-#[repr(C)]
-struct InputCtx {
-    drop_flags: u32,
-    add_flags: u32,
-    rsvd: [u32; 6],
-}
 
 pub struct UsbDevCtx {
     pub slot_id: u8,

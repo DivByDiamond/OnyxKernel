@@ -6,8 +6,8 @@
 //! fallback) is invisible to the host, so this node is the only usable display
 //! on sedna.
 
-use super::reader::{cstr_at, rd32, reg_base};
-use super::walk;
+use crate::libfdt::fdt::reader::{cstr_at, rd32, reg_base};
+use crate::libfdt::fdt::walk;
 
 #[derive(Clone, Copy, Default)]
 pub struct SimpleFramebuffer {

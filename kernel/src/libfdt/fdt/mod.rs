@@ -1,15 +1,6 @@
-mod clint;
-mod frame_present;
-mod framebuffer;
-mod init;
-mod memory;
-mod model;
-mod plic;
+mod find;
 mod reader;
-mod sdhci;
 mod types;
-mod uart;
-mod virtio;
 mod walk;
 
 pub(crate) use types::{
@@ -17,18 +8,13 @@ pub(crate) use types::{
     G_STRINGS_SIZE, G_STRUCT, G_STRUCT_SIZE, G_TOTALSIZE,
 };
 
-pub use clint::find_clint;
-pub use frame_present::{FramePresent, find_frame_present};
-pub use framebuffer::{SimpleFramebuffer, find_simple_framebuffer, find_simple_framebuffers};
-pub use init::init;
+pub use find::{
+    FramePresent, SimpleFramebuffer, find_clint, find_frame_present, find_plic, find_sdhci,
+    find_simple_framebuffer, find_simple_framebuffers, find_uart, find_virtio, init, is_qemu,
+    is_sedna, memory, model,
+};
 #[cfg(test)]
-pub(crate) use init::init_from;
-pub use memory::memory;
-pub use model::{is_qemu, is_sedna, model};
-pub use plic::find_plic;
+pub(crate) use find::init_from;
 pub use reader::prop_name;
-pub use sdhci::find_sdhci;
 pub use types::{FdtMemory, FdtMmio};
-pub use uart::find_uart;
-pub use virtio::find_virtio;
 pub use walk::walk;

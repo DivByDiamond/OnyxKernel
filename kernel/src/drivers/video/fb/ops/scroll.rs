@@ -1,4 +1,4 @@
-use super::G_FB;
+use super::super::G_FB;
 use crate::font;
 
 const WORD: usize = core::mem::size_of::<usize>();
@@ -45,7 +45,7 @@ pub(super) unsafe fn vcopy(dst: *mut u8, src: *const u8, len: usize) {
 ///
 /// # Safety
 /// `[dst, dst+len)` must be mapped framebuffer memory.
-pub(super) unsafe fn vzero(dst: *mut u8, len: usize) {
+pub(in crate::drivers::video::fb) unsafe fn vzero(dst: *mut u8, len: usize) {
     // SAFETY: caller guarantees the region is valid mapped framebuffer
     // memory; every store below is volatile.
     unsafe {

@@ -52,8 +52,8 @@ pub unsafe fn init_from_fdt() {
     let mut nodes = [crate::libfdt::fdt::FramePresent::default(); MAX_FRAMEBUFFERS];
     let count = unsafe { crate::libfdt::fdt::find_frame_present(&mut nodes) };
     for node in &nodes[..count] {
-        for (index, slot) in CONTROLS.iter().enumerate().take(super::count()) {
-            if super::display(index).is_some_and(|fb| fb.base == node.framebuffer) {
+        for (index, slot) in CONTROLS.iter().enumerate().take(super::super::count()) {
+            if super::super::display(index).is_some_and(|fb| fb.base == node.framebuffer) {
                 if let Some(c) = unsafe { Controller::probe(node.base) } {
                     // Recover abandoned transactions after a guest warm reboot.
                     c.command(ABORT);
@@ -72,9 +72,9 @@ pub unsafe fn init_from_fdt() {
 }
 
 fn console_controller() -> Option<Controller> {
-    let base = super::fb_base_pa();
+    let base = super::super::fb_base_pa();
     CONTROLS.iter().enumerate().find_map(|(index, slot)| {
-        if super::display(index).is_some_and(|fb| fb.base == base) {
+        if super::super::display(index).is_some_and(|fb| fb.base == base) {
             let control = slot.load(Ordering::Acquire);
             if control != 0 {
                 return Some(Controller(control));
@@ -86,7 +86,7 @@ fn console_controller() -> Option<Controller> {
 
 /// Cancel a console transaction before replacing its framebuffer geometry.
 /// Called under the framebuffer init single-threaded contract.
-pub(super) fn reset_console() {
+pub(in crate::drivers::video::fb) fn reset_console() {
     if let Some(c) = console_controller() {
         c.command(ABORT);
         c.command(DISABLE);

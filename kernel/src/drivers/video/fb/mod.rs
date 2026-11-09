@@ -1,8 +1,19 @@
 use onyx_core::errno::KResult;
 
-pub mod devices;
-pub mod present_control;
-pub use devices::{Framebuffer, count, get as display};
+pub mod draw;
+mod ops;
+mod pixel;
+mod present;
+
+pub use draw::*;
+pub use ops::resize;
+pub use ops::scroll;
+pub use ops::scroll::*;
+pub use present::devices::{Framebuffer, count, get as display};
+pub use present::{devices, present_control};
+
+use pixel::put_pixel;
+pub(crate) use pixel::{put_pixel_front, rgb32_to_r5g6b5};
 
 pub const FB_WIDTH: usize = 1280;
 pub const FB_HEIGHT: usize = 720;
@@ -178,47 +189,8 @@ pub fn clear() {
     }
 }
 
-/// Raw pixel write to an explicit surface base (front or back; both share
-/// the validated G_FB geometry and pixel format).
-///
-/// # Safety contract (enforced by callers)
-/// `base` must be the front framebuffer base or the published back-buffer
-/// base, both of `pitch * height` bytes with the installed bpp.
-fn put_pixel_at_base(base: *mut u8, x: usize, y: usize, color: u32) {
-    // SAFETY: x/y are bounds-checked against width/height and off is derived from the validated pitch/bpp, so each volatile store stays inside the surface set up at init.
-    unsafe {
-        if !G_FB.enabled || x >= G_FB.width || y >= G_FB.height {
-            return;
-        }
-        let off = y * G_FB.pitch + x * (G_FB.bpp / 8);
-        if G_FB.bpp <= 16 {
-            // RGB565 (r5g6b5), little-endian — the OC2R monitor format.
-            let px = pixel::rgb32_to_r5g6b5(color);
-            core::ptr::write_volatile(base.add(off) as *mut u16, px.to_le());
-        } else if G_FB.bpp >= 32 {
-            // X8R8G8B8, little-endian: blue in the low byte, matching the
-            // byte-wise order this replaces.
-            let px = color & 0xFF_FFFF;
-            core::ptr::write_volatile(base.add(off) as *mut u32, px.to_le());
-        } else {
-            *base.add(off) = (color & 0xFF) as u8;
-            *base.add(off + 1) = ((color >> 8) & 0xFF) as u8;
-            *base.add(off + 2) = ((color >> 16) & 0xFF) as u8;
-        }
-    }
-}
-
-pub mod draw;
-mod pixel;
-pub mod resize;
-pub mod scroll;
-pub use draw::*;
-use pixel::put_pixel;
-pub(crate) use pixel::{put_pixel_front, rgb32_to_r5g6b5};
-pub use scroll::*;
-
 // Console double buffering (back-buffer paint surface, debounced present,
-// init_back_buffer/double_buffered/paint_base/present) lives in draw.rs;
+// init_back_buffer/double_buffered/paint_base/present) lives in draw/;
 // the lazy get_back_buffer/swap_buffers stubs were replaced by it.
 
 /// Test-only hook: install a host-provided surface as the front buffer so

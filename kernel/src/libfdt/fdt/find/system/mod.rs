@@ -1,5 +1,18 @@
-use super::reader::rd32;
-use super::{FDT_MAGIC, G_DTB, G_STRINGS, G_STRINGS_SIZE, G_STRUCT, G_STRUCT_SIZE, G_TOTALSIZE};
+//! FDT header validation/scan plus the system-node finders (CLINT, PLIC,
+//! memory).
+
+mod clint;
+mod memory;
+mod plic;
+
+pub use clint::find_clint;
+pub use memory::memory;
+pub use plic::find_plic;
+
+use crate::libfdt::fdt::reader::rd32;
+use crate::libfdt::fdt::{
+    FDT_MAGIC, G_DTB, G_STRINGS, G_STRINGS_SIZE, G_STRUCT, G_STRUCT_SIZE, G_TOTALSIZE,
+};
 
 /// Upper sanity bound for totalsize. Real DTBs are a few hundred KiB at
 /// most; anything larger means a corrupt header, and trusting it would let

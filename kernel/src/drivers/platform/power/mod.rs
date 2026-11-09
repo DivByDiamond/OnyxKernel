@@ -7,6 +7,10 @@
 //!
 //! Full DVFS / domain power-down is delegated to `cpufreq` and to the
 //! board's PMIC (not yet modelled here).
+
+pub mod cpufreq;
+pub mod watchdog;
+
 use crate::arch::csr;
 
 static mut G_DEEP_SLEEP: bool = false;
