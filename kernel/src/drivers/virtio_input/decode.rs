@@ -22,7 +22,8 @@ const BTN_SIDE: u16 = 0x113;
 pub enum EventType {
     Key(KeyCode, bool),
     MouseRel(i32, i32),
-    MouseAbs(i32, i32),
+    MouseAbsX(i32),
+    MouseAbsY(i32),
     MouseButton(MouseButton, bool),
     Syn,
 }
@@ -79,11 +80,11 @@ pub(super) fn translate(ev: VirtioInputEvent) -> EventType {
             let dy = if ev.code == REL_Y { ev.value as i32 } else { 0 };
             EventType::MouseRel(dx, dy)
         }
-        EV_ABS => {
-            let x = if ev.code == REL_X { ev.value as i32 } else { 0 };
-            let y = if ev.code == REL_Y { ev.value as i32 } else { 0 };
-            EventType::MouseAbs(x, y)
-        }
+        EV_ABS => match ev.code {
+            REL_X => EventType::MouseAbsX(ev.value as i32),
+            REL_Y => EventType::MouseAbsY(ev.value as i32),
+            _ => EventType::Syn,
+        },
         _ => EventType::Syn,
     }
 }
@@ -152,7 +153,8 @@ pub fn event_type(ev: EventType) -> Option<Event> {
     match ev {
         EventType::Key(kc, down) => Some(Event::Key { code: kc, down }),
         EventType::MouseRel(dx, dy) => Some(Event::MouseRel { dx, dy }),
-        EventType::MouseAbs(x, y) => Some(Event::MouseAbs { x, y }),
+        EventType::MouseAbsX(x) => Some(Event::MouseAbsX(x)),
+        EventType::MouseAbsY(y) => Some(Event::MouseAbsY(y)),
         EventType::MouseButton(btn, down) => Some(Event::MouseButton { btn, down }),
         EventType::Syn => None,
     }

@@ -202,3 +202,32 @@ fn a_full_staged_key_burst_has_buffers_for_every_event() {
     assert_eq!(presses, codes.len());
     assert_eq!(device.avail.idx as usize, index);
 }
+
+#[test]
+fn absolute_pointer_decoder_ignores_unknown_axes_without_zeroing_coordinates() {
+    use super::decode::{EV_ABS, EventType, translate};
+    match translate(super::VirtioInputEvent {
+        type_: EV_ABS,
+        code: 0,
+        value: 253,
+    }) {
+        EventType::MouseAbsX(253) => {}
+        _ => panic!("ABS_X must update only X"),
+    }
+    match translate(super::VirtioInputEvent {
+        type_: EV_ABS,
+        code: 1,
+        value: 159,
+    }) {
+        EventType::MouseAbsY(159) => {}
+        _ => panic!("ABS_Y must update only Y"),
+    }
+    assert!(matches!(
+        translate(super::VirtioInputEvent {
+            type_: EV_ABS,
+            code: 2,
+            value: 50
+        }),
+        EventType::Syn
+    ));
+}

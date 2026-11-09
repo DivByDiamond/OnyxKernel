@@ -65,27 +65,33 @@ pub fn handle(ev: Event) {
     // callers run with interrupts disabled, as required by sync.rs.
     unsafe {
         let m = &raw mut G_MOUSE;
-        match ev {
-            Event::MouseRel { dx, dy } => {
-                (*m).x = clamp((*m).x + dx, w);
-                (*m).y = clamp((*m).y + dy, h);
-            }
-            Event::MouseAbs { x, y } => {
-                (*m).x = clamp(x, w);
-                (*m).y = clamp(y, h);
-            }
-            Event::MouseButton { btn, down } => {
-                let bit = button_bit(btn);
-                if down {
-                    (*m).buttons |= bit;
-                } else {
-                    (*m).buttons &= !bit;
-                }
-            }
-            _ => {}
-        }
+        apply(&mut *m, ev, w, h);
     }
     MOUSE_LOCK.unlock();
+}
+
+fn apply(m: &mut MouseState, ev: Event, w: i32, h: i32) {
+    match ev {
+        Event::MouseRel { dx, dy } => {
+            m.x = clamp(m.x + dx, w);
+            m.y = clamp(m.y + dy, h);
+        }
+        Event::MouseAbs { x, y } => {
+            m.x = clamp(x, w);
+            m.y = clamp(y, h);
+        }
+        Event::MouseAbsX(x) => m.x = clamp(x, w),
+        Event::MouseAbsY(y) => m.y = clamp(y, h),
+        Event::MouseButton { btn, down } => {
+            let bit = button_bit(btn);
+            if down {
+                m.buttons |= bit;
+            } else {
+                m.buttons &= !bit;
+            }
+        }
+        _ => {}
+    }
 }
 
 /// Current pointer snapshot: (x, y, button bits) for SYS_mouse_read.
@@ -103,6 +109,22 @@ pub fn snapshot() -> (i16, i16, u8) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn absolute_axes_preserve_each_other_and_clamp_to_tablet() {
+        let mut m = MouseState {
+            x: 0,
+            y: 0,
+            buttons: 0,
+        };
+        apply(&mut m, Event::MouseAbsX(120), 256, 160);
+        apply(&mut m, Event::MouseAbsY(99), 256, 160);
+        assert_eq!((m.x, m.y), (120, 99));
+        apply(&mut m, Event::MouseAbsX(255), 256, 160);
+        assert_eq!((m.x, m.y), (255, 99));
+        apply(&mut m, Event::MouseAbsY(999), 256, 160);
+        apply(&mut m, Event::MouseAbsX(-10), 256, 160);
+        assert_eq!((m.x, m.y), (0, 159));
+    }
     #[test]
     fn all_eight_buttons_have_distinct_userspace_bits() {
         use crate::drivers::input::MouseButton;

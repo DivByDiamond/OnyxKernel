@@ -70,6 +70,8 @@ pub enum Event {
     Key { code: KeyCode, down: bool },
     MouseRel { dx: i32, dy: i32 },
     MouseAbs { x: i32, y: i32 },
+    MouseAbsX(i32),
+    MouseAbsY(i32),
     MouseButton { btn: MouseButton, down: bool },
     Syn,
 }
