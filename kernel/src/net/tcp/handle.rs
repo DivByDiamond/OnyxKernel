@@ -4,7 +4,7 @@ use crate::net::G_IP;
 use crate::net::lock::{net_lock, net_unlock};
 
 use super::conn::{CONNS, TCP_HLEN, now_us, send_tcp_seg_tx, sweep_timewait, tcp_checksum_ok};
-use super::state::{ACK, FIN, SEG_ACK, SEG_FIN_ACK, tcp_transition};
+use super::conn::state::{ACK, FIN, SEG_ACK, SEG_FIN_ACK, tcp_transition};
 
 /// Total inbound segments dropped for a bad checksum (logged once).
 static BAD_CKSUM: AtomicU32 = AtomicU32::new(0);
@@ -88,11 +88,11 @@ unsafe fn handle_tcp_inner(frame: &[u8], ip_start: usize, ihl: usize, total_len:
         let payload = &frame[payload_start..payload_start + payload_len];
         // Options only matter in SYN/SYN-ACK: that is where the peer's MSS
         // lives (parsed strictly; None keeps the RFC 1122 default).
-        let peer_mss = if flags & super::state::SYN != 0 {
-            super::mss::parse_mss_option(&frame[tcp_off + TCP_HLEN..tcp_off + data_off])
-                .unwrap_or(super::mss::TCP_DEFAULT_MSS)
+        let peer_mss = if flags & super::conn::state::SYN != 0 {
+            super::control::mss::parse_mss_option(&frame[tcp_off + TCP_HLEN..tcp_off + data_off])
+                .unwrap_or(super::control::mss::TCP_DEFAULT_MSS)
         } else {
-            super::mss::TCP_DEFAULT_MSS
+            super::control::mss::TCP_DEFAULT_MSS
         };
         let iface = crate::drivers::virtio_net::active_device();
         if let Some(cid) = CONNS.iter().position(|slot| {
@@ -112,20 +112,20 @@ unsafe fn handle_tcp_inner(frame: &[u8], ip_start: usize, ihl: usize, total_len:
                 }
                 connection.peer_window =
                     u16::from_be_bytes([frame[tcp_off + 14], frame[tcp_off + 15]]);
-                if flags & super::state::SYN != 0 {
+                if flags & super::conn::state::SYN != 0 {
                     connection.peer_mss = peer_mss;
                 }
                 let commands = tcp_transition(connection, seq, ack, flags, payload, now_us());
                 if before == 5 && (connection.state == 2 || connection.state == 7) {
-                    super::listen::established(cid, connection.listener);
+                    super::control::listen::established(cid, connection.listener);
                 }
                 if before == 5
-                    && flags & super::state::SYN != 0
+                    && flags & super::conn::state::SYN != 0
                     && seq.wrapping_add(1) == connection.rcv_nxt
                 {
                     let mut tx = connection.tx();
                     tx.snd_nxt = tx.snd_una;
-                    send_tcp_seg_tx(tx, super::state::SYN | ACK, &[]);
+                    send_tcp_seg_tx(tx, super::conn::state::SYN | ACK, &[]);
                 }
                 for command in commands {
                     let tx = connection.tx();
@@ -136,8 +136,8 @@ unsafe fn handle_tcp_inner(frame: &[u8], ip_start: usize, ihl: usize, total_len:
                     }
                 }
             }
-        } else if flags & (super::state::SYN | ACK) == super::state::SYN {
-            super::listen::incoming_syn(
+        } else if flags & (super::conn::state::SYN | ACK) == super::conn::state::SYN {
+            super::control::listen::incoming_syn(
                 dport,
                 sip,
                 sport,

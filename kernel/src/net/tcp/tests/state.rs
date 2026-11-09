@@ -1,0 +1,204 @@
+//! State-machine tests: active and passive handshakes, in-sequence data,
+//! FIN/TIMEWAIT, and ACK accounting.
+
+use super::super::conn::state::{SEG_ACK, drain_acked, tcp_transition};
+use super::super::conn::sock::read_received;
+use super::super::conn::{CONNS, RECV_BUF_SIZE, TIMEWAIT_US, sweep_timewait};
+use super::test_conn;
+
+#[test]
+fn test_established_in_sequence_data_and_rcv_nxt() {
+    let _serial = crate::net::lock::test_serial();
+    let mut c = test_conn();
+    tcp_transition(&mut c, 5000, 1001, 0x12, &[], 0); // -> ESTABLISHED, rcv_nxt=5001
+    // In-sequence payload is buffered and acked; rcv_nxt advances.
+    let out = tcp_transition(&mut c, 5001, 1001, 0x10, b"hello", 0);
+    assert_eq!(out, [SEG_ACK, 0]);
+    assert_eq!(&c.recv_buf[..5], b"hello");
+    assert_eq!(c.recv_len, 5);
+    assert_eq!(c.rcv_nxt, 5006);
+    // Old data is dropped and ACKed again, without buffer growth.
+    let out = tcp_transition(&mut c, 5001, 1001, 0x10, b"junk", 0);
+    assert_eq!(out, [SEG_ACK, 0]);
+    assert_eq!(c.recv_len, 5);
+    assert_eq!(c.rcv_nxt, 5006);
+    // In-sequence again after the drop.
+    let out = tcp_transition(&mut c, 5006, 1001, 0x10, b"!", 0);
+    assert_eq!(out, [SEG_ACK, 0]);
+    assert_eq!(c.rcv_nxt, 5007);
+}
+
+#[test]
+fn test_fin_sequence_established_to_close_wait() {
+    let _serial = crate::net::lock::test_serial();
+    let mut c = test_conn();
+    tcp_transition(&mut c, 5000, 1001, 0x12, &[], 0);
+    // FIN landing exactly at rcv_nxt closes our receive side: TIMEWAIT
+    // deadline set and FIN|ACK emitted.
+    let out = tcp_transition(&mut c, 5001, 1001, 0x11, &[], 777);
+    assert_eq!(c.state, 7);
+    assert_eq!(out, [0, SEG_ACK]);
+    assert_eq!(c.rcv_nxt, 5002);
+    assert!(c.peer_fin);
+    assert_eq!(c.tw_deadline_us, 0);
+    // A stale retransmitted FIN (seq no longer matches rcv_nxt) during
+    // TIMEWAIT is ignored: no re-ACK and no state/deadline change.
+    let out = tcp_transition(&mut c, 5001, 1001, 0x11, &[], 778);
+    assert_eq!(c.state, 7);
+    assert_eq!(out, [0, 0]);
+    assert_eq!(c.tw_deadline_us, 0);
+    // FIN before all data is consumed (seq != rcv_nxt) is ignored.
+    let mut c = test_conn();
+    tcp_transition(&mut c, 5000, 1001, 0x12, &[], 0);
+    assert_eq!(tcp_transition(&mut c, 5002, 1001, 0x11, &[], 0), [0, 0]);
+    assert_eq!(c.state, 2);
+    // Data + FIN in one segment: plain ACK for the data, then FIN|ACK.
+    let mut c = test_conn();
+    tcp_transition(&mut c, 5000, 1001, 0x12, &[], 0);
+    let out = tcp_transition(&mut c, 5001, 1001, 0x11, b"bye", 0);
+    assert_eq!(out, [SEG_ACK, SEG_ACK]);
+    assert_eq!(c.state, 7);
+    assert_eq!(c.rcv_nxt, 5005);
+}
+
+#[test]
+fn test_state3_ack_to_timewait_and_unexpected_segments() {
+    let _serial = crate::net::lock::test_serial();
+    // State 3 (our close outstanding): a bare ACK without FIN moves to TIMEWAIT.
+    let mut c = test_conn();
+    c.state = 3;
+    c.send_len = 10;
+    c.snd_una = 1000;
+    c.snd_nxt = 1011; // Ten data bytes plus the FIN sequence number.
+    assert_eq!(tcp_transition(&mut c, 0, 1005, 0x10, &[], 41), [0, 0]);
+    assert_eq!(c.state, 3);
+    assert_eq!(c.send_len, 5);
+    assert_eq!(tcp_transition(&mut c, 0, 1011, 0x10, &[], 42), [0, 0]);
+    assert_eq!(c.state, 4);
+    // Active close never sets peer_fin: recv keeps reporting "no data",
+    // not EOF, for slots lingering in TIMEWAIT after our own FIN.
+    assert!(!c.peer_fin);
+    assert_eq!(c.tw_deadline_us, 42 + TIMEWAIT_US);
+    assert_eq!(c.send_len, 0); // The FIN ACK also acknowledges the remaining data.
+    // State 3 without ACK flag: no transition.
+    let mut c = test_conn();
+    c.state = 3;
+    assert_eq!(tcp_transition(&mut c, 0, 1005, 0x00, &[], 0), [0, 0]);
+    assert_eq!(c.state, 3);
+}
+
+#[test]
+fn test_drain_acked_window() {
+    let _serial = crate::net::lock::test_serial();
+    let mut c = test_conn();
+    c.state = 2;
+    c.snd_una = 100;
+    c.snd_nxt = 160;
+    c.send_buf[..50].copy_from_slice(&[0xAA; 50]);
+    c.send_len = 50;
+    // Bogus ACKs (equal to snd_una, beyond snd_nxt, or beyond buffered
+    // bytes) are ignored.
+    drain_acked(&mut c, 100);
+    assert_eq!((c.snd_una, c.send_len), (100, 50));
+    drain_acked(&mut c, 161);
+    assert_eq!((c.snd_una, c.send_len), (100, 50));
+    drain_acked(&mut c, 151);
+    assert_eq!((c.snd_una, c.send_len), (100, 50));
+    // A valid partial ACK drops only the leading acked bytes.
+    drain_acked(&mut c, 130);
+    assert_eq!((c.snd_una, c.send_len), (130, 20));
+    assert_eq!(c.send_buf[0], 0xAA); // remaining bytes shifted to the front
+}
+
+#[test]
+fn reading_a_full_receive_window_requests_an_ack_and_handles_persist_probe() {
+    let _serial = crate::net::lock::test_serial();
+    let mut c = test_conn();
+    c.state = 2;
+    c.rcv_nxt = 5000;
+    let payload = [b'x'; RECV_BUF_SIZE];
+    tcp_transition(&mut c, 5000, 1001, 0x10, &payload, 0);
+    assert_eq!(c.recv_len, RECV_BUF_SIZE);
+    let mut output = [0; 512];
+    let (n, notify) = read_received(&mut c, &mut output).unwrap();
+    assert_eq!(n, 512);
+    assert!(notify);
+    assert_eq!(RECV_BUF_SIZE - c.recv_len, 512);
+    assert_eq!(output, [b'x'; 512]);
+    let seq = c.rcv_nxt.wrapping_sub(1);
+    assert_eq!(
+        tcp_transition(&mut c, seq, 1001, 0x10, b"x", 0),
+        [SEG_ACK, 0]
+    );
+    assert_eq!(c.recv_len, RECV_BUF_SIZE - 512);
+}
+
+#[test]
+fn timewait_does_not_discard_unread_response_bytes() {
+    let _serial = crate::net::lock::test_serial();
+    unsafe {
+        crate::net::lock::net_lock();
+        let saved = CONNS;
+        let mut c = test_conn();
+        c.state = 4;
+        c.peer_fin = true;
+        c.recv_len = 1;
+        c.recv_buf[0] = b'x';
+        c.tw_deadline_us = 1;
+        CONNS[0] = Some(c);
+        sweep_timewait(2);
+        assert!(CONNS[0].is_some());
+        CONNS = saved;
+        crate::net::lock::net_unlock();
+    }
+}
+
+#[test]
+fn test_handshake_syn_sent_to_established() {
+    let _serial = crate::net::lock::test_serial();
+    let mut c = test_conn();
+    // SYN|ACK completes the handshake: ESTABLISHED with peer seq+1 as rcv_nxt.
+    let out = tcp_transition(&mut c, 5000, 1001, 0x12, &[], 0);
+    assert_eq!(c.state, 2);
+    assert_eq!(c.snd_una, 1001);
+    assert_eq!(c.snd_nxt, 1001);
+    assert_eq!(c.rcv_nxt, 5001);
+    assert_eq!(out, [SEG_ACK, 0]);
+    // A bare SYN or bare ACK in SYN_SENT must not establish.
+    let mut c = test_conn();
+    assert_eq!(tcp_transition(&mut c, 5000, 1001, 0x02, &[], 0), [0, 0]);
+    assert_eq!(c.state, 1);
+    assert_eq!(tcp_transition(&mut c, 5000, 1001, 0x10, &[], 0), [0, 0]);
+    assert_eq!(c.state, 1);
+}
+
+#[test]
+fn test_passive_handshake_requires_matching_ack_and_can_receive_immediate_data() {
+    let _serial = crate::net::lock::test_serial();
+    let mut connection = test_conn();
+    connection.state = 5;
+    connection.rcv_nxt = 5001;
+    assert_eq!(
+        tcp_transition(&mut connection, 5001, 999, 0x10, &[], 0),
+        [0, 0]
+    );
+    assert_eq!(connection.state, 5);
+    assert_eq!(
+        tcp_transition(&mut connection, 5001, 1001, 0x18, b"hello", 0),
+        [SEG_ACK, 0]
+    );
+    assert_eq!(connection.state, 2);
+    assert_eq!(connection.recv_len, 5);
+    assert_eq!(&connection.recv_buf[..5], b"hello");
+}
+
+#[test]
+fn test_active_handshake_rejects_wrong_ack() {
+    let _serial = crate::net::lock::test_serial();
+    let mut connection = test_conn();
+    assert_eq!(
+        tcp_transition(&mut connection, 5000, 999, 0x12, &[], 0),
+        [0, 0]
+    );
+    assert_eq!(connection.state, 1);
+}

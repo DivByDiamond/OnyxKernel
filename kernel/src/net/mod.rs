@@ -1,17 +1,18 @@
-pub mod checksum;
-pub mod config;
+//! Network stack: protocol layers (`stack`), policy (`policy`), and sockets.
+//!
+//! The flat modules of the old layout are re-exported here, so `crate::net::ip`,
+//! `crate::net::udp`, `crate::net::config`, … keep working.
+
 pub mod dhcp;
-pub mod dns;
-pub mod eth;
-pub mod ip;
-pub mod ipv4;
-pub mod lock;
-pub mod ownership;
+pub mod policy;
+pub mod stack;
 pub mod tcp;
 
 #[cfg(test)]
 mod tests;
-pub mod udp;
+
+pub use policy::{config, dns, lock, ownership};
+pub use stack::{checksum, eth, ip, ipv4, udp};
 
 pub use dns::dns_resolve;
 pub use tcp::{tcp_close, tcp_connect, tcp_recv, tcp_send};
