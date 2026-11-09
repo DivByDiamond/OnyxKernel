@@ -1,7 +1,7 @@
 #!/bin/bash
 # run_qemu_net.sh — same boot chain as run_qemu.sh, plus virtio-net wired
 # to QEMU user-mode networking (DHCP + slirp DNS proxy at 10.0.2.3) and
-# /bin/ohttp + /bin/dnstest added to the image, for exercising the net
+# /bin/obrowse added to the image, for exercising the net
 # stack (DHCP, DNS, TCP) end-to-end instead of just booting to a shell.
 set -e
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -87,11 +87,8 @@ MANIFEST="$BUILD/manifest.txt"
     echo "file $BUILD/lsblk.onx /bin/lsblk --ring=1"
     echo "file $BUILD/lsblk.onx /service/lsblk --ring=1"
     echo "file $BUILD/lsblk.enabled /etc/init/lsblk.enabled"
-    if [ -f "$ROOT/../OnyxApps/build/dnstest.onx" ]; then
-        echo "file $ROOT/../OnyxApps/build/dnstest.onx /bin/dnstest"
-    fi
-    if [ -f "$ROOT/../OnyxApps/build/ohttp.onx" ]; then
-        echo "file $ROOT/../OnyxApps/build/ohttp.onx /bin/ohttp"
+    if [ -f "$ROOT/../OnyxApps/build/obrowse.onx" ]; then
+        echo "file $ROOT/../OnyxApps/build/obrowse.onx /bin/obrowse"
     fi
     ONYXCC_TEST_C="$ROOT/../OnyxCompiller/tests/hello_full.c"
     if [ -f "$ONYXCC_TEST_C" ]; then

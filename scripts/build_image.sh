@@ -57,7 +57,7 @@ echo "==> Generating font"
 # Build every OnyxApps application and stage its .onx into $BUILD so the
 # manifest loop below can pick all of them up dynamically (not just
 # obrowse — previously hardcoded here, silently leaving otop/vim/osnake/
-# ohttp/oed/dnstest out of /bin even though they built fine).
+# mux out of /bin even though they built fine).
 APPS_DIR="${ONYXAPPS_DIR:-$ROOT/../OnyxApps}"
 if [ -d "$APPS_DIR" ]; then
     echo "==> Building OnyxApps (all apps)"
