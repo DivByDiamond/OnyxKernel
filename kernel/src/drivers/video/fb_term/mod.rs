@@ -1,6 +1,7 @@
 use super::fb;
 
 pub mod ansi;
+pub mod graphics;
 pub mod writer;
 pub use writer::FbWriter;
 

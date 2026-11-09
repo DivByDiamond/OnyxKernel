@@ -358,3 +358,19 @@ mod pipeline_tests {
         }
     }
 }
+
+/// Request restoration of the retained console after a graphics owner exits.
+pub(crate) fn console_dirty() {
+    // SAFETY: graphics release holds UART_LOCK; force a full repaint because
+    // application pixels replaced the front without changing console cells.
+    unsafe {
+        let t = &raw const G_ANSI;
+        scale::mark(viewport::Rect::new(
+            0,
+            0,
+            (*t).cols * state::FONT_W,
+            (*t).rows * state::FONT_H,
+        ));
+    }
+    present::mark_dirty();
+}

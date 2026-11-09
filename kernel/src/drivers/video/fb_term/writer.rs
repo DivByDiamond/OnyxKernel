@@ -25,6 +25,9 @@ impl FbWriter {
     }
 
     pub fn putc(&mut self, c: u8) {
+        if super::graphics::active() {
+            return;
+        }
         match c {
             b'\n' => {
                 self.col = 0;
@@ -64,6 +67,9 @@ impl FbWriter {
     }
 
     pub fn put_unicode(&mut self, cp: u32) {
+        if super::graphics::active() {
+            return;
+        }
         let fw = font::font_width();
         let fh = font::font_height();
         let max_col = fb::FB_WIDTH / fw;

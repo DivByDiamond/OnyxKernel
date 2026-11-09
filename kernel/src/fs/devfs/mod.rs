@@ -258,6 +258,8 @@ pub fn mmap_prefix(ino: u32) -> u64 {
 }
 
 pub const FB_IOCTL_GET_INFO: u64 = 0x4600;
+pub const FB_IOCTL_CLAIM_GRAPHICS: u64 = 0x46F0;
+pub const FB_IOCTL_RELEASE_GRAPHICS: u64 = 0x46F1;
 
 /// # Safety
 ///
@@ -274,6 +276,17 @@ pub unsafe fn ioctl(ino: u32, request: u64, arg: u64) -> KResult<i64> {
         }
         match ino {
             ino if is_framebuffer_ino(ino) => match request {
+                FB_IOCTL_CLAIM_GRAPHICS if ino == DEVFS_FB0_INO => {
+                    crate::drivers::fb_term::graphics::claim(crate::proc::current().pid)?;
+                    Ok(0)
+                }
+                FB_IOCTL_RELEASE_GRAPHICS if ino == DEVFS_FB0_INO => {
+                    if crate::drivers::fb_term::graphics::release(crate::proc::current().pid) {
+                        Ok(0)
+                    } else {
+                        Err(Errno::Perm)
+                    }
+                }
                 FB_IOCTL_GET_INFO => {
                     let p = crate::proc::current();
                     // SAFETY: sys_ioctl pre-validated arg as a writable user

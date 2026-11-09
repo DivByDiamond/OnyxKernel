@@ -73,6 +73,9 @@ pub(crate) fn should_present(dirty: bool, idle: u64, held: u64) -> bool {
 
 /// Write a byte through the ANSI interpreter.
 pub fn console_putc(c: u8) {
+    if super::super::graphics::active() {
+        return;
+    }
     // SAFETY: G_ANSI is a kernel-lifetime static; SIE=0 prevents same-hart preemption (see crate::sync). Cross-hart concurrent console_putc IS possible (klog from trap contexts) and tolerated by convention: output may interleave, the static never reallocates, and no reference escapes this block.
     unsafe {
         let t = &raw mut super::G_ANSI;
@@ -89,14 +92,21 @@ pub fn console_putc(c: u8) {
 /// painting is what drew mid-redraw cursor blocks at garbage positions
 /// (the second artifact in the flicker report). Just request a present.
 pub fn console_cursor() {
+    if super::super::graphics::active() {
+        return;
+    }
     if crate::drivers::fb::double_buffered() {
         mark_dirty();
     } else {
-        // SAFETY: G_ANSI is a kernel-lifetime static; SIE=0 prevents same-hart preemption (see crate::sync); cross-hart interleaving is tolerated by convention (see console_putc); draw_cursor only repaints the console grid.
-        unsafe {
-            let t = &raw mut super::G_ANSI;
-            (*t).draw_cursor();
+        crate::srv::klog::UART_LOCK.lock();
+        if !super::super::graphics::active() {
+            // SAFETY: the console lock excludes graphics claims and writers.
+            unsafe {
+                let t = &raw mut super::G_ANSI;
+                (*t).draw_cursor();
+            }
         }
+        crate::srv::klog::UART_LOCK.unlock();
     }
 }
 
@@ -106,6 +116,9 @@ pub fn console_cursor() {
 /// interrupt context): the try_lock skips ticks where a writer holds the
 /// console lock, and the back buffer is allocated eagerly at fb init.
 pub fn present_tick() {
+    if super::super::graphics::active() {
+        return;
+    }
     if !crate::drivers::fb::double_buffered() {
         return;
     }
@@ -132,6 +145,9 @@ pub fn present_tick() {
 /// Force an immediate present (debug/synchronous users). Blocks on the
 /// console write lock — do NOT call from interrupt context.
 pub fn present_now() {
+    if super::super::graphics::active() {
+        return;
+    }
     if !crate::drivers::fb::double_buffered() {
         return;
     }
@@ -143,6 +159,9 @@ pub fn present_now() {
 /// Copy the back buffer to the front and stamp the cursor onto the
 /// presented frame. Caller must hold the console write lock.
 pub(crate) fn present_locked() {
+    if super::super::graphics::active() {
+        return;
+    }
     let Some(publication) = crate::drivers::fb::present_control::Publication::begin_console()
     else {
         return;

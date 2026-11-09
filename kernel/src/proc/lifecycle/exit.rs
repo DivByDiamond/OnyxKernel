@@ -22,6 +22,8 @@ pub unsafe fn exit(pid: u32, code: i32) {
         // No PROC/RQ lock held here: reclaim process-owned network slots
         // before teardown so interrupted servers do not retain ports.
         crate::net::ownership::close_process(pid);
+        // Before PROC/RQ locks: graphics cleanup serializes with console output.
+        crate::drivers::fb_term::graphics::release(pid);
         if let Some(p) = by_pid(pid) {
             // Normal exit (code == 0) is INFO, not ERR: logging every clean
             // shutdown as "[ERR] proc: pid N exited code=0" (e.g. after
