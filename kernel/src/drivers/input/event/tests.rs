@@ -1,4 +1,6 @@
 use super::*;
+use core::sync::atomic::{AtomicU8, Ordering};
+
 #[test]
 fn a_reentrant_drain_cannot_dispatch_newer_events_before_the_current_one() {
     let lock = crate::sync::SpinLock::new();
@@ -30,16 +32,16 @@ fn a_reentrant_drain_cannot_dispatch_newer_events_before_the_current_one() {
 #[test]
 fn either_shift_and_ctrl_remain_active_until_both_sides_are_released() {
     let flags = AtomicU8::new(0);
-    update_modifiers(&flags, KeyCode::LeftShift, true);
-    update_modifiers(&flags, KeyCode::RightShift, true);
-    update_modifiers(&flags, KeyCode::LeftShift, false);
+    key::update_modifiers(&flags, KeyCode::LeftShift, true);
+    key::update_modifiers(&flags, KeyCode::RightShift, true);
+    key::update_modifiers(&flags, KeyCode::LeftShift, false);
     assert_ne!(flags.load(Ordering::Acquire) & 3, 0);
-    update_modifiers(&flags, KeyCode::RightShift, false);
+    key::update_modifiers(&flags, KeyCode::RightShift, false);
     assert_eq!(flags.load(Ordering::Acquire) & 3, 0);
-    update_modifiers(&flags, KeyCode::LeftCtrl, true);
-    update_modifiers(&flags, KeyCode::RightCtrl, true);
-    update_modifiers(&flags, KeyCode::RightCtrl, false);
+    key::update_modifiers(&flags, KeyCode::LeftCtrl, true);
+    key::update_modifiers(&flags, KeyCode::RightCtrl, true);
+    key::update_modifiers(&flags, KeyCode::RightCtrl, false);
     assert_ne!(flags.load(Ordering::Acquire) & 12, 0);
-    update_modifiers(&flags, KeyCode::LeftCtrl, false);
+    key::update_modifiers(&flags, KeyCode::LeftCtrl, false);
     assert_eq!(flags.load(Ordering::Acquire), 0);
 }

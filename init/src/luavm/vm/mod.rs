@@ -67,7 +67,11 @@ impl VM {
         loop {
             let frame = match self.call_stack.last_mut() {
                 Some(f) => f,
-                None => return Ok(Value::Nil),
+                // A `Return` in the outermost frame pops that frame and pushes
+                // its result; the next iteration lands here. Return the value
+                // (`pop` yields `Nil` for Lua's implicit nil), not a hardcoded
+                // `Nil` — otherwise every top-level return value was dropped.
+                None => return Ok(self.pop()),
             };
 
             if frame.pc >= frame.func.code.len() {

@@ -14,4 +14,7 @@ pub fn read_if_required<'a>(
 }
 
 #[cfg(test)]
+// Explicit path keeps the module resolvable both from the `onyx-login` bin and
+// from the host-test bridge in `init/src/lib.rs`.
+#[path = "password/tests.rs"]
 mod tests;
