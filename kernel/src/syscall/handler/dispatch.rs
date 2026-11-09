@@ -183,7 +183,7 @@ pub unsafe fn handle(tf: &mut TrapFrame) -> i64 {
             SYS_sched_getaffinity => crate::syscall::proc_sys::sys_sched_getaffinity(a0),
             SYS_net_connect => crate::syscall::net_sys::sys_net_connect(a0, a1),
             SYS_net_send => crate::syscall::net_sys::sys_net_send(a0, a1, a2),
-            SYS_net_recv => crate::syscall::net_sys::sys_net_recv(a0, a1, a2),
+            SYS_net_recv => crate::syscall::net_sys::sys_net_recv(tf, a0, a1, a2),
             SYS_net_close => crate::syscall::net_sys::sys_net_close(a0),
             SYS_net_listen => crate::syscall::net_server_sys::sys_net_listen(a0),
             SYS_net_accept => crate::syscall::net_server_sys::sys_net_accept(a0),

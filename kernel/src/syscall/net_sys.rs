@@ -6,6 +6,7 @@
 //! duplicate the critical section and hold the lock across user-pointer
 //! validation). The net layer is the single locking boundary.
 use super::handler::{parse_user_path, user_ptr_ok};
+use crate::arch::trap_frame::TrapFrame;
 use crate::mm::vmm;
 use crate::net;
 use crate::proc;
@@ -69,7 +70,11 @@ pub(super) unsafe fn sys_net_send(conn_id: u64, buf: u64, len: u64) -> i64 {
 ///
 /// Call only from the syscall path with a current process set; `buf`/`len`
 /// are validated inside before use.
-pub(super) unsafe fn sys_net_recv(conn_id: u64, buf: u64, len: u64) -> i64 {
+///
+/// Blocks until at least one byte arrives (or EOF/reset/error), matching
+/// the console/IPC read convention: pump RX, try the ring, and yield if it
+/// is empty. No lock is held across `sched_yield` (NET_LOCK is a leaf).
+pub(super) unsafe fn sys_net_recv(tf: &mut TrapFrame, conn_id: u64, buf: u64, len: u64) -> i64 {
     // SAFETY: buf/len passed user_ptr_ok and the per-page writable
     // check_user_range above, so the slice handed to net::tcp_recv covers
     // only mapped, writable user pages.
@@ -80,13 +85,32 @@ pub(super) unsafe fn sys_net_recv(conn_id: u64, buf: u64, len: u64) -> i64 {
         if vmm::check_user_range(proc::current().root_pa, buf, len, true).is_err() {
             return Errno::Fault.as_i64();
         }
+        if len == 0 {
+            // POSIX: a zero-length recv returns immediately instead of
+            // waiting for data it could never copy out.
+            return 0;
+        }
         let data = core::slice::from_raw_parts_mut(buf as *mut u8, len as usize);
-        net::poll();
-        match net::ownership::tcp(conn_id as usize, proc::current_pid(), || {
-            net::tcp_recv(conn_id as usize, data)
-        }) {
-            Ok(n) => n as i64,
-            Err(e) => e.as_i64(),
+        loop {
+            // The stack only reads wire frames inside net::poll() (RX is
+            // not IRQ-driven), so a blocked receiver must pump it itself
+            // before sleeping — same pattern as sys_poll's yield loop.
+            net::poll();
+            let result = {
+                // Fresh reborrow per iteration: the closure would otherwise
+                // move `data` on the first pass.
+                let bytes = &mut *data;
+                net::ownership::tcp(conn_id as usize, proc::current_pid(), || {
+                    net::tcp_recv(conn_id as usize, bytes)
+                })
+            };
+            match result {
+                Ok(n) => return n as i64,
+                // Empty ring: sleep a quantum, then re-poll and re-check.
+                Err(Errno::NoEnt) => proc::sched_yield(tf),
+                // EOF (Ok(0)), RST (Io) and a closed slot (Inval) end the wait.
+                Err(e) => return e.as_i64(),
+            }
         }
     }
 }

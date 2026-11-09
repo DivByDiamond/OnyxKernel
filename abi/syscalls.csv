@@ -80,7 +80,7 @@ number,name,description
 79,sched_getaffinity,"sched_getaffinity(pid) -> cpu (or -1 for any)"
 80,net_connect,"net_connect(ip_ptr, port) -> conn_id"
 81,net_send,"net_send(conn_id, buf, len) -> bytes"
-82,net_recv,"net_recv(conn_id, buf, len) -> bytes"
+82,net_recv,"net_recv(conn_id, buf, len) -> bytes (blocks until data/EOF)"
 83,net_close,"net_close(conn_id) -> 0"
 84,chown,"chown(path, uid, gid)"
 85,fchown,"fchown(fd, uid, gid)"
