@@ -9,7 +9,7 @@
 //!     pair for 64-bit values).
 //!
 //! This file is compiled only when target_pointer_width = "32".
-use crate::arch::asm::mtrap_32::G_MTRAP_SCRATCH_32;
+use crate::arch::asm::mtrap::G_MTRAP_SCRATCH_32;
 use crate::arch::{__bss_end, __bss_start, __stack_top, SAVED_FDT, SAVED_HARTID};
 use core::arch::global_asm;
 

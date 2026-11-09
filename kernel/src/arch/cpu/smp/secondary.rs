@@ -150,7 +150,7 @@ pub unsafe extern "Rust" fn secondary_continue() -> ! {
             in(reg) sp,
             in(reg) entry,
             in(reg) satp,
-            sym crate::arch::asm::mtrap_32::G_MTRAP_SCRATCH_32,
+            sym crate::arch::asm::mtrap::G_MTRAP_SCRATCH_32,
             options(noreturn),
         );
         #[cfg(feature = "smode")]

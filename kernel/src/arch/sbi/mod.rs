@@ -160,12 +160,9 @@ const BASE_PROBE_EXTENSION: usize = 3;
 /// `SBI_SUCCESS` from the v0.2 error-code space.
 const SBI_SUCCESS: isize = 0;
 
-/// SRST reset types (SBI v2.0, FID 0).
-pub const SRST_SHUTDOWN: u64 = 0;
-pub const SRST_COLD_REBOOT: u64 = 1;
-pub const SRST_WARM_REBOOT: u64 = 2;
-/// SRST reset reason: "some unexpected failure" (the SBI default).
-const SRST_REASON_SYSTEM_FAILURE: u64 = 1;
+mod reset;
+
+pub use reset::{SRST_COLD_REBOOT, SRST_SHUTDOWN, SRST_WARM_REBOOT, system_reset};
 
 /// Raw SBI v0.2+ ecall: a7 = EID, a6 = FID; returns (error, value).
 ///
@@ -230,24 +227,4 @@ pub fn probe_extension(eid: u64) -> bool {
     }
     let (err, val) = unsafe { sbi_ecall(SBI_EID_PROBE, 0, eid as usize, 0) };
     err == SBI_SUCCESS && val != 0
-}
-
-/// SBI System Reset (SRST, FID 0): `reset_type` 0 = shutdown, 1 = cold
-/// reboot, 2 = warm reboot. Returns `false` when SRST is unavailable (no
-/// implementation, probe negative, or the ecall reported an error) so the
-/// caller can use a platform fallback. On success the machine resets and
-/// this never returns.
-pub fn system_reset(reset_type: u64) -> bool {
-    if !probe_extension(SBI_EID_SRST as u64) {
-        return false;
-    }
-    let (err, _) = unsafe {
-        sbi_ecall(
-            SBI_EID_SRST,
-            0,
-            reset_type as usize,
-            SRST_REASON_SYSTEM_FAILURE as usize,
-        )
-    };
-    err == SBI_SUCCESS
 }

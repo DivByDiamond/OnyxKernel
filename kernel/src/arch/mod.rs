@@ -2,7 +2,7 @@
 
 pub mod asm;
 pub mod bits;
-pub mod csr;
+mod cpu;
 pub mod mmio;
 pub mod regs;
 // Needed by every real (non-test) build now that rv32 also arms its timer
@@ -10,9 +10,8 @@ pub mod regs;
 // previously this only mattered for smode and real rv64.
 #[cfg(any(feature = "smode", not(test)))]
 pub mod sbi;
-pub mod smp;
-pub mod trap_frame;
 
+pub use cpu::{csr, smp, trap_frame};
 pub use regs::*;
 
 // SAFETY: the kernel linker script defines these symbols as kernel image

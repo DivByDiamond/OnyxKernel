@@ -60,5 +60,5 @@ pub fn panic_handler(info: &PanicInfo) -> ! {
     crate::proc::dump_all(&mut w);
     w.write_str("\n  Rebooting in 3 seconds...\n");
     delay_loops(300_000_000);
-    super::power::reset_machine(false)
+    super::super::power::reset_machine(false)
 }

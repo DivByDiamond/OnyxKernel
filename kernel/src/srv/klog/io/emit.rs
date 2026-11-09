@@ -1,5 +1,5 @@
 //! Raw UART byte output and the formatted-line emit path used by kinf!/kwrn!/etc.
-use super::level::{Level, enabled};
+use super::super::level::{Level, enabled};
 use super::lock::UART_LOCK;
 use crate::drivers::uart;
 use core::sync::atomic::{AtomicU32, Ordering};

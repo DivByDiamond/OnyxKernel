@@ -3,7 +3,7 @@
 use onyx_core::errno::{Errno, KResult};
 use onyx_core::ringbuf::{ring_read, ring_used};
 
-use super::access::pid_allowed;
+use super::super::access::pid_allowed;
 use super::wait::{wait_enqueue, wait_wake_all};
 use crate::arch::trap_frame::TrapFrame;
 use crate::ipc::channel::types::{CHAN_MAX, G_CHANNELS};

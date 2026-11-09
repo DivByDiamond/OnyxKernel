@@ -1,10 +1,10 @@
 pub mod bootargs;
+mod debug;
 pub mod event;
-pub mod kdump;
 pub mod klog;
 pub mod main;
-pub mod syscall_dispatch;
-pub mod timer;
-mod timer_arm;
+mod time;
 pub mod trap;
-pub mod wallclock;
+
+pub use debug::{kdump, syscall_dispatch};
+pub use time::{timer, wallclock};
