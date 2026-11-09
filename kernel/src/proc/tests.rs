@@ -1,12 +1,20 @@
 use super::*;
 use crate::arch::trap_frame::TrapFrame;
 
+/// Serializes the tests that reset and mutate the process globals
+/// (`G_NEXT_PID`, `G_ALL_PROCS`, the runqueues): the host harness runs
+/// `#[test]` fns in parallel, and a concurrent `process::init()` would
+/// reset state in the middle of another test's assertions.
+fn test_serial() -> std::sync::MutexGuard<'static, ()> {
+    static SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    SERIAL.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 #[test]
 fn test_alloc_pid_unique() {
+    let _serial = test_serial();
     // SAFETY: host test; resets and exercises the process globals directly.
-    // Caller contract: single-threaded access - but the host harness runs
-    // #[test] fns in parallel, and both alloc_pid tests touch G_NEXT_PID
-    // and G_ALL_PROCS (pre-existing flakiness hazard, see report note).
+    // Caller contract: single-threaded access, guaranteed by test_serial.
     unsafe {
         super::process::init();
         let pid1 = alloc_pid();
@@ -19,8 +27,9 @@ fn test_alloc_pid_unique() {
 
 #[test]
 fn test_alloc_pid_increment() {
-    // SAFETY: same host-test contract as test_alloc_pid_unique (parallel
-    // #[test] fns share the process globals (pre-existing flakiness).
+    let _serial = test_serial();
+    // SAFETY: same host-test contract as test_alloc_pid_unique (serialized
+    // by test_serial against the other process-global tests).
     unsafe {
         super::process::init();
         let base = alloc_pid();
@@ -164,6 +173,7 @@ fn test_fork_creating_not_runnable_until_publish() {
     use crate::proc::process::{G_ALL_PROCS, by_pid_unlocked, proc_list_lock, proc_list_unlock};
     use crate::proc::scheduler::runqueue;
 
+    let _serial = test_serial();
     unsafe {
         super::process::init();
         runqueue::init();
