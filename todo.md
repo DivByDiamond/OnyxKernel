@@ -1,6 +1,6 @@
 # OnyxKernel — TODO
 
-> **Актуально на 2026-10-25.**
+> **Актуально на 2026-11-09.**
 > Правила кода: `../info.md` (корень набора репозиториев), `docs/CONCURRENCY.md`
 > (локи, планировщик, инварианты), `docs/TESTING.md` (что и как проверять).
 > История расследований и закрытые баги — `docs/history/` и `git log`.
@@ -37,11 +37,11 @@ QEMU slirp (`N2`: рендер → переход по ссылке → back) и
 
 ### ФС
 - Динамическая загрузка модулей (сейчас `/proc/modules` показывает только встроенные).
-- FAT32: нет per-FS лока; все write-пути предполагают single-hart I/O.
-- xHCI: URB transfer (EHCI control/bulk уже есть).
+- [x] FAT32: per-FS лок, write-пути сериализованы (`b1270dc`, 2026-11-09).
+- [~] xHCI: URB transfer — control/bulk, диспетчеризация и `XhciHcd` готовы (`9d83db4`, `f99101e`); в работе PCI-обнаружение контроллера и QEMU-проверка.
 
 ### Платформа / время
-- RTC → `gettimeofday`: драйвер (`drivers/platform/rtc.rs`) есть, но время берётся из uptime.
+- [x] RTC → `gettimeofday`: epoch-база из RTC, fallback на uptime (`1d94693`, 2026-11-09).
 - rv32 non-smode: `nanosleep` через прямой CLINT MMIO вместо SBI (нужен `mtrap_32`-путь, как у rv64).
 
 ### Userland: GUI (v0.7+)
@@ -56,6 +56,9 @@ QEMU slirp (`N2`: рендер → переход по ссылке → back) и
 - Подмножество JDK (`java/lang/Object`, `String`, `System`, `arraycopy`).
 - GC (mark-sweep), исключения, потоки поверх proc/scheduler.
 - hello-world от javac → `/bin/jvm` в QEMU/OC2R.
+
+### Структура кода
+- [~] Тесты вынести из файлов с кодом: 53 файла держат inline `#[cfg(test)] mod tests { ... }` (kernel 46, core 4, init 2, tools 1). Цель — `foo/tests.rs` для `foo.rs` и `tests.rs` для `mod.rs`, в коде остаётся только `#[cfg(test)] mod tests;`. Готовый образец: `fs_sys3/mem/brk.rs` + `brk/tests.rs`. Заодно переименовать `pipeline_tests` (`fb_term/ansi/mod.rs`) и `modifier_tests` (`input/event.rs`) в `tests`.
 
 ### Документация / долг
 - README: «16 FD slots» сверить с кодом; «UDP/DHCP/DNS — осталось» устарело (реализовано); USB-формулировка (URB-слой есть, открыт только xHCI transfer); синхронизировать `README.ru.md`.
@@ -137,3 +140,10 @@ QEMU slirp (`N2`: рендер → переход по ссылке → back) и
 5. P0 — только то, что ломает данные/железо/релиз. Всё «хотелось бы» — P2.
 6. Если задача расползлась на несколько подсистем — заводи отдельные ID
    (например `F1`, `F2`) и ссылайся между ними.
+7. **Тесты — только в отдельных файлах.** В файле с кодом допустима лишь
+   строка `#[cfg(test)] mod tests;`. Сам модуль живёт в `tests.rs` рядом
+   (для `mod.rs`) или в подпапке `foo/tests.rs` (для `foo.rs`). Inline
+   `mod tests { ... }` в файле с кодом запрещён. Причина: файл остаётся
+   ≤250 строк, диффы кода и тестов не смешиваются, а подпапка не раздувает
+   счётчик «≤4 файла на папку». `#[cfg(test)]`-хелперы, нужные только
+   тестам, переносятся вместе с ними.
