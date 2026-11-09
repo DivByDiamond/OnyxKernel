@@ -92,6 +92,12 @@ pub unsafe fn create_user(
         (*p).tf.sp = reg_truncate(if argc > 0 { argv_sp } else { ustack });
         (*p).tf.a0 = reg_truncate(argc as u64);
         (*p).tf.a1 = reg_truncate(if argc > 0 { argv_sp + 8 } else { 0 });
+        // Canonical argv/envp registers for this process record: sys_fork
+        // restores them into the child's a1/a2 (the parent's live registers
+        // are caller-saved by the time it calls fork). SYS_spawn passes no
+        // environment, so envp stays empty.
+        (*p).argv_sp = if argc > 0 { argv_sp + 8 } else { 0 };
+        (*p).envp_sp = 0;
         (*p).tf.sstatus = reg_truncate(SSTATUS_SPIE | crate::arch::regs::SSTATUS_FS_INITIAL);
         #[cfg(target_pointer_width = "64")]
         {

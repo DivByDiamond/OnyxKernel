@@ -61,7 +61,7 @@ number,name,description
 60,setpgid,"setpgid(pid, pgid)"
 61,setsid,"setsid()"
 62,getpgid,"getpgid(pid)"
-63,fork,"fork() — duplicate current process (vfork-style)"
+63,fork,"fork() — duplicate current process (vfork-style; child a1/a2 = argv/envp)"
 64,clock_gettime,"clock_gettime(clk_id, *ts)"
 65,clock_getres,"clock_getres(clk_id, *res)"
 66,isatty,"isatty(fd)"

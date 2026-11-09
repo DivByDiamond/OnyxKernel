@@ -81,6 +81,10 @@ pub unsafe fn sys_execve(tf: &mut TrapFrame, path: u64, argv: u64, envp: u64) ->
         p.root_refcount = new_refcount;
         p.entry = r.entry;
         p.ustack = argv_sp;
+        // Canonical argv/envp registers: sys_fork restores these into a
+        // child's a1/a2 instead of the parent's caller-saved live values.
+        p.argv_sp = argv_sp + 8;
+        p.envp_sp = envp_sp;
         p.heap_brk = r.heap_brk;
         p.mmap_brk = 0x2000_0000;
         p.readdir_ino = 0;
@@ -141,9 +145,7 @@ pub unsafe fn sys_fork(tf: &mut TrapFrame) -> i64 {
         let parent_pid = parent.pid;
         let new_pid = proc::alloc_pid();
 
-        let mut child_tf = *tf;
-        child_tf.a0 = 0;
-        child_tf.sepc = tf.sepc.wrapping_add(4);
+        let child_tf = fork_child_frame(tf, parent.argv_sp, parent.envp_sp);
 
         let refcount = if parent.root_refcount.is_null() {
             match crate::mm::heap::kmalloc(4) {
@@ -194,6 +196,8 @@ pub unsafe fn sys_fork(tf: &mut TrapFrame) -> i64 {
                 child.cwd_len = parent.cwd_len;
                 child.mmap_brk = parent.mmap_brk;
                 child.umask = parent.umask;
+                child.argv_sp = parent.argv_sp;
+                child.envp_sp = parent.envp_sp;
                 child.tf = child_tf;
                 // Atomic publication: Creating → Ready + enqueue. From this
                 // point the child is fully initialized and may be stolen.
@@ -208,5 +212,39 @@ pub unsafe fn sys_fork(tf: &mut TrapFrame) -> i64 {
                 e.as_i64()
             }
         }
+    }
+}
+
+/// Child's trap frame at fork: the parent's frame (shared stack, SATP,
+/// signals) plus the fork return value (a0 = 0), the resume point past the
+/// ecall, and the canonical argv/envp registers from the process record —
+/// the parent's live a1/a2 are caller-saved and may be clobbered by fork time.
+fn fork_child_frame(tf: &TrapFrame, argv_sp: u64, envp_sp: u64) -> TrapFrame {
+    let mut child = *tf;
+    child.a0 = 0;
+    child.sepc = tf.sepc.wrapping_add(4);
+    child.a1 = reg_truncate(argv_sp);
+    child.a2 = reg_truncate(envp_sp);
+    child
+}
+
+#[cfg(test)]
+mod tests {
+    use super::fork_child_frame;
+    use crate::arch::trap_frame::TrapFrame;
+
+    #[test]
+    fn child_frame_passes_argv_envp_and_returns_zero() {
+        let mut tf = TrapFrame::zero();
+        tf.sp = 0x7fff_abcd;
+        tf.sepc = 0x1000;
+        tf.a1 = 0xdead; // caller-saved garbage at fork time
+        tf.a2 = 0xbeef;
+        let child = fork_child_frame(&tf, 0x7fff_1000, 0x7fff_2000);
+        assert_eq!(child.a0, 0); // fork returns 0 in the child
+        assert_eq!(child.sepc, 0x1004); // resumes past the ecall
+        assert_eq!(child.a1, 0x7fff_1000); // canonical argv restored
+        assert_eq!(child.a2, 0x7fff_2000); // canonical envp restored
+        assert_eq!(child.sp, tf.sp); // shared frame is inherited
     }
 }
