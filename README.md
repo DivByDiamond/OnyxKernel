@@ -46,8 +46,8 @@ OnyxKernel is a 64-bit RISC-V operating system kernel (~98% Rust, assembly via
 journaling and snapshots, preemptive multitasking, and a complete userland with
 authentication.
 
-Part of the [OnyxOS](https://github.com/anomalyco/OnyxOS) ecosystem. Booted by
-[OnyxBoot](https://github.com/anomalyco/OnyxBoot).
+Part of the [OnyxOS](https://github.com/DivByDiamond/OnyxOS) ecosystem. Booted by
+[OnyxBoot](https://github.com/DivByDiamond/OnyxBoot).
 
 ----
 
@@ -284,8 +284,8 @@ osh> _
 
 | Project | Description |
 |---------|-------------|
-| [OnyxBoot](https://github.com/anomalyco/OnyxBoot) | Minimalist RISC-V 64-bit bootloader (C++20, ~9.5 KB) |
-| [OnyxCompiller](https://github.com/anomalyco/OnyxCompiller) | C → RV64 compiler (runs on OnyxOS as `/bin/onyxcc`) |
+| [OnyxBoot](https://github.com/DivByDiamond/OnyxBoot) | Minimalist RISC-V 64-bit bootloader (C++20, ~9.5 KB) |
+| [OnyxCompiller](https://github.com/DivByDiamond/OnyxCompiller) | C → RV64 compiler (runs on OnyxOS as `/bin/onyxcc`) |
 
 ----
 
@@ -316,11 +316,12 @@ osh> _
 - Signal delivery with user-space handlers
 - 90 syscalls total
 
-### ❌ Осталось:
-- **USB xHCI transfer** — URB-слой и EHCI/OHCI control/bulk transfer готовы (`bus/usb/`); открыт только transfer-путь xHCI
-- **FAT32 long filenames (LFN)** — сейчас поддерживаются только 8.3 short names
-- **FAT32 write через VFS layer** — функции `write()`/`create()`/`unlink()` в `fat32/write.rs` готовы, но VFS-layer (`vfs/rw.rs`, `vfs/file.rs`) ещё не вызывает их для `Fs::Fat32`
-- **Динамическая загрузка модулей** — загрузка ELF-модулей ядра из userspace
+### Still open
+- **USB xHCI transfer**: the URB layer and EHCI/OHCI control/bulk transfers are done (`bus/usb/`); only the xHCI transfer path is missing
+- **Dynamic kernel modules**: loading kernel ELF modules from userspace (`/proc/modules` lists only built-in drivers)
+- **Blocking socket `recv`**: userspace busy-polls today; the kernel has no per-socket wait queue
+- **FAT32 locking**: no per-filesystem lock yet, write paths assume single-hart I/O
+- **Wall clock**: RTC-backed `gettimeofday` landed recently; see `todo.md` for the current backlog
 
 ----
 

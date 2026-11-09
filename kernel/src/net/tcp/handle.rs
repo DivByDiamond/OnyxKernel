@@ -86,6 +86,14 @@ unsafe fn handle_tcp_inner(frame: &[u8], ip_start: usize, ihl: usize, total_len:
             return;
         }
         let payload = &frame[payload_start..payload_start + payload_len];
+        // Options only matter in SYN/SYN-ACK: that is where the peer's MSS
+        // lives (parsed strictly; None keeps the RFC 1122 default).
+        let peer_mss = if flags & super::state::SYN != 0 {
+            super::mss::parse_mss_option(&frame[tcp_off + TCP_HLEN..tcp_off + data_off])
+                .unwrap_or(super::mss::TCP_DEFAULT_MSS)
+        } else {
+            super::mss::TCP_DEFAULT_MSS
+        };
         let iface = crate::drivers::virtio_net::active_device();
         if let Some(cid) = CONNS.iter().position(|slot| {
             slot.as_ref().is_some_and(|c| {
@@ -104,6 +112,9 @@ unsafe fn handle_tcp_inner(frame: &[u8], ip_start: usize, ihl: usize, total_len:
                 }
                 connection.peer_window =
                     u16::from_be_bytes([frame[tcp_off + 14], frame[tcp_off + 15]]);
+                if flags & super::state::SYN != 0 {
+                    connection.peer_mss = peer_mss;
+                }
                 let commands = tcp_transition(connection, seq, ack, flags, payload, now_us());
                 if before == 5 && (connection.state == 2 || connection.state == 7) {
                     super::listen::established(cid, connection.listener);
@@ -132,6 +143,7 @@ unsafe fn handle_tcp_inner(frame: &[u8], ip_start: usize, ihl: usize, total_len:
                 sport,
                 seq,
                 u16::from_be_bytes([frame[tcp_off + 14], frame[tcp_off + 15]]),
+                peer_mss,
             );
         }
     }

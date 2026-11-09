@@ -2,6 +2,7 @@ use super::conn::{
     CONNS, RECV_BUF_SIZE, SEND_BUF_SIZE, TIMEWAIT_US, TcpConn, alloc_conn, alloc_local_port,
     sweep_timewait,
 };
+use super::mss::TCP_MSS;
 use super::state::{SEG_ACK, drain_acked, tcp_transition};
 
 pub(super) fn test_conn() -> TcpConn {
@@ -27,6 +28,7 @@ pub(super) fn test_conn() -> TcpConn {
         recv_head: 0,
         peer_fin: false,
         tw_deadline_us: 0,
+        peer_mss: TCP_MSS as u16,
     }
 }
 
@@ -185,6 +187,7 @@ fn test_conn_table_alloc_port_sweep() {
             recv_head: 0,
             peer_fin: false,
             tw_deadline_us: 0,
+            peer_mss: TCP_MSS as u16,
         });
         // alloc_local_port never hands out a port already in use.
         assert_ne!(alloc_local_port(), sport);
@@ -292,6 +295,29 @@ fn zero_window_send_does_not_postpone_outstanding_data_retries() {
         assert_eq!(super::sock::tcp_send(0, b"more"), Ok(0));
         assert_eq!(CONNS[0].unwrap().last_tx_us, 123);
         assert_eq!(CONNS[0].unwrap().retries, 2);
+        CONNS = saved;
+        crate::net::lock::net_unlock();
+    }
+}
+
+#[test]
+fn send_is_clamped_to_the_peer_announced_mss() {
+    let _serial = crate::net::lock::test_serial();
+    unsafe {
+        crate::net::lock::net_lock();
+        let saved = CONNS;
+        let mut c = test_conn();
+        c.state = 2;
+        // A peer that announced MSS=100 (or fell back to the RFC default)
+        // must never receive a larger segment than it accepted.
+        c.peer_mss = 100;
+        c.peer_window = 2048;
+        CONNS[0] = Some(c);
+        assert_eq!(super::sock::tcp_send(0, &[b'x'; 500]), Ok(100));
+        assert_eq!(CONNS[0].unwrap().send_len, 100);
+        // The unclamped path still works for the default1460.
+        CONNS[0].as_mut().unwrap().peer_mss = super::mss::TCP_MSS as u16;
+        assert_eq!(super::sock::tcp_send(0, &[b'y'; 500]), Ok(500));
         CONNS = saved;
         crate::net::lock::net_unlock();
     }

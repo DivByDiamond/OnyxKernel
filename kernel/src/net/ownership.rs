@@ -124,7 +124,7 @@ mod tests {
             net_lock();
             let saved = tcp::conn::CONNS;
             let id = listen(34569, 41).unwrap();
-            tcp::listen::incoming_syn(34569, [192, 168, 50, 2], 40001, 100, 2048);
+            tcp::listen::incoming_syn(34569, [192, 168, 50, 2], 40001, 100, 2048, 1460);
             let cid = tcp::conn::CONNS
                 .iter()
                 .position(|slot| slot.as_ref().is_some_and(|c| c.listener == id))

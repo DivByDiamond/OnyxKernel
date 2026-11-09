@@ -28,8 +28,8 @@ OnyxKernel — 64-битное RISC-V ядро ОС (~98% Rust, ассембле
 с журналированием и снэпшотами, вытесняющей многозадачностью и полноценным
 юзерлендом с аутентификацией.
 
-Часть экосистемы [OnyxOS](https://github.com/anomalyco/OnyxOS). Загружается
-[OnyxBoot](https://github.com/anomalyco/OnyxBoot).
+Часть экосистемы [OnyxOS](https://github.com/DivByDiamond/OnyxOS). Загружается
+[OnyxBoot](https://github.com/DivByDiamond/OnyxBoot).
 
 ----
 
@@ -263,8 +263,8 @@ osh> _
 
 | Проект | Описание |
 |--------|----------|
-| [OnyxBoot](https://github.com/anomalyco/OnyxBoot) | Минималистичный RISC-V 64-bit загрузчик (C++20, ~9.5 КБ) |
-| [OnyxCompiller](https://github.com/anomalyco/OnyxCompiller) | Компилятор C → RV64 (работает на OnyxOS как `/bin/onyxcc`) |
+| [OnyxBoot](https://github.com/DivByDiamond/OnyxBoot) | Минималистичный RISC-V 64-bit загрузчик (C++20, ~9.5 КБ) |
+| [OnyxCompiller](https://github.com/DivByDiamond/OnyxCompiller) | Компилятор C → RV64 (работает на OnyxOS как `/bin/onyxcc`) |
 
 ----
 

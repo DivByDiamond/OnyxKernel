@@ -18,7 +18,6 @@ pub(in crate::net) const SEND_BUF_SIZE: usize = 2048;
 pub(in crate::net) const RECV_BUF_SIZE: usize = 8192;
 
 pub(in crate::net) const TCP_HLEN: usize = 20;
-
 /// How long a connection stays in state 4 (TIMEWAIT-equivalent) before
 /// its slot is reclaimed by sweep_timewait(). Bounded and short because
 /// this stack keeps no retransmission state — anything arriving for an
@@ -53,6 +52,9 @@ pub(in crate::net) struct TcpConn {
     /// uptime_us() deadline past which a state-4 slot is freed.
     /// 0 = no deadline (connection not in TIMEWAIT).
     pub(in crate::net) tw_deadline_us: u64,
+    /// Announced peer MSS from the SYN/SYN-ACK; defaults to TCP_DEFAULT_MSS
+    /// if the handshake never carried the MSS option.
+    pub(in crate::net) peer_mss: u16,
 }
 
 /// Scalar snapshot of the fields the TX path reads.
@@ -142,13 +144,21 @@ pub(crate) fn tcp_checksum_ok(src_ip: &[u8; 4], dst_ip: &[u8; 4], segment: &[u8]
 /// `CONNS` use this so no ~10 KB `TcpConn` value ever lands on the kernel
 /// stack (see `TcpTx` for the overflow this fixes).
 pub(super) fn send_tcp_seg_tx(c: TcpTx, flags: u8, data: &[u8]) {
-    let tcp_len = TCP_HLEN + data.len();
+    // SYN/SYN-ACK segments carry our MSS option (kind=2, len=4) so the peer
+    // can stop assuming the RFC 1122 fallback of 536 bytes.
+    let opt_len = if flags & super::state::SYN != 0 {
+        super::mss::MSS_OPT_LEN
+    } else {
+        0
+    };
+    let hdr_len = TCP_HLEN + opt_len;
+    let tcp_len = hdr_len + data.len();
     let mut seg = alloc::vec![0u8; tcp_len];
     seg[0..2].copy_from_slice(&c.src_port.to_be_bytes());
     seg[2..4].copy_from_slice(&c.dst_port.to_be_bytes());
     seg[4..8].copy_from_slice(&c.snd_nxt.to_be_bytes());
     seg[8..12].copy_from_slice(&c.rcv_nxt.to_be_bytes());
-    let off_flags = ((TCP_HLEN as u16) / 4) << 12 | flags as u16;
+    let off_flags = ((hdr_len as u16) / 4) << 12 | flags as u16;
     seg[12..14].copy_from_slice(&off_flags.to_be_bytes());
     // Advertised receive window = free space in the inbound ring, clamped
     // to the u16 wire field (RECV_BUF_SIZE is far below 65535 today, but a
@@ -157,8 +167,11 @@ pub(super) fn send_tcp_seg_tx(c: TcpTx, flags: u8, data: &[u8]) {
     seg[14..16].copy_from_slice(&window.to_be_bytes());
     seg[16..18].copy_from_slice(&[0, 0]);
     seg[18..20].copy_from_slice(&[0, 0]);
+    if opt_len > 0 {
+        seg[TCP_HLEN..hdr_len].copy_from_slice(&super::mss::mss_option(super::mss::TCP_MSS as u16));
+    }
     if !data.is_empty() {
-        seg[TCP_HLEN..].copy_from_slice(data);
+        seg[hdr_len..].copy_from_slice(data);
     }
     // SAFETY: caller holds net_lock; the context is restored after TX/ARP poll.
     unsafe {

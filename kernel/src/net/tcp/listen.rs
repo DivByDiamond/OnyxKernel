@@ -100,6 +100,7 @@ pub(in crate::net) unsafe fn incoming_syn(
     remote_port: u16,
     seq: u32,
     window: u16,
+    peer_mss: u16,
 ) {
     // SAFETY: all indices checked or allocated from bounded tables.
     unsafe {
@@ -145,6 +146,7 @@ pub(in crate::net) unsafe fn incoming_syn(
             last_tx_us: super::conn::now_us(),
             retries: 0,
             peer_window: window,
+            peer_mss,
         };
         CONNS[cid] = Some(connection);
         // Stored snd_nxt stays isn+1; the SYN-ACK itself carries isn (as

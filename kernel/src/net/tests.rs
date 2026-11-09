@@ -210,6 +210,7 @@ fn test_net_tables_concurrent_exclusivity() {
                         recv_head: 0,
                         peer_fin: false,
                         tw_deadline_us: 0,
+                        peer_mss: crate::net::tcp::mss::TCP_MSS as u16,
                     });
                     *c = cid;
                     cids_used += 1;

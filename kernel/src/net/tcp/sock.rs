@@ -53,6 +53,7 @@ unsafe fn tcp_connect_inner(dst_ip: [u8; 4], port: u16) -> KResult<usize> {
             recv_head: 0,
             peer_fin: false,
             tw_deadline_us: 0,
+            peer_mss: super::mss::TCP_MSS as u16,
         });
         // The SYN consumes one sequence number: send it with `isn` while the
         // stored `snd_nxt` stays `isn + 1` (it did when the slot was built).
@@ -117,7 +118,7 @@ unsafe fn tcp_send_inner(cid: usize, data: &[u8]) -> KResult<usize> {
         let n = data
             .len()
             .min(SEND_BUF_SIZE - conn.send_len)
-            .min(536)
+            .min(conn.peer_mss as usize)
             .min(available);
         conn.send_buf[conn.send_len..conn.send_len + n].copy_from_slice(&data[..n]);
         if n > 0 && conn.send_len == 0 {
