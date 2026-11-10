@@ -89,3 +89,23 @@ fn chunked_update_matches_one_shot() {
     let streamed = sha256_final(st);
     assert_eq!(streamed, sha256(&data));
 }
+
+/// Every chunking pattern must agree with one-shot hashing. The update path
+/// has distinct branches for a partial buffer that does / does not fill up,
+/// exact 64-byte blocks (compressed straight from the caller's slice) and a
+/// trailing remainder, so each length/chunk combination is exercised.
+#[test]
+fn chunked_update_all_chunk_sizes_match_one_shot() {
+    let data: [u8; 200] = core::array::from_fn(|i| (i * 131 % 253) as u8);
+    for len in 0..=data.len() {
+        let expect = sha256(&data[..len]);
+        for chunk in [1usize, 3, 17, 31, 63, 64, 65, 127] {
+            let mut st = sha256_init();
+            for part in data[..len].chunks(chunk) {
+                sha256_update(&mut st, part);
+            }
+            sha256_update(&mut st, &[]);
+            assert_eq!(sha256_final(st), expect, "len={len} chunk={chunk}");
+        }
+    }
+}

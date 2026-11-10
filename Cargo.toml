@@ -29,5 +29,15 @@ opt-level = "z"
 debug = true
 strip = "debuginfo"
 
+# onyx_core stays at -O3 while the rest of the workspace is size-optimised:
+# it carries the CPU-bound userspace paths (crypto KDF/login, parsers).
+# Measured 2026-11-10 (Xeon E5-2680 v3, everything else at -Oz): login KDF
+# -19%, `$5$` 5000 rounds -22%, sha256 <=65 B -10..-17%, bulk hashing
+# unchanged. Cost: +3.3..4.6 KB .text per crypto-linking init binary
+# (login/passwd/su/useradd, +16.4 KB total); the kernel shrinks by 2 KB.
+# Details: docs/history/2026-11-sha256-throughput.md.
+[profile.release.package.onyx_core]
+opt-level = 3
+
 [patch.crates-io]
 miniz_oxide = { path = "vendor/miniz_oxide" }
