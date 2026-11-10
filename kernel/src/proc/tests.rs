@@ -5,7 +5,11 @@ use crate::arch::trap_frame::TrapFrame;
 /// (`G_NEXT_PID`, `G_ALL_PROCS`, the runqueues): the host harness runs
 /// `#[test]` fns in parallel, and a concurrent `process::init()` would
 /// reset state in the middle of another test's assertions.
-fn test_serial() -> std::sync::MutexGuard<'static, ()> {
+///
+/// `pub(crate)` because the runqueue tests live in another module and touch
+/// the same globals (`runqueue::init`, `enqueue`); they must share this one
+/// lock rather than keep a second, mutually invisible one.
+pub(crate) fn test_serial() -> std::sync::MutexGuard<'static, ()> {
     static SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
     SERIAL.lock().unwrap_or_else(|e| e.into_inner())
 }

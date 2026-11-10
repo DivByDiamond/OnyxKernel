@@ -18,9 +18,12 @@ unsafe fn rq_len(hart: usize) -> usize {
 
 /// Combined test: G_RQ is a process-global static and the host test
 /// harness runs #[test] fns in parallel, so every runqueue/steal
-/// assertion lives in one function to stay deterministic.
+/// assertion lives in one function to stay deterministic. It shares
+/// `proc::tests::test_serial` with the other proc-global tests, which
+/// also call `init()` on the same statics.
 #[test]
 fn test_runqueue_fifo_affinity_remove_and_steal() {
+    let _serial = crate::proc::tests::test_serial();
     // SAFETY: host test; G_RQ is initialized here and exercised
     // single-threaded from this one merged test (no parallel access).
     unsafe {

@@ -232,7 +232,11 @@ fn test_net_tables_concurrent_exclusivity() {
 
         // 5) ARP cache: insert + lookup roundtrip and update-in-place for an
         //    existing IP (the ARP-cache race fix keeps both under net_lock).
-        let ip = [10, 8, 8, 1];
+        //    The cache is a process-global static, so the IP must be unique
+        //    to this test: `test_arp_cache_insert_lookup` owns 10.8.8.1 and
+        //    asserts it misses on entry, which failed whenever this test had
+        //    run first and left that entry behind.
+        let ip = [10, 9, 9, 1];
         let mac_a = [0x11, 0x22, 0x33, 0x44, 0x55, 0x66];
         let mac_b = [0x77, 0x88, 0x99, 0xAA, 0xBB, 0xCC];
         use crate::net::eth::{arp_insert, arp_lookup};
@@ -241,6 +245,6 @@ fn test_net_tables_concurrent_exclusivity() {
         arp_insert(ip, mac_b); // update in place, no duplicate entry
         assert_eq!(arp_lookup(ip), Some(mac_b));
         // Unknown IP still misses.
-        assert_eq!(arp_lookup([10, 8, 8, 99]), None);
+        assert_eq!(arp_lookup([10, 9, 9, 99]), None);
     }
 }
