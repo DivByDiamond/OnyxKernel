@@ -152,7 +152,8 @@ pub fn snapshot() -> (i16, i16, u8) {
     MOUSE_LOCK.lock();
     // SAFETY: lock excludes all mutations by input dispatch.
     let value = unsafe {
-        let m = (&mut *(&raw mut G_MOUSE)).read();
+        let queue = &raw mut G_MOUSE;
+        let m = (*queue).read();
         (m.x as i16, m.y as i16, m.buttons)
     };
     MOUSE_LOCK.unlock();

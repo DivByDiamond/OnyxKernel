@@ -79,9 +79,14 @@ pub fn user_pages_release(n: usize) {
     }
     // Saturating sub: defensive against transient over-decrement from
     // non-user leaf PTEs sharing a page table subtree.
-    let _ = G_USER_PAGES.fetch_update(Ordering::AcqRel, Ordering::Acquire, |v| {
-        Some(v.saturating_sub(n))
-    });
+    let mut cur = G_USER_PAGES.load(Ordering::Acquire);
+    loop {
+        let next = cur.saturating_sub(n);
+        match G_USER_PAGES.compare_exchange_weak(cur, next, Ordering::AcqRel, Ordering::Acquire) {
+            Ok(_) => break,
+            Err(actual) => cur = actual,
+        }
+    }
 }
 
 /// Number of live processes (every state except `Free`) — zombies count,

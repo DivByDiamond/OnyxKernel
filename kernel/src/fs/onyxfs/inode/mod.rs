@@ -1,4 +1,4 @@
-pub mod read;
+mod read;
 pub mod write;
 
 pub(super) use read::read_inode;

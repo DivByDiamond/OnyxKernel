@@ -20,10 +20,18 @@ mod fdt {
     pub use walk::walk;
 }
 
+/// The included display parsers use `crate::libfdt::fdt::...` paths; alias
+/// the local walker modules under that name.
+mod libfdt {
+    pub mod fdt {
+        pub use crate::fdt::{reader, walk};
+    }
+}
+
 pub use fdt::{reader, walk};
-#[path = "../../kernel/src/libfdt/fdt/frame_present.rs"]
+#[path = "../../kernel/src/libfdt/fdt/find/display/frame_present.rs"]
 mod frame_present;
-#[path = "../../kernel/src/libfdt/fdt/framebuffer.rs"]
+#[path = "../../kernel/src/libfdt/fdt/find/display/framebuffer.rs"]
 mod framebuffer;
 
 #[derive(Default)]

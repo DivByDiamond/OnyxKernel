@@ -27,8 +27,9 @@ jobs:
           python3 scripts/test-generate-syscalls.py
           cargo fmt --check -p onyx_core -p onyx_init -p onyx_tools
           rustfmt --check --edition 2024 \
-            kernel/src/drivers/video/fb/devices.rs \
-            kernel/src/libfdt/fdt/framebuffer.rs \
+            kernel/src/drivers/video/fb/present/devices.rs \
+            kernel/src/libfdt/fdt/find/display/framebuffer.rs \
+            kernel/src/libfdt/fdt/find/display/frame_present.rs \
             kernel/src/libfdt/fdt/walk.rs
 
   clippy-kernel:

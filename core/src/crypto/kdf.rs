@@ -213,4 +213,3 @@ pub fn classify_field(password: &[u8], stored: &[u8]) -> HashScheme {
         None => HashScheme::Unknown,
     }
 }
-

@@ -24,7 +24,8 @@ pub const HASH_CHARS: usize = 43;
 
 /// crypt-base64 alphabet: `.` `/` digits, uppercase, lowercase.
 /// Crypt base64 alphabet (crypt(3) `./0-9A-Za-z`).
-pub(super) const B64: &[u8; 64] = b"./0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+pub(super) const B64: &[u8; 64] =
+    b"./0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
 /// Scheme marker.
 const SALT_PREFIX: &[u8] = b"$5$";
 /// Optional rounds tag.
@@ -246,4 +247,3 @@ pub fn hash_into(password: &[u8], salt: &[u8], rounds: u32, out: &mut [u8]) -> O
     encoded.fill(0);
     Some(pos + HASH_CHARS)
 }
-

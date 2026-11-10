@@ -12,3 +12,4 @@ build/
 .claude/
 
 release_out/
+__pycache__/
