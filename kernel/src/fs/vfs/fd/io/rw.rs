@@ -2,7 +2,43 @@ use crate::fs::vfs::{
     FdToken, Fs, PERM_READ, PERM_WRITE, fd_check, fd_check_perm, fd_get, fd_update_pos, with_mount,
 };
 use crate::fs::{devfs, fat32, ipcfs, onyxfs, procfs};
+use crate::syscall::abi::O_APPEND;
 use onyx_core::errno::{Errno, KResult};
+
+/// First write offset of a descriptor: with `O_APPEND` the current end of the
+/// file, otherwise the descriptor's own position.
+fn write_start(flags: u32, pos: u32, end_of_file: u32) -> u32 {
+    if flags & O_APPEND != 0 {
+        end_of_file
+    } else {
+        pos
+    }
+}
+
+/// Where a write through `fd` starts. An appending descriptor asks the inode
+/// for the real end of file instead of trusting its cached position: a spawned
+/// child that inherited the same bound standard stream may have extended the
+/// file in the meantime.
+///
+/// # Safety
+///
+/// `fd` is a live descriptor of the calling context.
+unsafe fn write_offset(fd: &crate::fs::vfs::VfsFd) -> KResult<u32> {
+    // SAFETY: the stat reads only the inode behind `fd.ino` inside the fd's
+    // own mount context, as the open path does.
+    unsafe {
+        if fd.flags & O_APPEND == 0 || !matches!(fd.fs, Fs::Onyx) {
+            return Ok(fd.pos);
+        }
+        let mut st = onyxfs::OnyfsStat::default();
+        with_mount(fd.mnt as usize, || onyxfs::stat(fd.ino, &mut st))?;
+        Ok(write_start(
+            fd.flags,
+            fd.pos,
+            u32::try_from(st.size).unwrap_or(u32::MAX),
+        ))
+    }
+}
 
 /// # Safety
 ///
@@ -50,7 +86,8 @@ pub unsafe fn write(token: FdToken, buf: *const u8, len: u32) -> KResult<u32> {
     // and runs the write in the fd's mount context.
     unsafe {
         let idx = fd_check_perm(token, PERM_WRITE)?;
-        let fd = fd_get(idx);
+        let mut fd = fd_get(idx);
+        fd.pos = write_offset(&fd)?;
         let mnt = fd.mnt as usize;
         let written = match fd.fs {
             Fs::Onyx => with_mount(mnt, || onyxfs::write(fd.ino, buf, fd.pos, len))?,
@@ -109,3 +146,6 @@ pub unsafe fn stat(token: FdToken, size_out: &mut u32) -> KResult<()> {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests;
