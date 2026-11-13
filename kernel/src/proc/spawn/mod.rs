@@ -1,7 +1,7 @@
 use super::lifecycle::{alloc_proc, free_proc};
 use super::process::{
-    PROC_PID_INIT, PROC_RING_ROOT, PROC_RING_USER, Proc, ProcState, alloc_pid, by_pid_unlocked,
-    hart_id, proc_list_lock, proc_list_unlock,
+    PROC_PID_INIT, PROC_RING_ROOT, PROC_RING_USER, Proc, ProcState, alloc_pid, by_pid,
+    by_pid_unlocked, hart_id, proc_list_lock, proc_list_unlock,
 };
 use crate::arch::regs::*;
 use crate::arch::trap_frame::{TrapFrame, reg_truncate};
@@ -13,6 +13,17 @@ use onyx_core::errno::{Errno, KResult};
 mod wait;
 
 pub use wait::*;
+
+#[cfg(test)]
+mod tests;
+
+/// Copy the standard-stream bindings (fds 0..2, set with `F_BIND_STDIO`) of the
+/// spawning process into its still-`Creating` child, so a redirection or pipe
+/// set up by the shell also reaches external programs. Other descriptors stay
+/// private to the parent.
+pub(crate) fn inherit_stdio(parent: &Proc, child: &mut Proc) {
+    child.fds[..3].copy_from_slice(&parent.fds[..3]);
+}
 
 /// # Safety
 ///
@@ -215,9 +226,13 @@ pub unsafe fn spawn(path: &[u8], argv_user: u64, ring_hint: u8, parent_pid: u32)
             crate::mm::vmm::destroy_root(r.root_pa);
             return Err(e);
         }
-        // Fork-race fix: spawn copied ALL inherited state inside create_user
-        // (fresh image, zeroed fds), so publish immediately. create_user
-        // guarantees the child is Creating here; make it runnable.
+        // Only the standard-stream bindings are inherited; the rest of the
+        // fresh image keeps zeroed fds. The child is still Creating, so no
+        // other hart can run it while this copy happens.
+        if let (Some(parent), Some(child)) = (by_pid(parent_pid), by_pid(new_pid)) {
+            inherit_stdio(parent, child);
+        }
+        // create_user guarantees the child is Creating here; make it runnable.
         if !publish_ready(new_pid) {
             // Unreachable by contract (create_user left the node Creating);
             // keep the address-space accounting honest if it ever trips.
