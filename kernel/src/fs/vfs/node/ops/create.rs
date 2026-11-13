@@ -118,6 +118,11 @@ pub unsafe fn mkdir(path: &[u8]) -> KResult<()> {
             } else {
                 onyxfs::lookup(parent_rel, &mut st)?
             };
+            // An existing entry must survive: the dirent insert below would
+            // otherwise replace a populated directory with an empty one.
+            if onyxfs::lookup_in(parent_ino, dirname, &mut st).is_ok() {
+                return Err(Errno::Exist);
+            }
             let new_ino = onyxfs::mkdir(parent_ino, dirname)?;
             let _ = onyxfs::set_uid_gid(new_ino, cur_uid, cur_gid);
             Ok(())
