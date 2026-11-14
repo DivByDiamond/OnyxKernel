@@ -6,7 +6,7 @@ use crate::fs::onyxfs::alloc::free_data_block;
 use crate::fs::onyxfs::inode::{read_inode, write_inode};
 use crate::fs::onyxfs::journal::{journal_commit, journal_log};
 use crate::fs::onyxfs::write::check_v2;
-use crate::fs::onyxfs::{G_BUF, read_block, write_block};
+use crate::fs::onyxfs::{read_block, write_block};
 use crate::srv::timer;
 use onyx_core::errno::KResult;
 use onyx_core::formats::{ONYFS_BLOCK_SIZE, ONYFS_DIRECT_BLKS, OnyfsInode};
@@ -59,10 +59,12 @@ unsafe fn free_indirect_block(ind_blk: u32) -> KResult<()> {
     // SAFETY: single-threaded onyxfs exclusion (see # Safety); `pb` is the
     // module-global G_BUF, valid for a full block; entry loop is bounded.
     unsafe {
-        let pb = &raw mut G_BUF;
-        read_block(ind_blk, &mut *pb)?;
+        // Local copy: free_data_block() reuses the shared G_BUF for the
+        // data bitmap and would overwrite the entries being walked.
+        let mut ind_buf = [0u8; ONYFS_BLOCK_SIZE];
+        read_block(ind_blk, &mut ind_buf)?;
         for i in 0..entries_per_block() {
-            let blk = ind_entry(&*pb, i);
+            let blk = ind_entry(&ind_buf, i);
             if blk != 0 {
                 free_data_block(blk)?;
             }
@@ -83,10 +85,10 @@ unsafe fn free_double_indirect(dind_blk: u32) -> KResult<()> {
     // SAFETY: single-threaded onyxfs exclusion (see # Safety); `pb` is the
     // module-global G_BUF, valid for a full block; entry loop is bounded.
     unsafe {
-        let pb = &raw mut G_BUF;
+        let mut dind_buf = [0u8; ONYFS_BLOCK_SIZE];
+        read_block(dind_blk, &mut dind_buf)?;
         for i in 0..entries_per_block() {
-            read_block(dind_blk, &mut *pb)?;
-            let ind_blk = ind_entry(&*pb, i);
+            let ind_blk = ind_entry(&dind_buf, i);
             if ind_blk != 0 {
                 free_indirect_block(ind_blk)?;
             }
@@ -200,17 +202,17 @@ unsafe fn shrink(inode: &mut OnyfsInode, length: u64) -> KResult<()> {
             // last_needed is in the indirect range. Free indirect entries
             // past (last_needed - ONYFS_DIRECT_BLKS).
             let ind_last_needed = (last_needed - ONYFS_DIRECT_BLKS as u64) as usize;
-            let pb = &raw mut G_BUF;
-            read_block(inode.indirect, &mut *pb)?;
+            let mut ind_buf = [0u8; ONYFS_BLOCK_SIZE];
+            read_block(inode.indirect, &mut ind_buf)?;
             for i in (ind_last_needed + 1)..entries_per_block() {
-                let blk = ind_entry(&*pb, i);
+                let blk = ind_entry(&ind_buf, i);
                 if blk != 0 {
                     free_data_block(blk)?;
-                    set_ind_entry(&mut *pb, i, 0);
+                    set_ind_entry(&mut ind_buf, i, 0);
                 }
             }
-            journal_log(inode.indirect, &*pb)?;
-            write_block(inode.indirect, &*pb)?;
+            journal_log(inode.indirect, &ind_buf)?;
+            write_block(inode.indirect, &ind_buf)?;
         }
         // Note: double_indirect handling skipped — OnyxFS only grows files
         // through direct + single-indirect blocks, so no file ever has

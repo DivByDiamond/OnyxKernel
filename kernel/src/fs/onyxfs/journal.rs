@@ -17,7 +17,7 @@
 //! because the only metadata that fits in those 8 bytes (rare tail padding of
 //! dirent blocks) is not critical for crash recovery.
 use super::{G_JOURNAL_HEAD, G_SB, read_block, write_block};
-use onyx_core::errno::{Errno, KResult};
+use onyx_core::errno::KResult;
 use onyx_core::formats::{
     JournalScanStep, ONYFS_BLOCK_SIZE, ONYFS_JOURNAL_BLOCK_WRITE, ONYFS_JOURNAL_COMMIT_END,
     ONYFS_JOURNAL_DATA_SIZE, journal_entry_type, journal_replay_entry, journal_scan_step,
@@ -45,10 +45,16 @@ pub(super) unsafe fn journal_log(block_num: u32, data: &[u8; ONYFS_BLOCK_SIZE]) 
         if journal_start == 0 || (*sb_ptr).journal_size == 0 {
             return Ok(());
         }
-        let head = G_JOURNAL_HEAD;
-        if head >= (*sb_ptr).journal_size {
-            // Journal full — caller should have committed by now. Bail out.
-            return Err(Errno::NoSpace);
+        let mut head = G_JOURNAL_HEAD;
+        if head + 1 >= (*sb_ptr).journal_size {
+            // Journal full (keep one slot for the commit marker). Operations
+            // that touch many blocks, such as freeing a large file, log more
+            // images than the log can hold. Every entry logged so far has
+            // already been written to its target block, so close that part
+            // of the transaction and continue with an empty log instead of
+            // failing the whole operation.
+            journal_commit()?;
+            head = G_JOURNAL_HEAD;
         }
         let mut entry = [0u8; ONYFS_BLOCK_SIZE];
         entry[0..4].copy_from_slice(&ONYFS_JOURNAL_BLOCK_WRITE.to_le_bytes());

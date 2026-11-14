@@ -65,24 +65,24 @@ pub unsafe fn write(ino: u32, buf: *const u8, off: u32, len: u32) -> KResult<u32
                     journal_log(ind_blk, &*pb)?;
                     write_block(ind_blk, &*pb)?;
                 }
-                let pb = &raw mut G_BUF;
-                read_block(inode.indirect, &mut *pb)?;
+                // The indirect block lives in a local buffer: alloc_data_block()
+                // reuses the shared G_BUF for the data bitmap, so keeping the
+                // indirect block there would corrupt it on every new entry.
+                let mut ind_buf = [0u8; ONYFS_BLOCK_SIZE];
+                read_block(inode.indirect, &mut ind_buf)?;
                 let entry_off = ind_idx * 4;
                 blk = u32::from_le_bytes([
-                    (*pb)[entry_off],
-                    (*pb)[entry_off + 1],
-                    (*pb)[entry_off + 2],
-                    (*pb)[entry_off + 3],
+                    ind_buf[entry_off],
+                    ind_buf[entry_off + 1],
+                    ind_buf[entry_off + 2],
+                    ind_buf[entry_off + 3],
                 ]);
                 if blk == 0 {
                     blk = alloc_data_block()?;
-                    let bytes = blk.to_le_bytes();
-                    (*pb)[entry_off] = bytes[0];
-                    (*pb)[entry_off + 1] = bytes[1];
-                    (*pb)[entry_off + 2] = bytes[2];
-                    (*pb)[entry_off + 3] = bytes[3];
-                    journal_log(inode.indirect, &*pb)?;
-                    write_block(inode.indirect, &*pb)?;
+                    ind_buf[entry_off..entry_off + 4].copy_from_slice(&blk.to_le_bytes());
+                    journal_log(inode.indirect, &ind_buf)?;
+                    write_block(inode.indirect, &ind_buf)?;
+                    let pb = &raw mut G_BUF;
                     for b in (*pb).iter_mut() {
                         *b = 0;
                     }

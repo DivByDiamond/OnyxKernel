@@ -82,6 +82,10 @@ pub(super) static mut G_SB: OnyfsSuper = OnyfsSuper {
 };
 pub(super) static mut G_BUF: [u8; ONYFS_BLOCK_SIZE] = [0; ONYFS_BLOCK_SIZE];
 
+/// In-memory block device used by host unit tests instead of virtio-blk.
+#[cfg(test)]
+pub(super) static mut TEST_DISK: Option<::alloc::vec::Vec<u8>> = None;
+
 /// Next free journal slot (block offset from `journal_start`).
 pub(super) static mut G_JOURNAL_HEAD: u32 = 0;
 
@@ -97,6 +101,17 @@ pub(super) unsafe fn raw_read_block(blk: u32, buf: &mut [u8; ONYFS_BLOCK_SIZE]) 
     // are set by mount() before any I/O. Caller must not run onyxfs I/O concurrently
     // from multiple harts (globals are unsynchronized).
     unsafe {
+        #[cfg(test)]
+        if let Some(disk) = (*&raw const TEST_DISK).as_ref() {
+            let off = blk as usize * ONYFS_BLOCK_SIZE;
+            return match disk.get(off..off + ONYFS_BLOCK_SIZE) {
+                Some(s) => {
+                    buf.copy_from_slice(s);
+                    Ok(())
+                }
+                None => Err(onyx_core::errno::Errno::Io),
+            };
+        }
         let lba = (G_LBA_BASE as u64) + (blk as u64) * 8;
         // A single OnyxFS block is 4096 bytes = 8 × 512-byte sectors. We issue
         // ONE batched `virtio_req::read_multi` call covering all 8 sectors rather
@@ -120,6 +135,17 @@ pub(super) unsafe fn raw_write_block(blk: u32, buf: &[u8; ONYFS_BLOCK_SIZE]) -> 
     // SAFETY: buf points to a fully initialized ONYFS_BLOCK_SIZE buffer owned by the
     // caller; G_DEV/G_LBA_BASE were set by mount(). Same exclusion contract as read_block.
     unsafe {
+        #[cfg(test)]
+        if let Some(disk) = (*&raw mut TEST_DISK).as_mut() {
+            let off = blk as usize * ONYFS_BLOCK_SIZE;
+            return match disk.get_mut(off..off + ONYFS_BLOCK_SIZE) {
+                Some(s) => {
+                    s.copy_from_slice(buf);
+                    Ok(())
+                }
+                None => Err(onyx_core::errno::Errno::Io),
+            };
+        }
         let lba = (G_LBA_BASE as u64) + (blk as u64) * 8;
         // Same batching as `read_block` — a single `write_multi` call for the
         // whole 8-sector block.
@@ -151,3 +177,6 @@ pub(super) unsafe fn dirents_per_block() -> usize {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod large_file_tests;
