@@ -74,7 +74,12 @@ pub(in crate::syscall) unsafe fn sys_net_send(conn_id: u64, buf: u64, len: u64) 
 /// Blocks until at least one byte arrives (or EOF/reset/error), matching
 /// the console/IPC read convention: pump RX, try the ring, and yield if it
 /// is empty. No lock is held across `sched_yield` (NET_LOCK is a leaf).
-pub(in crate::syscall) unsafe fn sys_net_recv(tf: &mut TrapFrame, conn_id: u64, buf: u64, len: u64) -> i64 {
+pub(in crate::syscall) unsafe fn sys_net_recv(
+    tf: &mut TrapFrame,
+    conn_id: u64,
+    buf: u64,
+    len: u64,
+) -> i64 {
     // SAFETY: buf/len passed user_ptr_ok and the per-page writable
     // check_user_range above, so the slice handed to net::tcp_recv covers
     // only mapped, writable user pages.

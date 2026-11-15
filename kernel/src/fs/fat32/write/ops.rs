@@ -11,9 +11,9 @@ use super::super::{
     ATTR_DIRECTORY, ATTR_LFN, DIR_ENTRY_SIZE, ENTRIES_PER_SECTOR, G_ROOT_CLUSTER, G_SPC, fat_entry,
     fat32_name_8_3, is_eoc, is_valid_cluster, read_cluster_sector, scan_dir_entries,
 };
-use super::entry::dirent::{find_free_dirent_slot, write_dirent};
-use super::alloc::fat::{alloc_cluster, write_cluster_sector};
 use super::alloc::chain::free_chain;
+use super::alloc::fat::{alloc_cluster, write_cluster_sector};
+use super::entry::dirent::{find_free_dirent_slot, write_dirent};
 
 /// Create a new file in `dir_cluster` with the given 8.3 name.
 /// Returns the new file's first cluster (or 0 for an empty file).

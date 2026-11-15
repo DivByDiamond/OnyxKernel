@@ -1,11 +1,13 @@
 #![no_std]
 #![no_main]
 
-#[path = "../auth/mod.rs"]
-mod auth;
+#[path = "../allocator/mod.rs"]
+mod allocator;
+
+use onyx_init::auth;
 use onyx_init::{syscalls, term};
 
-mod password;
+use onyx_init::login_password as password;
 mod seed;
 mod session;
 

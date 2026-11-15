@@ -8,7 +8,7 @@ pub mod regs;
 // Needed by every real (non-test) build now that rv32 also arms its timer
 // via the legacy SBI_SET_TIMER ecall (arch::asm::mtrap_32, 2026-09-12) —
 // previously this only mattered for smode and real rv64.
-#[cfg(any(feature = "smode", not(test)))]
+#[cfg(any(target_arch = "riscv32", target_arch = "riscv64"))]
 pub mod sbi;
 
 pub use cpu::{csr, smp, trap_frame};

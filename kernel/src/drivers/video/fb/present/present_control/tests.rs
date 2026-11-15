@@ -2,16 +2,25 @@ use super::*;
 #[test]
 fn probe_requires_exact_magic_version_and_atomic_snapshot_capability() {
     let mut regs = [0u32; 8];
-    let base = regs.as_ptr() as usize;
+    let base = regs.as_mut_ptr() as usize;
+    let set = |index: usize, value: u32| {
+        assert!(index < 8);
+        // SAFETY: index is bounded and base points to the live aligned array.
+        unsafe { core::ptr::write_volatile((base as *mut u32).add(index), value) };
+    };
+    // SAFETY: base covers eight initialized fake MMIO registers.
     assert!(unsafe { Controller::probe(base) }.is_none());
-    regs[0] = MAGIC;
-    regs[1] = 1;
-    regs[4] = 1;
+    set(0, MAGIC);
+    set(1, 1);
+    set(4, 1);
+    // SAFETY: the same live register array remains valid.
     assert!(unsafe { Controller::probe(base) }.is_some());
-    regs[1] = 2;
+    set(1, 2);
+    // SAFETY: the same live register array remains valid.
     assert!(unsafe { Controller::probe(base) }.is_none());
-    regs[1] = 1;
-    regs[4] = 0;
+    set(1, 1);
+    set(4, 0);
+    // SAFETY: the same live register array remains valid.
     assert!(unsafe { Controller::probe(base) }.is_none());
 }
 #[test]

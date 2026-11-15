@@ -4,8 +4,8 @@ use crate::proc;
 use crate::srv::timer;
 use onyx_core::errno::{Errno, KResult};
 
-use super::fmt::consts::*;
 use super::fmt;
+use super::fmt::consts::*;
 
 /// # Safety
 ///

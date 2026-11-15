@@ -4,5 +4,5 @@ mod lines;
 pub(crate) mod stat;
 
 pub use consts::*;
-pub use stat::*;
 pub(super) use lines::*;
+pub use stat::*;

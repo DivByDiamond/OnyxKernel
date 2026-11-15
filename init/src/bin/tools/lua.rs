@@ -3,12 +3,10 @@
 #![no_std]
 #![no_main]
 
-extern crate alloc;
+#[path = "../../allocator/mod.rs"]
+mod allocator;
 
-mod kalloc_lua;
-#[path = "../../luavm/mod.rs"]
-mod luavm;
-use onyx_init::syscalls;
+use onyx_init::luavm;
 
 use luavm::repl;
 

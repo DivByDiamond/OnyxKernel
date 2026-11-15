@@ -12,11 +12,11 @@ mod handle;
 #[cfg(test)]
 mod tests;
 
+pub use conn::sock::{tcp_close, tcp_connect, tcp_recv, tcp_send};
 pub use control::listen;
 #[cfg(test)]
 pub(crate) use control::mss;
 pub use handle::handle_tcp;
-pub use conn::sock::{tcp_close, tcp_connect, tcp_recv, tcp_send};
 
 /// Periodic TCP maintenance: reclaim TIMEWAIT slots. Called from
 /// net::poll so dead connections cannot accumulate.

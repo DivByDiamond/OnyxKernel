@@ -3,9 +3,7 @@
 //! FSINFO hint update.
 use onyx_core::errno::{Errno, KResult};
 
-use super::super::super::{
-    FAT32_EOC, G_DEV, G_FAT_SZ, G_FSINFO, G_NUM_FATS, G_RESVD, read_sec,
-};
+use super::super::super::{FAT32_EOC, G_DEV, G_FAT_SZ, G_FSINFO, G_NUM_FATS, G_RESVD, read_sec};
 
 /// FSINFO sector lead signature (offset 0).
 const FSINFO_LEAD_SIG: u32 = 0x4161_5252;

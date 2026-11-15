@@ -6,8 +6,8 @@
 mod access;
 mod flow;
 
-pub use onyx_core::ringbuf::{ring_free, ring_read, ring_used, ring_write};
 pub use flow::{disconnect_waiter, recv, send};
+pub use onyx_core::ringbuf::{ring_free, ring_read, ring_used, ring_write};
 
 #[cfg(test)]
 mod tests;

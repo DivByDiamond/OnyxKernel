@@ -101,7 +101,7 @@ fn parse(len: usize) -> Option<Font> {
         || charsize == 0
         || height == 0
         || width == 0
-        || width % 8 != 0
+        || !width.is_multiple_of(8)
         || num_glyphs.saturating_mul(charsize) > len.saturating_sub(hdr)
     {
         return None;
@@ -126,7 +126,7 @@ pub fn current() -> Option<&'static Font> {
 /// Length of valid data in FONT_BUF (set by init()).
 fn font_len() -> usize {
     // SAFETY: read-only snapshot of a static written once by init().
-    unsafe { *(&raw const FONT_LEN) }
+    unsafe { FONT_LEN }
 }
 
 /// Copy of the glyph bytes for `c`, or None when out of range. Reads go
@@ -158,7 +158,7 @@ pub fn draw_char(
     let Some(font) = current() else { return 8 };
     let bytes_per_row = if font.psf1 { 1 } else { font.width / 8 };
     for row in 0..font.height {
-        let Some(row_bits) = glyph_row(&font, c, row) else {
+        let Some(row_bits) = glyph_row(font, c, row) else {
             break;
         };
         for col in 0..font.width {
@@ -214,7 +214,7 @@ pub fn draw_text_fg(
             break;
         }
         for row in 0..font.height {
-            let Some(row_bits) = glyph_row(&font, c, row) else {
+            let Some(row_bits) = glyph_row(font, c, row) else {
                 break;
             };
             for col in 0..font.width.min(bytes_per_row * 8) {

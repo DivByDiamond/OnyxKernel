@@ -35,7 +35,10 @@ const ERASE_SEQ: [u8; 3] = [0x08, b' ', 0x08];
 /// swallows a genuine stray trailing `\n` completing a `\r\n` pair left
 /// over from the previous field's Enter, and never blocks or discards
 /// anything else.
+/// # Safety
+/// The caller exclusively owns the process console until this call returns.
 pub unsafe fn read_secret_line(buf: &mut [u8]) -> &[u8] {
+    // SAFETY: The caller owns the console; syscall buffers stay live and in bounds.
     unsafe {
         let _ = syscalls::ioctl(0, TIOCSRAW, 0);
 

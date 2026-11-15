@@ -1,18 +1,8 @@
-//! Minimal global allocator for the auth-using init binaries.
+//! Per-executable 16 KiB bump allocator, explicitly installed by each binary.
 //!
-//! The pure crypto/KDF code now lives in `onyx_core`, whose crate root
-//! declares `extern crate alloc`; linking that crate therefore requires
-//! every consumer binary to define a `#[global_allocator]`. Nothing in the
-//! init userspace actually performs a heap allocation today, so this bump
-//! allocator exists purely to satisfy the linker contract — it is expected
-//! to stay untouched at runtime. If allocation ever happens and the tiny
-//! arena is exhausted, requests fail cleanly (`null`) instead of panicking.
-//!
-//! Design notes:
-//! - Fixed static arena, single-word bump pointer, spin bit for safety
-//!   under the (currently impossible) concurrent case.
-//! - `dealloc` is a no-op: bump allocation never reclaims. Acceptable for
-//!   an allocator that must never be exercised.
+//! Shared library modules never install a global allocator. Auth uses fixed
+//! buffers; the Lua VM allocates from this arena. Deallocation remains a no-op,
+//! preserving the existing executables' allocator behavior and capacity.
 
 use core::alloc::{GlobalAlloc, Layout};
 use core::ptr;
@@ -28,6 +18,7 @@ static mut NEXT: usize = 0;
 
 impl BumpAlloc {
     fn alloc_inner(&self, layout: Layout) -> *mut u8 {
+        // SAFETY: BUSY serializes arena/NEXT access; returned ranges stay in ARENA.
         unsafe {
             let base = ptr::addr_of_mut!(ARENA) as usize;
             let start = (base + NEXT).next_multiple_of(layout.align().max(1));
@@ -44,7 +35,10 @@ impl BumpAlloc {
     }
 }
 
+// SAFETY: BUSY serializes allocation; aligned disjoint ranges come from a static arena.
 unsafe impl GlobalAlloc for BumpAlloc {
+    /// # Safety
+    /// `layout` must meet GlobalAlloc's nonzero-size allocation contract.
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         while BUSY.swap(true, Ordering::Acquire) {
             core::hint::spin_loop();
@@ -54,6 +48,8 @@ unsafe impl GlobalAlloc for BumpAlloc {
         p
     }
 
+    /// # Safety
+    /// The pointer/layout pair must denote a live allocation from this allocator.
     unsafe fn dealloc(&self, _ptr: *mut u8, _layout: Layout) {}
 }
 

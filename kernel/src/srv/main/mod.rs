@@ -43,7 +43,10 @@ pub unsafe fn kmain(hartid: usize, fdt_addr: usize) -> ! {
         // the kernel in M-mode; the first SBI ecall (timer arm) would then trap
         // to mtvec=0 and silently kill the machine right after the trap-init
         // banner (no panic, no kdump). Detect it while the console works.
-        #[cfg(feature = "smode")]
+        #[cfg(all(
+            feature = "smode",
+            any(target_arch = "riscv32", target_arch = "riscv64")
+        ))]
         if crate::arch::sbi::hart_in_m_mode() {
             crate::kpanic!(
                 "boot",

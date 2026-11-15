@@ -25,12 +25,8 @@ jobs:
         run: |
           python3 scripts/generate-syscalls.py --check
           python3 scripts/test-generate-syscalls.py
-          cargo fmt --check -p onyx_core -p onyx_init -p onyx_tools
-          rustfmt --check --edition 2024 \
-            kernel/src/drivers/video/fb/present/devices.rs \
-            kernel/src/libfdt/fdt/find/display/framebuffer.rs \
-            kernel/src/libfdt/fdt/find/display/frame_present.rs \
-            kernel/src/libfdt/fdt/walk.rs
+          cargo fmt --all -- --check
+          python3 scripts/quality/no-dead-allow.py
 
   clippy-kernel:
     runs-on: ubuntu-latest
@@ -41,18 +37,13 @@ jobs:
         uses: dtolnay/rust-toolchain@1.97.1
         with:
           targets: riscv64gc-unknown-none-elf, riscv32imac-unknown-none-elf
-          components: clippy
+          components: clippy, rustfmt
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
 
-      # The package library is a std-based host-test harness, so lint it
-      # separately from the freestanding RISC-V kernel binary.
-      - name: clippy onyx_kernel lib (host, strict)
-        run: cargo clippy -p onyx_kernel --lib -- -D warnings
-
-      - name: clippy onyx_kernel target riscv64 (strict)
-        run: cargo clippy -p onyx_kernel --release --target riscv64gc-unknown-none-elf --bin onyx-kernel -- -D warnings
+      - name: Full strict clippy matrix
+        run: bash scripts/quality/check.sh
 
   test-core:
     runs-on: ubuntu-latest
@@ -67,20 +58,8 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
 
-      # Strict clippy on the library itself (-A non-snake-case: SIG0/SIG1
-      # in core/src/crypto/sha256.rs follow standard SHA-256 paper naming).
-      # Note: core/src/lib.rs has #![warn(clippy::all)], and source
-      # attributes take precedence over command-line -A flags, so
-      # pre-existing style lints in the embedded tests can't be allowed
-      # from here — they're tracked by the advisory step below.
-      - name: clippy onyx_core lib (strict)
-        run: cargo clippy -p onyx_core -- -D warnings -A non-snake-case
-
-      # Advisory until the cfg(test) code in core passes clippy
-      # (b"..\0" c-string literals, vec! in tests, const asserts).
-      - name: clippy onyx_core tests (advisory)
-        run: cargo clippy -p onyx_core --all-targets -- -D warnings -A non-snake-case
-        continue-on-error: true
+      - name: Strict clippy including tests
+        run: cargo clippy -p onyx_core --all-targets -- -D warnings
 
       - name: Test core
         run: cargo test -p onyx_core

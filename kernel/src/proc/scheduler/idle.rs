@@ -3,12 +3,9 @@ use core::sync::atomic::Ordering;
 use crate::{
     arch::{
         csr,
-        regs::{SIE_SEIE, SIE_STIE, SSTATUS_SIE, SSTATUS_SPP},
-        trap_frame::TrapFrame,
+        regs::{SIE_SEIE, SIE_STIE, SSTATUS_SIE},
     },
-    proc::process::{
-        G_HART_IDLE_TF, G_HART_IDLE_TF_VALID, G_NEED_RESCHED, current_for_hart, hart_id,
-    },
+    proc::process::{G_NEED_RESCHED, current_for_hart, hart_id},
     srv::timer,
 };
 
@@ -87,6 +84,9 @@ pub unsafe fn is_idle() -> bool {
 /// before any process ever runs on it (so `G_HART_IDLE_TF[hartid]` is not
 /// yet relied upon) and before interrupts are enabled.
 pub unsafe fn seed_boot_hart_idle_context(hartid: usize) {
+    #[cfg(test)]
+    let _ = hartid;
+    #[cfg(not(test))]
     // SAFETY: reads this hart's own live gp/tp/satp (stable, correct for
     // this hart at boot); writes only this hart's own G_HART_IDLE_TF slot,
     // which no other hart touches (per-hart ownership, same as everywhere
@@ -100,6 +100,8 @@ pub unsafe fn seed_boot_hart_idle_context(hartid: usize) {
         // `sched_enter_idle` from code reachable under `cfg(test)`).
         #[cfg(not(test))]
         {
+            use crate::arch::{regs::SSTATUS_SPP, trap_frame::TrapFrame};
+            use crate::proc::process::{G_HART_IDLE_TF, G_HART_IDLE_TF_VALID};
             let gp: usize;
             let tp: usize;
             core::arch::asm!("mv {0}, gp", out(reg) gp);
@@ -117,10 +119,6 @@ pub unsafe fn seed_boot_hart_idle_context(hartid: usize) {
             tf.satp = reg_truncate(satp);
             G_HART_IDLE_TF[hartid] = tf;
             G_HART_IDLE_TF_VALID[hartid].store(true, Ordering::Release);
-        }
-        #[cfg(test)]
-        {
-            let _ = hartid;
         }
     }
 }

@@ -55,14 +55,6 @@ pub(crate) unsafe fn rd64_lo(p: *const u8) -> u64 {
 
 /// # Safety
 ///
-/// `p` must point to at least 4 readable bytes in mapped memory.
-pub(crate) unsafe fn rd64_hi(p: *const u8) -> u32 {
-    // SAFETY: caller contract guarantees 4 readable bytes at `p`.
-    unsafe { rd32(p) }
-}
-
-/// # Safety
-///
 /// `offset` must address a NUL-terminated string within the FDT strings
 /// block (i.e. `init()` must have succeeded and the offset must come from
 /// the parsed struct block, per the FDT spec).

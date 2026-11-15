@@ -111,7 +111,12 @@ pub(super) unsafe fn control_trbs(
         // IOC is where this TD's transfer event comes from.
         trbs[n].set_type(ring::TRB_STATUS);
         trbs[n].set_flags(
-            ring::TRB_IOC | if data_len == 0 || !data_in { 1 << 16 } else { 0 },
+            ring::TRB_IOC
+                | if data_len == 0 || !data_in {
+                    1 << 16
+                } else {
+                    0
+                },
         );
         (trbs, n + 1)
     }

@@ -10,6 +10,9 @@
 #![no_std]
 #![no_main]
 
+#[path = "../../allocator/mod.rs"]
+mod allocator;
+
 #[path = "../../libtui/mod.rs"]
 mod libtui;
 use onyx_init::syscalls;
@@ -169,7 +172,7 @@ pub unsafe extern "C" fn _start() -> ! {
             }
             // Pointer snapshot (kernel accumulates virtio-input mouse events):
             // moves/clicks flow through the widget set; Exit ends the demo.
-            if syscalls::mouse_read(&raw mut mouse as *mut MouseEvt as *mut u8) == 0 {
+            if syscalls::mouse_read((&raw mut mouse).cast::<u8>()) == 0 {
                 let move_ev = Event::MouseMove {
                     x: mouse.x,
                     y: mouse.y,

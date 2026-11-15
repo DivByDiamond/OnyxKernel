@@ -5,7 +5,9 @@ use onyx_core::errno::{Errno, KResult};
 
 use super::pty::pty_ioctl::pty_ioctl;
 use super::pty::pty_nodes;
-use super::{DEVFS_FB0_INO, DEVFS_HVC0_INO, DevfsStat, blk, framebuffer, is_blk_ino, is_framebuffer_ino};
+use super::{
+    DEVFS_FB0_INO, DEVFS_HVC0_INO, DevfsStat, blk, framebuffer, is_blk_ino, is_framebuffer_ino,
+};
 
 fn st(ino: u32, size: u32, mode: u32) -> DevfsStat {
     DevfsStat { ino, size, mode }

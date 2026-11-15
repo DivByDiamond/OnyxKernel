@@ -17,7 +17,7 @@ use super::{
 /// malformed blob can no longer be read past its buffer (the previous
 /// implementation trusted the blob to be well-formed and could walk past
 /// `end` on a truncated FDT_PROP or unterminated node name).
-pub unsafe fn walk(cb: &mut dyn FnMut(&str, &[(u32, &[u8])]) -> bool) {
+pub unsafe fn walk(cb: &mut impl FnMut(&str, &[(u32, &[u8])]) -> bool) {
     unsafe {
         // SAFETY: caller contract: init() ran and validated the DTB, so
         // G_STRUCT/G_STRUCT_SIZE describe the magic-checked blob.

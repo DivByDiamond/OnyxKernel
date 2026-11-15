@@ -25,5 +25,5 @@ fn test_mnt_root_sentinel_casts_to_fd_byte() {
     // VfsFd.mnt stores the root sentinel truncated to u8; with_mount
     // treats any slot >= MAX_MOUNTS as root, so 0xFF must qualify.
     assert_eq!(MNT_ROOT as u8, 0xFF);
-    assert!(MNT_ROOT >= MAX_MOUNTS);
+    assert!(core::hint::black_box(MNT_ROOT) >= MAX_MOUNTS);
 }

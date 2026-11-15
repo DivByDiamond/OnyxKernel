@@ -7,7 +7,7 @@ use crate::drivers::fb;
 #[test]
 fn present_publishes_frame_and_cursor_stamps_front() {
     let _g = LOCK.lock().unwrap();
-    let mut s = install();
+    let s = install();
     fb::test_publish_back(back_ptr(&s));
     let front_before = s.front.clone();
 
@@ -22,9 +22,7 @@ fn present_publishes_frame_and_cursor_stamps_front() {
     );
 
     // Present (caller holds the console lock contract in tests).
-    unsafe {
-        present_locked();
-    }
+    present_locked();
 
     // Invariant 3: the finished frame is now visible, byte-exact.
     assert_eq!(s.front, s.back, "present did not publish the back buffer");

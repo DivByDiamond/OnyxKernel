@@ -8,13 +8,13 @@ pub(crate) use types::{
     G_STRINGS_SIZE, G_STRUCT, G_STRUCT_SIZE, G_TOTALSIZE,
 };
 
+#[cfg(test)]
+pub(crate) use find::init_from;
 pub use find::{
     FramePresent, SimpleFramebuffer, find_clint, find_frame_present, find_plic, find_sdhci,
     find_simple_framebuffer, find_simple_framebuffers, find_uart, find_virtio, init, is_qemu,
     is_sedna, memory, model,
 };
-#[cfg(test)]
-pub(crate) use find::init_from;
 pub use reader::prop_name;
 pub use types::{FdtMemory, FdtMmio};
 pub use walk::walk;

@@ -12,11 +12,7 @@ pub(super) fn execute_control(vm: &mut VM, instr: Instruction) -> Result<(), Str
         Instruction::Return => {
             let ret = vm.pop();
             vm.call_stack.pop();
-            if vm.call_stack.is_empty() {
-                vm.push(ret)?;
-            } else {
-                vm.push(ret)?;
-            }
+            vm.push(ret)?;
         }
 
         Instruction::GetGlobal(name) => {

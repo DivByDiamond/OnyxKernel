@@ -1,5 +1,5 @@
-use crate::fs::fat32::ATTR_LFN;
 use super::*;
+use crate::fs::fat32::ATTR_LFN;
 
 fn lfn_entry(seq: u8, checksum: u8, units: &[u16]) -> [u8; 32] {
     let mut e = [0xFFu8; 32];

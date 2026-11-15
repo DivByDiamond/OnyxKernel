@@ -9,7 +9,10 @@ pub fn register(vm: &mut VM) {
     let mut math_lib = BTreeMap::new();
 
     // Math constants
-    math_lib.insert(ValueKey::Str("pi".into()), Value::Number(3.141592653589793));
+    math_lib.insert(
+        ValueKey::Str("pi".into()),
+        Value::Number(core::f64::consts::PI),
+    );
 
     // Placeholders for math functions
     math_lib.insert(ValueKey::Str("abs".into()), Value::Nil);

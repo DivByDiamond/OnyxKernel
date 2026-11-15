@@ -1,6 +1,6 @@
 use super::super::state::FONT_H;
-use core::sync::atomic::Ordering;
 use crate::drivers::fb;
+use core::sync::atomic::Ordering;
 
 fn fb_info() -> (usize, usize, usize, usize, usize) {
     fb::info()
@@ -25,7 +25,12 @@ pub(super) fn ensure_saved(bytes: usize) -> usize {
     let pages = bytes.div_ceil(crate::mm::pmm::PAGE_SIZE);
     match unsafe { crate::mm::pmm::alloc_n(pages) } {
         Ok(pa) => {
-            match super::G_SAVE_PA.compare_exchange(0, pa as usize, Ordering::AcqRel, Ordering::Acquire) {
+            match super::G_SAVE_PA.compare_exchange(
+                0,
+                pa as usize,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
                 Ok(_) => pa as usize,
                 Err(existing) => {
                     unsafe { crate::mm::pmm::free(pa) };

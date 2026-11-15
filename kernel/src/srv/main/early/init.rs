@@ -91,13 +91,13 @@ pub(crate) unsafe fn early_init(fdt_addr: usize) {
         // this is real firmware; under OnyxBoot it is the M-mode shim
         // (arch/asm/mtrap.rs), which must answer the same probe for SRST so
         // reboot/poweroff work on both chains.
-        #[cfg(not(test))]
+        #[cfg(all(not(test), any(target_arch = "riscv32", target_arch = "riscv64")))]
         log_sbi_capabilities();
     }
 }
 
 /// Log the SBI spec version and SRST availability (boot evidence).
-#[cfg(not(test))]
+#[cfg(all(not(test), any(target_arch = "riscv32", target_arch = "riscv64")))]
 unsafe fn log_sbi_capabilities() {
     use crate::arch::sbi;
     let Some((major, minor)) = sbi::spec_version_parts() else {

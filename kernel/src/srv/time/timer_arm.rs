@@ -11,14 +11,26 @@
 //! CLINT-MMIO path below (`write_mtimecmp`/`arm_timer_for_hart`) now only
 //! exists as a `cfg(test)` stub for host unit tests, which have no real
 //! CSRs/firmware to ecall into.
-#[cfg(not(feature = "smode"))]
+#[cfg(any(
+    not(feature = "smode"),
+    not(any(target_arch = "riscv32", target_arch = "riscv64"))
+))]
 use crate::arch::mmio::Mmio;
-#[cfg(not(feature = "smode"))]
+#[cfg(any(
+    not(feature = "smode"),
+    not(any(target_arch = "riscv32", target_arch = "riscv64"))
+))]
 use crate::arch::regs::CLINT_BASE;
 
-#[cfg(not(feature = "smode"))]
+#[cfg(any(
+    not(feature = "smode"),
+    not(any(target_arch = "riscv32", target_arch = "riscv64"))
+))]
 pub(super) static mut G_MTIME: usize = 0;
-#[cfg(not(feature = "smode"))]
+#[cfg(any(
+    not(feature = "smode"),
+    not(any(target_arch = "riscv32", target_arch = "riscv64"))
+))]
 pub(super) static mut G_MTIMECMP: usize = 0;
 
 /// # Safety
@@ -26,7 +38,10 @@ pub(super) static mut G_MTIMECMP: usize = 0;
 /// Boot-time only, before any `read_mtime`/`arm_timer` call: sets the
 /// CLINT MMIO base addresses used by the non-`smode` builds.
 pub(super) unsafe fn init_mmio_bases() {
-    #[cfg(not(feature = "smode"))]
+    #[cfg(any(
+        not(feature = "smode"),
+        not(any(target_arch = "riscv32", target_arch = "riscv64"))
+    ))]
     {
         // SAFETY: single boot-hart call, before any reader; not(smode)-only statics.
         unsafe {
@@ -36,7 +51,10 @@ pub(super) unsafe fn init_mmio_bases() {
     }
 }
 
-#[cfg(feature = "smode")]
+#[cfg(all(
+    feature = "smode",
+    any(target_arch = "riscv32", target_arch = "riscv64")
+))]
 /// # Safety
 ///
 /// S-mode only: reads the `time` CSR, valid whenever S-mode timer access
@@ -51,7 +69,10 @@ pub(super) unsafe fn read_mtime() -> u64 {
     }
 }
 
-#[cfg(not(feature = "smode"))]
+#[cfg(any(
+    not(feature = "smode"),
+    not(any(target_arch = "riscv32", target_arch = "riscv64"))
+))]
 /// # Safety
 ///
 /// M-mode-boot kernels only: `G_MTIME` must have been set by
@@ -71,7 +92,7 @@ pub(super) unsafe fn read_mtime() -> u64 {
     }
 }
 
-#[cfg(any(feature = "smode", not(test)))]
+#[cfg(any(target_arch = "riscv32", target_arch = "riscv64"))]
 /// # Safety
 ///
 /// S-mode: issues the SBI SetTimer ecall, which arms THIS hart's timer
@@ -96,7 +117,7 @@ pub(super) unsafe fn arm_timer(next: u64) {
     }
 }
 
-#[cfg(all(not(feature = "smode"), test))]
+#[cfg(not(any(target_arch = "riscv32", target_arch = "riscv64")))]
 /// # Safety
 ///
 /// Host unit tests only: writes hart 0's mtimecmp via `write_mtimecmp`
@@ -110,7 +131,7 @@ pub(super) unsafe fn arm_timer(next: u64) {
     }
 }
 
-#[cfg(all(not(feature = "smode"), test))]
+#[cfg(not(any(target_arch = "riscv32", target_arch = "riscv64")))]
 /// # Safety
 ///
 /// Targets G_MTIMECMP (hart 0's slot, set by `init_mmio_bases`); the
@@ -130,7 +151,7 @@ unsafe fn write_mtimecmp(v: u64) {
 /// Host unit tests only: writes `hartid`'s CLINT mtimecmp slot directly.
 /// Every real (non-test) build now goes through `arm_timer`'s SBI ecall
 /// (inherently per-hart — see its doc comment) instead.
-#[cfg(all(not(feature = "smode"), test))]
+#[cfg(not(any(target_arch = "riscv32", target_arch = "riscv64")))]
 pub(super) unsafe fn arm_timer_for_hart(hartid: usize, next: u64) {
     // SAFETY: per-hart comparator address; ordered guarded MMIO writes as in write_mtimecmp.
     unsafe {

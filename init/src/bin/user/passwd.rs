@@ -1,10 +1,12 @@
 #![no_std]
 #![no_main]
 
+#[path = "../../allocator/mod.rs"]
+mod allocator;
+
 use core::arch::asm;
 
-#[path = "../../auth/mod.rs"]
-mod auth;
+use onyx_init::auth;
 #[path = "../../passwd_flow/mod.rs"]
 mod passwd_flow;
 use onyx_init::syscalls;

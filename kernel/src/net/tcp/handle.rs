@@ -3,8 +3,8 @@ use core::sync::atomic::{AtomicU32, Ordering};
 use crate::net::G_IP;
 use crate::net::lock::{net_lock, net_unlock};
 
-use super::conn::{CONNS, TCP_HLEN, now_us, send_tcp_seg_tx, sweep_timewait, tcp_checksum_ok};
 use super::conn::state::{ACK, FIN, SEG_ACK, SEG_FIN_ACK, tcp_transition};
+use super::conn::{CONNS, TCP_HLEN, now_us, send_tcp_seg_tx, sweep_timewait, tcp_checksum_ok};
 
 /// Total inbound segments dropped for a bad checksum (logged once).
 static BAD_CKSUM: AtomicU32 = AtomicU32::new(0);

@@ -2,6 +2,9 @@
 #![no_main]
 #![warn(clippy::all)]
 
+#[path = "allocator/mod.rs"]
+mod allocator;
+
 use core::arch::asm;
 
 #[path = "bin/smoke/boottest.rs"]

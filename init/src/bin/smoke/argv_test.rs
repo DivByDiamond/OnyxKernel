@@ -1,6 +1,9 @@
 #![no_std]
 #![no_main]
 
+#[path = "../../allocator/mod.rs"]
+mod allocator;
+
 use onyx_init::syscalls;
 
 fn write_dec(v: usize) {

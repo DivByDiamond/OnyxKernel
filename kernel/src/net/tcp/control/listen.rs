@@ -1,8 +1,8 @@
 //! Bounded passive TCP listeners; accepted connections use the ordinary socket API.
+use super::super::conn::state::{ACK, SYN};
 use super::super::conn::{
     CONNS, RECV_BUF_SIZE, SEND_BUF_SIZE, TcpConn, alloc_conn, alloc_local_port, send_tcp_seg_tx,
 };
-use super::super::conn::state::{ACK, SYN};
 use crate::net::lock::{net_lock, net_unlock};
 use onyx_core::errno::{Errno, KResult};
 const LISTENERS_MAX: usize = 8;

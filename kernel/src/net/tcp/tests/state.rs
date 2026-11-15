@@ -1,8 +1,8 @@
 //! State-machine tests: active and passive handshakes, in-sequence data,
 //! FIN/TIMEWAIT, and ACK accounting.
 
-use super::super::conn::state::{SEG_ACK, drain_acked, tcp_transition};
 use super::super::conn::sock::read_received;
+use super::super::conn::state::{SEG_ACK, drain_acked, tcp_transition};
 use super::super::conn::{CONNS, RECV_BUF_SIZE, TIMEWAIT_US, sweep_timewait};
 use super::test_conn;
 

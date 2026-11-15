@@ -1,6 +1,5 @@
 //! xHCI device-context layouts: slot, endpoint and input-control contexts.
 
-
 #[repr(C)]
 pub(super) struct SlotCtx {
     pub(super) dw0: u32,

@@ -8,7 +8,7 @@ use crate::drivers::fb;
 #[test]
 fn output_goes_to_back_buffer_never_to_front() {
     let _g = LOCK.lock().unwrap();
-    let mut s = install();
+    let s = install();
     fb::test_publish_back(back_ptr(&s));
     let front_before = s.front.clone();
 
@@ -23,9 +23,7 @@ fn output_goes_to_back_buffer_never_to_front() {
         s.front, front_before,
         "console output leaked to the visible front buffer"
     );
-    unsafe {
-        present_locked();
-    }
+    present_locked();
     assert_eq!(
         s.front, s.back,
         "frame did not round-trip through the back buffer"
@@ -39,7 +37,7 @@ fn output_goes_to_back_buffer_never_to_front() {
 #[test]
 fn direct_mode_still_paints_immediately() {
     let _g = LOCK.lock().unwrap();
-    let mut s = install();
+    let s = install();
     // No back buffer published (direct/legacy mode).
     assert!(!fb::double_buffered());
     let front_before = s.front.clone();

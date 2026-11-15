@@ -1,6 +1,6 @@
 //! Bounded retransmission plans; no unbounded retry loops or retained socket borrows.
-use super::super::conn::{CONNS, TcpConn, send_tcp_seg_tx};
 use super::super::conn::state::{ACK, FIN, SYN};
+use super::super::conn::{CONNS, TcpConn, send_tcp_seg_tx};
 use super::mss::TCP_MSS;
 const RETRY_US: u64 = 1_000_000;
 const RETRIES: u8 = 5;

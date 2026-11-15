@@ -30,7 +30,11 @@ pub(in crate::fs::procfs) unsafe fn format_line(
 ///
 /// No unsafe operations inside; only a bounds-checked slice write guarded by
 /// `pos + line.len() <= buf.len()`. Unsafe signature kept for symmetry.
-pub(in crate::fs::procfs) unsafe fn format_line_raw(line: &[u8], buf: &mut [u8], pos: usize) -> usize {
+pub(in crate::fs::procfs) unsafe fn format_line_raw(
+    line: &[u8],
+    buf: &mut [u8],
+    pos: usize,
+) -> usize {
     if pos + line.len() <= buf.len() {
         buf[pos..pos + line.len()].copy_from_slice(line);
         line.len()

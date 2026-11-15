@@ -16,7 +16,11 @@ pub(in crate::syscall) unsafe fn sys_exec(tf: &mut TrapFrame, path: u64, argv: u
 
 /// Run a relative break change without publishing an advance before the
 /// absolute-break operation has successfully mapped its backing pages.
-pub(in crate::syscall) fn sbrk_with(cur: u64, incr: i64, set_break: impl FnOnce(u64) -> i64) -> i64 {
+pub(in crate::syscall) fn sbrk_with(
+    cur: u64,
+    incr: i64,
+    set_break: impl FnOnce(u64) -> i64,
+) -> i64 {
     let Some(new_brk) = cur.checked_add_signed(incr) else {
         return Errno::NoMem.as_i64();
     };

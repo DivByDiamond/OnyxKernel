@@ -171,7 +171,9 @@ pub(in crate::net::tcp) fn send_tcp_seg_tx(c: TcpTx, flags: u8, data: &[u8]) {
     seg[16..18].copy_from_slice(&[0, 0]);
     seg[18..20].copy_from_slice(&[0, 0]);
     if hdr_len > TCP_HLEN {
-        seg[TCP_HLEN..hdr_len].copy_from_slice(&super::control::mss::mss_option(super::control::mss::TCP_MSS as u16));
+        seg[TCP_HLEN..hdr_len].copy_from_slice(&super::control::mss::mss_option(
+            super::control::mss::TCP_MSS as u16,
+        ));
     }
     if !data.is_empty() {
         seg[hdr_len..].copy_from_slice(data);

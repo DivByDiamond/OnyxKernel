@@ -34,6 +34,9 @@
     reason = "TODO(2026-09-13): crate-wide backstop for older unsafe fns predating the per-fn `# Safety` convention now enforced on new code; burn down opportunistically"
 )]
 
+#[cfg(all(target_arch = "riscv32", feature = "smode"))]
+compile_error!("RV32 smode boot entry is not implemented; use RV32 default or RV64 smode");
+
 extern crate alloc;
 extern crate onyx_core;
 

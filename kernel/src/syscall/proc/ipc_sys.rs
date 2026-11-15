@@ -104,7 +104,12 @@ pub(in crate::syscall) unsafe fn sys_chan_connect(chan_id: u32) -> i64 {
 ///
 /// Call only from the syscall path with a current process set and a live
 /// trap frame; `buf`/`len` are validated inside before use.
-pub(in crate::syscall) unsafe fn sys_chan_send(tf: &mut TrapFrame, chan_id: u32, buf: u64, len: u64) -> i64 {
+pub(in crate::syscall) unsafe fn sys_chan_send(
+    tf: &mut TrapFrame,
+    chan_id: u32,
+    buf: u64,
+    len: u64,
+) -> i64 {
     // SAFETY: buf/len passed user_ptr_ok and the per-page readable
     // check_user_range above, so ipc::send reads only mapped user pages;
     // `tf` is this hart's live trap frame per the contract above.
@@ -128,7 +133,12 @@ pub(in crate::syscall) unsafe fn sys_chan_send(tf: &mut TrapFrame, chan_id: u32,
 ///
 /// Call only from the syscall path with a current process set and a live
 /// trap frame; `buf`/`len` are validated inside before use.
-pub(in crate::syscall) unsafe fn sys_chan_recv(tf: &mut TrapFrame, chan_id: u32, buf: u64, len: u64) -> i64 {
+pub(in crate::syscall) unsafe fn sys_chan_recv(
+    tf: &mut TrapFrame,
+    chan_id: u32,
+    buf: u64,
+    len: u64,
+) -> i64 {
     // SAFETY: buf/len passed user_ptr_ok and the per-page writable
     // check_user_range above, so ipc::recv writes only mapped, writable
     // user pages; `tf` is this hart's live trap frame per the contract above.

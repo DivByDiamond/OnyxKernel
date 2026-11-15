@@ -50,7 +50,7 @@ impl Tree {
         self.pad();
     }
     fn pad(&mut self) {
-        while self.data.len() % 4 != 0 {
+        while !self.data.len().is_multiple_of(4) {
             self.data.push(0);
         }
     }
@@ -85,12 +85,11 @@ impl Tree {
         &mut self,
         name: &str,
         address: u64,
-        width: u32,
-        height: u32,
-        stride: u32,
+        geometry: (u32, u32, u32),
         status: &[u8],
         format: &[u8],
     ) {
+        let (width, height, stride) = geometry;
         self.begin(name);
         self.prop("compatible", b"simple-framebuffer\0");
         let mut reg = address.to_be_bytes().to_vec();
@@ -123,45 +122,35 @@ fn discovers_multiple_surfaces_without_ancestor_duplicates_and_rejects_invalid_n
     t.display(
         "framebuffer@30000000",
         0x30000000,
-        320,
-        200,
-        640,
+        (320, 200, 640),
         b"okay\0",
         b"r5g6b5\0",
     );
     t.display(
         "framebuffer@30100000",
         0x30100000,
-        640,
-        480,
-        1280,
+        (640, 480, 1280),
         b"okay\0",
         b"r5g6b5\0",
     );
     t.display(
         "disabled",
         0x30200000,
-        640,
-        480,
-        1280,
+        (640, 480, 1280),
         b"disabled\0",
         b"r5g6b5\0",
     );
     t.display(
         "bad-format",
         0x30300000,
-        640,
-        480,
-        1280,
+        (640, 480, 1280),
         b"okay\0",
         b"unsupported\0",
     );
     t.display(
         "short-stride",
         0x30400000,
-        640,
-        480,
-        12,
+        (640, 480, 12),
         b"okay\0",
         b"r5g6b5\0",
     );
@@ -171,18 +160,14 @@ fn discovers_multiple_surfaces_without_ancestor_duplicates_and_rejects_invalid_n
     t.display(
         "legacy-copy",
         0x30000000,
-        320,
-        200,
-        640,
+        (320, 200, 640),
         b"okay\0",
         b"r5g6b5\0",
     );
     t.display(
         "framebuffer@30500000",
         0x30500000,
-        160,
-        100,
-        640,
+        (160, 100, 640),
         b"okay\0",
         b"x8r8g8b8\0",
     );
@@ -231,6 +216,8 @@ fn discovers_multiple_surfaces_without_ancestor_duplicates_and_rejects_invalid_n
             ),
             (0x30100000, 640, 480, 16)
         );
+        assert_eq!(displays[0].stride, 640);
+        assert_eq!(displays[1].stride, 1280);
         assert_eq!((displays[2].pa, displays[2].bpp), (0x30500000, 32));
         assert_eq!(
             framebuffer::find_simple_framebuffer().unwrap().pa,

@@ -19,7 +19,7 @@ use core::sync::atomic::AtomicU64 as AtomicTick;
 use core::sync::atomic::Ordering;
 
 use crate::{arch::csr, proc};
-#[cfg(all(not(feature = "smode"), test))]
+#[cfg(not(any(target_arch = "riscv32", target_arch = "riscv64")))]
 use timer_arm::arm_timer_for_hart;
 use timer_arm::{arm_timer, read_mtime};
 
@@ -95,7 +95,7 @@ pub unsafe fn init_hart(hartid: usize) {
     unsafe {
         let now = read_mtime();
         let next = now + G_TICK_INTERVAL;
-        #[cfg(any(feature = "smode", not(test)))]
+        #[cfg(any(target_arch = "riscv32", target_arch = "riscv64"))]
         {
             // arm_timer's SBI ecall is inherently per-hart (each hart's
             // ecall is serviced independently), so no address computation
@@ -108,7 +108,7 @@ pub unsafe fn init_hart(hartid: usize) {
             let _ = hartid;
             arm_timer(next);
         }
-        #[cfg(all(not(feature = "smode"), test))]
+        #[cfg(not(any(target_arch = "riscv32", target_arch = "riscv64")))]
         arm_timer_for_hart(hartid, next);
         csr::set_sie(1 << 5);
     }
@@ -133,9 +133,9 @@ pub unsafe fn handle() {
         // non-`smode` rv64/rv32 — both real builds now share this path,
         // see timer_arm::arm_timer's doc comments). Only cfg(test) still
         // takes the raw per-hart CLINT-MMIO stub below.
-        #[cfg(any(feature = "smode", not(test)))]
+        #[cfg(any(target_arch = "riscv32", target_arch = "riscv64"))]
         arm_timer(next);
-        #[cfg(all(not(feature = "smode"), test))]
+        #[cfg(not(any(target_arch = "riscv32", target_arch = "riscv64")))]
         arm_timer_for_hart(crate::arch::smp::current_hart(), next);
         proc::sched_tick();
         // Heartbeat: ping the watchdog every tick (100 Hz) so the system

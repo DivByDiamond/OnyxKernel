@@ -1,5 +1,5 @@
-use crate::net::tcp::conn::state::{ACK, FIN};
 use super::*;
+use crate::net::tcp::conn::state::{ACK, FIN};
 
 #[test]
 fn syn_segments_are_four_bytes_longer_than_plain_ones() {

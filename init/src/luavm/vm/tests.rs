@@ -1,4 +1,5 @@
 use super::*;
+use alloc::vec;
 
 #[test]
 fn test_basic_arithmetic() {

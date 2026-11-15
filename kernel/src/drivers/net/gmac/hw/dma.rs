@@ -1,5 +1,5 @@
-use super::regs;
 use super::super::{G_GMAC, RX_RING_SIZE, TX_RING_SIZE};
+use super::regs;
 use crate::mm::pmm;
 use core::ptr;
 use onyx_core::errno::KResult;

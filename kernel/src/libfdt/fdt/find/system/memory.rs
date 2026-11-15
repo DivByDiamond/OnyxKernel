@@ -1,5 +1,5 @@
 use crate::libfdt::fdt::FdtMemory;
-use crate::libfdt::fdt::reader::{cstr_at, rd64, rd64_hi};
+use crate::libfdt::fdt::reader::{cstr_at, rd64};
 use crate::libfdt::fdt::walk::walk;
 
 /// # Safety
@@ -16,8 +16,7 @@ pub unsafe fn memory() -> Option<FdtMemory> {
                 for (name_off, data) in props {
                     if cstr_at(*name_off) == "reg" && data.len() >= 16 {
                         let base = rd64(data.as_ptr());
-                        let size = (rd64(data.as_ptr().add(8)))
-                            | ((rd64_hi(data.as_ptr().add(8)) as u64) << 32);
+                        let size = rd64(data.as_ptr().add(8));
                         result = Some(FdtMemory { base, size });
                         return true;
                     }

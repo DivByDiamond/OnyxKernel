@@ -1,8 +1,8 @@
 //! Cluster-chain extension and teardown on top of the FAT primitives.
 use onyx_core::errno::{Errno, KResult};
 
-use super::fat::{alloc_cluster, free_cluster, write_fat_entry};
 use super::super::super::{fat_entry, is_eoc, is_valid_cluster};
+use super::fat::{alloc_cluster, free_cluster, write_fat_entry};
 
 /// Extend the chain starting at `start_cluster` by allocating one new
 /// cluster and linking it from the current end-of-chain. Returns the new

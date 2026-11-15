@@ -169,7 +169,10 @@ unsafe fn tcp_recv_inner(cid: usize, buf: &mut [u8]) -> KResult<usize> {
     }
 }
 
-pub(in crate::net::tcp) fn read_received(conn: &mut TcpConn, buf: &mut [u8]) -> KResult<(usize, bool)> {
+pub(in crate::net::tcp) fn read_received(
+    conn: &mut TcpConn,
+    buf: &mut [u8],
+) -> KResult<(usize, bool)> {
     if conn.state == 6 {
         return Err(Errno::Io);
     }

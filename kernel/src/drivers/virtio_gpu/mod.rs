@@ -17,7 +17,6 @@ pub const VIRTIO_ID_GPU: u32 = 16;
 pub const GPU_WIDTH: usize = 1280;
 pub const GPU_HEIGHT: usize = 720;
 
-
 #[derive(Clone, Copy)]
 pub(crate) struct VirtioGpuDev {
     pub base: usize,

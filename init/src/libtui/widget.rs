@@ -167,14 +167,12 @@ impl Widget for TextBox {
                     }
                 }
                 // Insert: shift the tail right, place the char at cursor.
-                32..=126 => {
-                    if self.len < 63 {
-                        self.buffer
-                            .copy_within(self.cursor..self.len, self.cursor + 1);
-                        self.buffer[self.cursor] = *key;
-                        self.cursor += 1;
-                        self.len += 1;
-                    }
+                32..=126 if self.len < 63 => {
+                    self.buffer
+                        .copy_within(self.cursor..self.len, self.cursor + 1);
+                    self.buffer[self.cursor] = *key;
+                    self.cursor += 1;
+                    self.len += 1;
                 }
                 _ => {}
             }

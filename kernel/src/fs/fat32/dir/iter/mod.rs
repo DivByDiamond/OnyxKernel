@@ -1,11 +1,11 @@
 //! Stateful directory iteration: one entry per call with a resume cursor.
 mod resume;
 
-use super::name::lfn::LfnChain;
 use super::super::{
     ATTR_DIRECTORY, ATTR_LFN, DIR_ENTRY_SIZE, ENTRIES_PER_SECTOR, G_DATA_LBA, G_DEV, G_SPC,
     fat_entry, is_eoc, is_valid_cluster, read_cluster_sector,
 };
+use super::name::lfn::LfnChain;
 use super::scan::G_WALK;
 use resume::save_resume;
 
@@ -218,4 +218,3 @@ pub unsafe fn readdir_entry(
         }
     }
 }
-

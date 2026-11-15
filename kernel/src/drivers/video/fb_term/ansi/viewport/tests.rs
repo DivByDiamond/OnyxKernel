@@ -96,7 +96,7 @@ fn rgb8888_nearest_sampling_matches_at_all_positions_with_padded_stride() {
     }
     for y in 0..h {
         for x in 0..pitch {
-            let expected = if y >= 48 && y < 432 && x < 640 {
+            let expected = if (48..432).contains(&y) && x < 640 {
                 back[(y - 48) * pitch + x]
             } else {
                 u32::MAX

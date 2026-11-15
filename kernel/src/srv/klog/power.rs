@@ -19,7 +19,7 @@ pub fn reset_machine(restart: bool) -> ! {
     // `arch::sbi` is gated out under host `cargo test` builds (its ecall
     // uses riscv-only inline asm) — mirror that gate here so the SBI SRST
     // attempt is skipped there and only the QEMU finisher fallback runs.
-    #[cfg(any(feature = "smode", all(not(test), target_pointer_width = "64")))]
+    #[cfg(any(target_arch = "riscv32", target_arch = "riscv64"))]
     {
         let reset_type = if restart {
             crate::arch::sbi::SRST_COLD_REBOOT

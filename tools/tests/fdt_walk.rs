@@ -26,7 +26,7 @@ fn reports_parent_once_and_leaf_once() {
         word(v, 1);
         v.extend(name.as_bytes());
         v.push(0);
-        while v.len() % 4 != 0 {
+        while !v.len().is_multiple_of(4) {
             v.push(0);
         }
     }

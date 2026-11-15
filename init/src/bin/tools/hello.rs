@@ -1,6 +1,9 @@
 #![no_std]
 #![no_main]
 
+#[path = "../../allocator/mod.rs"]
+mod allocator;
+
 use onyx_init::syscalls;
 
 const MSG: &[u8] = b"Hello from Onyx!\n";
