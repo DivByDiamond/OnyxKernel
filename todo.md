@@ -3,6 +3,7 @@
 > **Актуально на 2026-11-15.**
 > Правила кода: `../info.md` (корень набора репозиториев), `docs/CONCURRENCY.md`
 > (локи, планировщик, инварианты), `docs/TESTING.md` (что и как проверять).
+> Обязательный полный fmt/Clippy и запрет dead-code bypass: `docs/QUALITY.md`.
 > История расследований и закрытые баги — `docs/history/` и `git log`.
 > Как вести этот файл — последний раздел.
 
@@ -28,8 +29,8 @@ QEMU slirp (`N2`: рендер → переход по ссылке → back) и
 |----|--------|-----|------------------------|
 | F8 | [x] Обнулять вновь открытый хвост блока при shrink → extend | `fs/onyxfs/write/meta/extend.rs` | 2026-11-15, `9215876`: регрессии direct/indirect, внутри блока и через границы; 70 core + 3 integration + 291 kernel, 4 init прошли |
 | EX1 | [x] Отклонять недопустимые ONX permissions до маппинга, проверять PA перед копированием | `proc/onx/load.rs`, `segments.rs` | 2026-11-15, `14937bc`; согласовано с linker `e7a57ec`: 293 kernel-теста, QEMU linked-C++ и отказ malformed image без падения shell |
-| FS-J1 | [ ] Fault injection на первом rollover журнала при большом truncate | `fs/onyxfs/journal.rs`, `write/meta/truncate.rs` | 2026-11-15: по коду bitmap фиксируется раньше inode; воспроизвести crash → remount → allocation и проверить уникальность владения блоками, затем исправить |
-| FS-J2 | [ ] Безопасное повторное использование журнала после ошибки очистки | `fs/onyxfs/journal.rs` | 2026-11-15: head сбрасывается до fallible zeroing; воспроизвести I/O error → короткий commit → crash и исключить replay старых записей |
+| FS-J1 | [x] Fault injection на первом rollover журнала при большом truncate | `fs/onyxfs/journal.rs`, `write/meta/truncate.rs` | 2026-11-15, `cf6ca42`: full-block undo, dedup и откат по внешней операции; write-cut регрессии и QEMU legacy/undo прошли (`docs/ONYXFS_JOURNAL.md`, границы модели там же) |
+| FS-J2 | [x] Безопасное повторное использование журнала после ошибки очистки | `fs/onyxfs/journal.rs` | 2026-11-15, `cf6ca42`: header-only commit, quarantine, restartable recovery; ошибка clear → короткая транзакция → recovery покрыта регрессией |
 
 ## 3. P2 — backlog по подсистемам
 
@@ -63,7 +64,7 @@ QEMU slirp (`N2`: рендер → переход по ссылке → back) и
 
 ### Структура кода
 - Сверка 2026-11-15: inline `mod tests { ... }`, `pipeline_tests` и `modifier_tests` в `kernel/core/init/tools/src` больше не найдены; прежний счётчик 53 устарел. Раскладка новых тестов — по §8.7.
-- [ ] Q1: устранить существующие расхождения `cargo fmt --all -- --check` (52 участка diff на 2026-11-15); критерий — чистая проверка всего workspace. Файлы F8 проверены отдельно.
+- [x] Q1: полный fmt/Clippy без dead-code bypass (2026-11-15, `1c0f188`): общие init-модули и host-тесты очищены, `scripts/quality/check.sh` и CI проходят всю поддерживаемую матрицу; RV32 smode явно отклоняется вместо ELF с entry=0.
 
 ### Документация / долг
 - README: «16 FD slots» сверить с кодом; «UDP/DHCP/DNS — осталось» устарело (реализовано); USB-формулировка (URB-слой есть, открыт только xHCI transfer); синхронизировать `README.ru.md`.
