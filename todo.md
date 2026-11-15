@@ -1,6 +1,6 @@
 # OnyxKernel — TODO
 
-> **Актуально на 2026-11-09.**
+> **Актуально на 2026-11-15.**
 > Правила кода: `../info.md` (корень набора репозиториев), `docs/CONCURRENCY.md`
 > (локи, планировщик, инварианты), `docs/TESTING.md` (что и как проверять).
 > История расследований и закрытые баги — `docs/history/` и `git log`.
@@ -26,6 +26,9 @@ QEMU slirp (`N2`: рендер → переход по ссылке → back) и
 
 | ID | Задача | Где | Статус / что осталось |
 |----|--------|-----|------------------------|
+| F8 | [x] Обнулять вновь открытый хвост блока при shrink → extend | `fs/onyxfs/write/meta/extend.rs` | 2026-11-15, `9215876`: регрессии direct/indirect, внутри блока и через границы; 70 core + 3 integration + 291 kernel, 4 init прошли |
+| FS-J1 | [ ] Fault injection на первом rollover журнала при большом truncate | `fs/onyxfs/journal.rs`, `write/meta/truncate.rs` | 2026-11-15: по коду bitmap фиксируется раньше inode; воспроизвести crash → remount → allocation и проверить уникальность владения блоками, затем исправить |
+| FS-J2 | [ ] Безопасное повторное использование журнала после ошибки очистки | `fs/onyxfs/journal.rs` | 2026-11-15: head сбрасывается до fallible zeroing; воспроизвести I/O error → короткий commit → crash и исключить replay старых записей |
 
 ## 3. P2 — backlog по подсистемам
 
@@ -58,7 +61,8 @@ QEMU slirp (`N2`: рендер → переход по ссылке → back) и
 - hello-world от javac → `/bin/jvm` в QEMU/OC2R.
 
 ### Структура кода
-- [~] Тесты вынести из файлов с кодом: 53 файла держат inline `#[cfg(test)] mod tests { ... }` (kernel 46, core 4, init 2, tools 1). Цель — `foo/tests.rs` для `foo.rs` и `tests.rs` для `mod.rs`, в коде остаётся только `#[cfg(test)] mod tests;`. Готовый образец: `fs_sys3/mem/brk.rs` + `brk/tests.rs`. Заодно переименовать `pipeline_tests` (`fb_term/ansi/mod.rs`) и `modifier_tests` (`input/event.rs`) в `tests`.
+- Сверка 2026-11-15: inline `mod tests { ... }`, `pipeline_tests` и `modifier_tests` в `kernel/core/init/tools/src` больше не найдены; прежний счётчик 53 устарел. Раскладка новых тестов — по §8.7.
+- [ ] Q1: устранить существующие расхождения `cargo fmt --all -- --check` (52 участка diff на 2026-11-15); критерий — чистая проверка всего workspace. Файлы F8 проверены отдельно.
 
 ### Документация / долг
 - README: «16 FD slots» сверить с кодом; «UDP/DHCP/DNS — осталось» устарело (реализовано); USB-формулировка (URB-слой есть, открыт только xHCI transfer); синхронизировать `README.ru.md`.
