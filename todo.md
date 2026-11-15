@@ -27,6 +27,7 @@ QEMU slirp (`N2`: рендер → переход по ссылке → back) и
 | ID | Задача | Где | Статус / что осталось |
 |----|--------|-----|------------------------|
 | F8 | [x] Обнулять вновь открытый хвост блока при shrink → extend | `fs/onyxfs/write/meta/extend.rs` | 2026-11-15, `9215876`: регрессии direct/indirect, внутри блока и через границы; 70 core + 3 integration + 291 kernel, 4 init прошли |
+| EX1 | [x] Отклонять недопустимые ONX permissions до маппинга, проверять PA перед копированием | `proc/onx/load.rs`, `segments.rs` | 2026-11-15, `14937bc`; согласовано с linker `e7a57ec`: 293 kernel-теста, QEMU linked-C++ и отказ malformed image без падения shell |
 | FS-J1 | [ ] Fault injection на первом rollover журнала при большом truncate | `fs/onyxfs/journal.rs`, `write/meta/truncate.rs` | 2026-11-15: по коду bitmap фиксируется раньше inode; воспроизвести crash → remount → allocation и проверить уникальность владения блоками, затем исправить |
 | FS-J2 | [ ] Безопасное повторное использование журнала после ошибки очистки | `fs/onyxfs/journal.rs` | 2026-11-15: head сбрасывается до fallible zeroing; воспроизвести I/O error → короткий commit → crash и исключить replay старых записей |
 
