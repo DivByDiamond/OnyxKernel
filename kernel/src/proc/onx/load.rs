@@ -46,6 +46,7 @@ pub unsafe fn load(image: *const u8, image_size: usize) -> KResult<OnxLoadResult
 
 /// Validate an untrusted OnyxExec image before any mapping happens:
 ///
+/// - permissions contain only R/W/X bits and form a valid RISC-V leaf;
 /// - every segment range [vaddr, vaddr+memsz) must lie inside
 ///   [USER_BASE, USER_TOP) — this also excludes page zero;
 /// - entry must point inside the user range AND inside some loaded
@@ -55,6 +56,15 @@ pub unsafe fn load(image: *const u8, image_size: usize) -> KResult<OnxLoadResult
 /// running); nothing has been mapped yet.
 fn validate_image(hdr: &OnxHeader) -> KResult<()> {
     for s in &hdr.segs {
+        // Onyx segment flags are only RISC-V R/W/X permission bits. Other
+        // bits can turn a leaf into an invalid PTE or alter its address.
+        let flags = u64::from(s.flags);
+        if flags & !(PTE_R | PTE_W | PTE_X) != 0
+            || flags & (PTE_R | PTE_X) == 0
+            || flags & PTE_W != 0 && flags & PTE_R == 0
+        {
+            return Err(Errno::Inval);
+        }
         let end = s.vaddr.checked_add(s.memsz).ok_or(Errno::Range)?;
         if s.vaddr < USER_BASE || end > USER_TOP {
             return Err(Errno::Range);
@@ -193,3 +203,6 @@ unsafe fn load_into(
         })
     }
 }
+
+#[cfg(test)]
+mod tests;

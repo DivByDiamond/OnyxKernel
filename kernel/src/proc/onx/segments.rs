@@ -101,7 +101,10 @@ unsafe fn decompress_to_pages(root_pa: u64, s: &OnxSegment, image: *const u8) ->
                 let mut left = count.min((file_end - out_va) as usize);
                 while left > 0 {
                     let pb = out_va & !0xFFF;
-                    let paddr = vmm::translate(root_pa, pb);
+                    let paddr = vmm::translate_user(root_pa, pb);
+                    if paddr == 0 {
+                        return Err(Errno::Fault);
+                    }
                     let poff = (out_va & 0xFFF) as usize;
                     let chunk = left.min(4096 - poff);
                     ptr::write_bytes((paddr as *mut u8).add(poff), val, chunk);
@@ -116,7 +119,10 @@ unsafe fn decompress_to_pages(root_pa: u64, s: &OnxSegment, image: *const u8) ->
                 }
                 while left > 0 {
                     let pb = out_va & !0xFFF;
-                    let paddr = vmm::translate(root_pa, pb);
+                    let paddr = vmm::translate_user(root_pa, pb);
+                    if paddr == 0 {
+                        return Err(Errno::Fault);
+                    }
                     let poff = (out_va & 0xFFF) as usize;
                     let chunk = left.min(4096 - poff);
                     ptr::copy_nonoverlapping(src.add(in_off), (paddr as *mut u8).add(poff), chunk);
@@ -146,6 +152,9 @@ unsafe fn copy_raw_to_pages(root_pa: u64, s: &OnxSegment, image: *const u8) -> K
         while va < end {
             let page_base = va & !0xFFF;
             let existing = vmm::translate_user(root_pa, page_base);
+            if existing == 0 {
+                return Err(Errno::Fault);
+            }
             let page_end = page_base + 4096;
             let page_va_end = page_end.min(end);
             let copy_len = (page_va_end - va).min(s.filesz.saturating_sub(file_pos));
