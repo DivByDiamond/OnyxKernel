@@ -153,7 +153,7 @@ fn indirect_file_grow_truncate_unlink_reuse() {
         truncate_to_length(ino, 200_000).unwrap();
         let ext = get(ino, 200_000);
         assert_eq!(ext[..20_000], data3[..20_000]);
-        assert!(ext[20_480..].iter().all(|&x| x == 0));
+        assert!(ext[20_000..].iter().all(|&x| x == 0));
 
         // Another file grown while the first one exists, then unlink both.
         let ino2 = create(ONYFS_ROOT_INO, b"other", 0o100644).unwrap();
@@ -208,5 +208,32 @@ fn create_over_existing_file_reuses_inode_and_frees_blocks() {
         }
         unlink(b"/f").unwrap();
         assert_eq!(used_data_blocks(), base);
+    }
+}
+
+#[test]
+fn shrink_then_extend_within_retained_block_zeroes_from_old_eof() {
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    // SAFETY: SERIAL excludes the other disk scenarios; run the host suite
+    // with --test-threads=1 to exclude other users of filesystem globals.
+    unsafe {
+        for old_eof in [2_000usize, 50_000] {
+            mkfs();
+            let ino = create(ONYFS_ROOT_INO, b"tail", 0o100644).unwrap();
+            let block_end = old_eof.div_ceil(ONYFS_BLOCK_SIZE) * ONYFS_BLOCK_SIZE;
+            let data = pattern(block_end, 19);
+            put(ino, &data, ONYFS_BLOCK_SIZE);
+            let allocated = used_data_blocks();
+            truncate_to_length(ino, old_eof as u64).unwrap();
+            // Two extensions exercise successive EOFs within the same block.
+            for end in [old_eof + 17, block_end] {
+                truncate_to_length(ino, end as u64).unwrap();
+                let out = get(ino, end);
+                assert_eq!(size_of(ino), end as u64);
+                assert_eq!(out[..old_eof], data[..old_eof]);
+                assert!(out[old_eof..].iter().all(|&b| b == 0), "EOF {old_eof}");
+                assert_eq!(used_data_blocks(), allocated);
+            }
+        }
     }
 }

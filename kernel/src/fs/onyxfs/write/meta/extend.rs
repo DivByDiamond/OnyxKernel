@@ -10,8 +10,8 @@ use onyx_core::errno::KResult;
 use onyx_core::formats::{ONYFS_BLOCK_SIZE, ONYFS_DIRECT_BLKS, OnyfsInode};
 
 /// Ensure blocks [first_needed..=last_needed] exist on `inode`, freshly
-/// allocated ones zero-filled. `cur_size` is only used to compute the
-/// first block that may need allocation.
+/// allocated ones zero-filled, and clear newly exposed bytes in the retained
+/// partial EOF block. `length` must be greater than `cur_size`.
 ///
 /// # Safety
 ///
@@ -40,6 +40,31 @@ pub(super) unsafe fn extend_to_length(
         let mut ind_dirty = false;
         if inode.indirect != 0 {
             read_block(inode.indirect, &mut ind_buf)?;
+        }
+
+        // Shrinking retains the last partial block unchanged. Clear its
+        // newly visible tail even when growth needs no additional blocks.
+        let tail_start = (cur_size % bs) as usize;
+        if tail_start != 0 {
+            let idx = cur_size / bs;
+            let blk = if idx < ONYFS_DIRECT_BLKS as u64 {
+                inode.blocks[idx as usize]
+            } else {
+                let ind_idx = (idx - ONYFS_DIRECT_BLKS as u64) as usize;
+                if ind_idx < entries_per_block() {
+                    ind_entry(&ind_buf, ind_idx)
+                } else {
+                    0
+                }
+            };
+            if blk != 0 {
+                let tail_end = (length - idx * bs).min(bs) as usize;
+                let pb = &raw mut G_BUF;
+                read_block(blk, &mut *pb)?;
+                (&mut *pb)[tail_start..tail_end].fill(0);
+                journal_log(blk, &*pb)?;
+                write_block(blk, &*pb)?;
+            }
         }
 
         let mut cur_idx = first_new_block;

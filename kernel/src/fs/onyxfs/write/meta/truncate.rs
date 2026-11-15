@@ -126,9 +126,9 @@ pub unsafe fn truncate(ino: u32) -> KResult<()> {
 ///   - length < current_size: free any block whose block-index is fully
 ///     past `length`, and update inode.size. Partial-trailing block is
 ///     kept as-is (its bytes past `length` are simply not visible).
-///   - length > current_size: allocate new zero-filled blocks to cover the
-///     extended range (see `extend::extend_to_length`). This guarantees
-///     that read() sees zeros past the old EOF (POSIX semantics).
+///   - length > current_size: zero the exposed partial-block tail and
+///     allocate zero-filled blocks to cover the extended range (see
+///     `extend::extend_to_length`). Reads past the old EOF see zeros.
 ///
 /// Block-index math (bs = ONYFS_BLOCK_SIZE = 4096):
 ///   block_index = floor(offset / bs)
