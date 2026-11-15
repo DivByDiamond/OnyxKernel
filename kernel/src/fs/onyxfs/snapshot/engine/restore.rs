@@ -1,9 +1,9 @@
 //! Restore paths: packed archives, legacy readers and restartable rollback.
-use super::compress::rle_decompress;
 use super::super::format::{
     Area, Block, DEFLATE, Io, LENGTH_MASK, PACKED, PENDING, RAW, get, meta, store_meta,
 };
 use super::super::stream::Stream;
+use super::compress::rle_decompress;
 use super::{header, payload_end, persist, target};
 use miniz_oxide::inflate::{
     TINFLStatus,

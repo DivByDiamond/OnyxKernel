@@ -1,4 +1,8 @@
 use super::*;
+mod crash;
+pub(super) mod io;
+pub(super) mod support;
+pub(super) static SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 #[test]
 fn test_onyfs_stat_default() {
@@ -13,6 +17,7 @@ fn test_onyfs_stat_default() {
 
 #[test]
 fn test_inode_dirent_per_block_v1() {
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     // SAFETY: test-only; saves and restores G_VERSION around reads of it.
     // NOTE: cargo test may run tests in parallel; these two tests mutate the
     // same global, which is a benign-for-assertions race in practice.
@@ -29,6 +34,7 @@ fn test_inode_dirent_per_block_v1() {
 
 #[test]
 fn test_inode_dirent_per_block_v2() {
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     // SAFETY: test-only; saves and restores G_VERSION around reads of it.
     // NOTE: races with test_inode_dirent_per_block_v1 if run in parallel.
     unsafe {
@@ -58,3 +64,5 @@ fn test_onyxfs_constants() {
     assert_eq!(onyx_core::formats::OnyfsInode::SIZE, 128);
     assert_eq!(onyx_core::formats::OnyfsDirent::SIZE, 40);
 }
+
+mod recovery;

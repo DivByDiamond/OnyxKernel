@@ -131,8 +131,8 @@ pub unsafe fn readdir(dir_path: &[u8], name_out: *mut u8, name_len: usize) -> KR
                 }
                 let (cur_ino, cur_idx) = (p.readdir_ino, p.readdir_idx);
                 let entry = with_mount(slot, || {
-                    fat32::readdir_entry(cur_ino, cur_idx, name_out, name_len)
-                });
+                    Ok(fat32::readdir_entry(cur_ino, cur_idx, name_out, name_len))
+                })?;
                 match entry {
                     Some(_ino) => {
                         p.readdir_idx += 1;

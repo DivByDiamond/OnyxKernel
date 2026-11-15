@@ -1,8 +1,8 @@
 //! Snapshot entry points. The packed engine is tested against memory-backed I/O;
 //! kernel callers serialize these globals through the root VFS mount lock.
+use super::super::{G_SB, G_SNAPSHOT_QUARANTINED, raw_read_block, raw_write_block};
 use super::engine;
 use super::format::{Block, Io};
-use super::super::{G_SB, G_SNAPSHOT_QUARANTINED, raw_read_block, raw_write_block};
 use crate::srv::timer;
 use onyx_core::errno::KResult;
 
@@ -31,6 +31,7 @@ pub unsafe fn snapshot_create(name: &[u8]) -> KResult<u32> {
     // SAFETY: the VFS root mount lock excludes concurrent access to G_SB.
     unsafe {
         super::access::access(G_SNAPSHOT_QUARANTINED)?;
+        super::super::journal::snapshot_boundary()?;
         engine::create(&mut Disk, &mut G_SB, name, timer::jiffies())
     }
 }

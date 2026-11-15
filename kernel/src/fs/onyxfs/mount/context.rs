@@ -6,10 +6,10 @@
 //! type and the save/apply primitives plus a mount helper that returns a
 //! context without leaving the singletons pointed at the new volume.
 
-use super::mount;
 use super::super::{
     G_DEV, G_JOURNAL_HEAD, G_LBA_BASE, G_SB, G_SNAPSHOT_QUARANTINED, G_VERSION, OnyfsSuper,
 };
+use super::mount;
 use onyx_core::errno::KResult;
 
 /// Snapshot of the onyxfs singleton state for one mounted volume.

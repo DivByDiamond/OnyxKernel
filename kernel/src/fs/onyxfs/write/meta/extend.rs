@@ -4,7 +4,7 @@
 
 use super::truncate::{entries_per_block, ind_entry, set_ind_entry};
 use crate::fs::onyxfs::alloc::alloc_data_block;
-use crate::fs::onyxfs::journal::journal_log;
+use crate::fs::onyxfs::journal::journal_before_write;
 use crate::fs::onyxfs::{G_BUF, read_block, write_block};
 use onyx_core::errno::KResult;
 use onyx_core::formats::{ONYFS_BLOCK_SIZE, ONYFS_DIRECT_BLKS, OnyfsInode};
@@ -62,7 +62,6 @@ pub(super) unsafe fn extend_to_length(
                 let pb = &raw mut G_BUF;
                 read_block(blk, &mut *pb)?;
                 (&mut *pb)[tail_start..tail_end].fill(0);
-                journal_log(blk, &*pb)?;
                 write_block(blk, &*pb)?;
             }
         }
@@ -93,7 +92,7 @@ pub(super) unsafe fn extend_to_length(
             cur_idx += 1;
         }
         if ind_dirty {
-            journal_log(inode.indirect, &ind_buf)?;
+            journal_before_write(inode.indirect)?;
             write_block(inode.indirect, &ind_buf)?;
         }
         Ok(())
@@ -115,7 +114,6 @@ unsafe fn alloc_zero_block() -> KResult<u32> {
         for b in (*pb).iter_mut() {
             *b = 0;
         }
-        journal_log(blk, &*pb)?;
         write_block(blk, &*pb)?;
         Ok(blk)
     }

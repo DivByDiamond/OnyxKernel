@@ -1,4 +1,4 @@
-use super::super::journal::journal_log;
+use super::super::journal::journal_before_write;
 use super::super::{G_BUF, G_SB, read_block, write_block};
 use onyx_core::errno::{Errno, KResult};
 use onyx_core::formats::ONYFS_BLOCK_SIZE;
@@ -43,7 +43,7 @@ pub unsafe fn alloc_data_block() -> KResult<u32> {
                 }
                 if (*pb)[byte_idx] & (1 << bit) == 0 {
                     (*pb)[byte_idx] |= 1 << bit;
-                    journal_log(bm_blk, &*pb)?;
+                    journal_before_write(bm_blk)?;
                     write_block(bm_blk, &*pb)?;
                     return Ok((G_SB).data_blocks_start + bit_index);
                 }
@@ -77,7 +77,7 @@ pub unsafe fn free_data_block(blk_num: u32) -> KResult<()> {
         let pb = &raw mut G_BUF;
         read_block(bm_blk, &mut *pb)?;
         (*pb)[byte_idx] &= !(1 << bit);
-        journal_log(bm_blk, &*pb)?;
+        journal_before_write(bm_blk)?;
         write_block(bm_blk, &*pb)?;
         Ok(())
     }

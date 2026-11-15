@@ -1,6 +1,6 @@
 use super::super::super::alloc::{add_dirent, alloc_data_block, alloc_inode};
 use super::super::super::inode::{read_inode, write_inode};
-use super::super::super::journal::{journal_commit, journal_log};
+use super::super::super::journal::journal_commit;
 use super::super::super::{G_BUF, G_VERSION, ONYFS_V1, read_block, write_block};
 use crate::srv::timer;
 use onyx_core::errno::{Errno, KResult};
@@ -17,47 +17,48 @@ pub unsafe fn symlink(dir_ino: u32, name: &[u8], target: &[u8]) -> KResult<u32> 
     // SAFETY: single-threaded onyxfs exclusion (see # Safety); the target
     // copy into G_BUF is clamped to ONYFS_BLOCK_SIZE.
     unsafe {
-        if G_VERSION == ONYFS_V1 {
-            return Err(Errno::NoSys);
-        }
-        if name.is_empty() || name.len() > ONYFS_NAME_MAX {
-            return Err(Errno::Inval);
-        }
-        if target.is_empty() {
-            return Err(Errno::Inval);
-        }
-        let new_ino = alloc_inode()?;
-        let now = timer::jiffies();
-        let data_blk = alloc_data_block()?;
-        let mut inode = OnyfsInode {
-            mode: ONYFS_DT_LNK,
-            size: target.len() as u64,
-            uid: 0,
-            gid: 0,
-            nlink: 1,
-            blocks: [0; ONYFS_DIRECT_BLKS],
-            indirect: 0,
-            double_indirect: 0,
-            crtime: now,
-            mtime: now,
-            atime: now,
-            ctime: now,
-            flags: 0,
-            reserved: 0,
-        };
-        inode.blocks[0] = data_blk;
-        {
-            let pb = &raw mut G_BUF;
-            (*pb).fill(0);
-            let n = target.len().min(ONYFS_BLOCK_SIZE);
-            (&mut *pb)[..n].copy_from_slice(&target[..n]);
-            journal_log(data_blk, &*pb)?;
-            write_block(data_blk, &*pb)?;
-        }
-        write_inode(new_ino, &inode)?;
-        add_dirent(dir_ino, name, new_ino, /*dtype=*/ 10)?;
-        journal_commit()?;
-        Ok(new_ino)
+        crate::fs::onyxfs::journal::transaction(|| {
+            if G_VERSION == ONYFS_V1 {
+                return Err(Errno::NoSys);
+            }
+            if name.is_empty() || name.len() > ONYFS_NAME_MAX {
+                return Err(Errno::Inval);
+            }
+            if target.is_empty() {
+                return Err(Errno::Inval);
+            }
+            let new_ino = alloc_inode()?;
+            let now = timer::jiffies();
+            let data_blk = alloc_data_block()?;
+            let mut inode = OnyfsInode {
+                mode: ONYFS_DT_LNK,
+                size: target.len() as u64,
+                uid: 0,
+                gid: 0,
+                nlink: 1,
+                blocks: [0; ONYFS_DIRECT_BLKS],
+                indirect: 0,
+                double_indirect: 0,
+                crtime: now,
+                mtime: now,
+                atime: now,
+                ctime: now,
+                flags: 0,
+                reserved: 0,
+            };
+            inode.blocks[0] = data_blk;
+            {
+                let pb = &raw mut G_BUF;
+                (*pb).fill(0);
+                let n = target.len().min(ONYFS_BLOCK_SIZE);
+                (&mut *pb)[..n].copy_from_slice(&target[..n]);
+                write_block(data_blk, &*pb)?;
+            }
+            write_inode(new_ino, &inode)?;
+            add_dirent(dir_ino, name, new_ino, /*dtype=*/ 10)?;
+            journal_commit()?;
+            Ok(new_ino)
+        })
     }
 }
 

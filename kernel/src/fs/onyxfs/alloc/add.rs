@@ -1,5 +1,5 @@
 use super::super::inode;
-use super::super::journal::journal_log;
+use super::super::journal::journal_before_write;
 use super::super::{
     G_BUF, G_VERSION, ONYFS_V1, ONYFS_V1_DIRENT_SIZE, dirents_per_block, read_block, write_block,
 };
@@ -116,7 +116,7 @@ pub unsafe fn add_dirent(dir_ino: u32, name: &[u8], target_ino: u32, dtype: u8) 
                     && (match_len >= ONYFS_NAME_MAX || existing_name[match_len] == 0)
                 {
                     write_slot!(&mut *pb, i);
-                    journal_log(dir_blk, &*pb)?;
+                    journal_before_write(dir_blk)?;
                     write_block(dir_blk, &*pb)?;
                     return Ok(());
                 }
@@ -147,7 +147,7 @@ pub unsafe fn add_dirent(dir_ino: u32, name: &[u8], target_ino: u32, dtype: u8) 
                     continue;
                 }
                 write_slot!(&mut *pb, i);
-                journal_log(dir_blk, &*pb)?;
+                journal_before_write(dir_blk)?;
                 write_block(dir_blk, &*pb)?;
                 return Ok(());
             }
@@ -165,11 +165,11 @@ pub unsafe fn add_dirent(dir_ino: u32, name: &[u8], target_ino: u32, dtype: u8) 
             for b in (*pb).iter_mut() {
                 *b = 0;
             }
-            journal_log(new_blk, &*pb)?;
+            journal_before_write(new_blk)?;
             write_block(new_blk, &*pb)?;
             // Write the dirent as the first slot.
             write_slot!(&mut *pb, 0);
-            journal_log(new_blk, &*pb)?;
+            journal_before_write(new_blk)?;
             write_block(new_blk, &*pb)?;
             // Persist the updated inode (now references the new block).
             inode::write_inode(dir_ino, &dir_inode)?;

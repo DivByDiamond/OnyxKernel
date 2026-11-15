@@ -4,7 +4,9 @@
 //! `FS_LOCK`) lives in the sibling `exec` module.
 mod exec;
 
-pub(crate) use exec::{is_dir_target, rel_to_abs, resolve_path, stat_target, with_mount};
+pub(crate) use exec::{
+    is_dir_target, rel_to_abs, resolve_path, stat_target, with_mount, with_mount_recovery,
+};
 
 use crate::fs::fat32::FatCtx;
 use crate::fs::onyxfs::OnyxCtx;

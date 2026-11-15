@@ -32,7 +32,30 @@ use super::{Fs, G_MOUNTS, MAX_MOUNTS, MountFs, resolve_mount};
 /// `crate::sync`). `f` must not call back into VFS path dispatch that would
 /// take `FS_LOCK` again (the lock is not reentrant); the dispatch sites use
 /// this helper exactly once per public entry point.
-pub(crate) unsafe fn with_mount<T>(slot: usize, f: impl FnOnce() -> T) -> T {
+pub(crate) unsafe fn with_mount<T>(slot: usize, f: impl FnOnce() -> KResult<T>) -> KResult<T> {
+    // SAFETY: the caller supplies the FS_LOCK/SIE and callback contract.
+    unsafe { with_context(slot, true, f) }
+}
+
+/// Run a snapshot operation with its independent recovery protocol.
+/// # Safety
+/// Same mount/exclusion contract as with_mount. Only snapshot entry points
+/// may use this path; they must handle their own commit and quarantine.
+pub(crate) unsafe fn with_mount_recovery<T>(
+    slot: usize,
+    f: impl FnOnce() -> KResult<T>,
+) -> KResult<T> {
+    // SAFETY: snapshots own recovery and must not trigger metadata rollback.
+    unsafe { with_context(slot, false, f) }
+}
+
+/// # Safety
+/// Same mount/exclusion contract as with_mount; false is snapshot-only.
+unsafe fn with_context<T>(
+    slot: usize,
+    journaled: bool,
+    f: impl FnOnce() -> KResult<T>,
+) -> KResult<T> {
     // SAFETY: FS_LOCK is only taken here and in the boot mount paths, all
     // with SIE=0 (crate::sync invariant). The G_MOUNTS write-back only
     // touches the `ctx` field of `slot`, which the (unlocked) readers in
@@ -48,6 +71,8 @@ pub(crate) unsafe fn with_mount<T>(slot: usize, f: impl FnOnce() -> T) -> T {
                 let r = f();
                 fat32::FAT32_LOCK.unlock();
                 r
+            } else if journaled {
+                onyxfs::journal::transaction(f)
             } else {
                 f()
             }
@@ -57,7 +82,11 @@ pub(crate) unsafe fn with_mount<T>(slot: usize, f: impl FnOnce() -> T) -> T {
                 Some(MountFs::Onyx(ref ctx)) => {
                     let saved = onyxfs::save_ctx();
                     onyxfs::apply_ctx(ctx);
-                    let r = f();
+                    let r = if journaled {
+                        onyxfs::journal::transaction(f)
+                    } else {
+                        f()
+                    };
                     (*pm)[slot].ctx = Some(MountFs::Onyx(onyxfs::save_ctx()));
                     onyxfs::apply_ctx(&saved);
                     r

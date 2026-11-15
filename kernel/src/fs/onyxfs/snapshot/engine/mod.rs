@@ -238,5 +238,4 @@ mod restore;
 pub(super) use restore::{recover, rollback};
 
 #[cfg(test)]
-
 mod tests;

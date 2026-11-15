@@ -82,9 +82,8 @@ pub(super) static mut G_SB: OnyfsSuper = OnyfsSuper {
 };
 pub(super) static mut G_BUF: [u8; ONYFS_BLOCK_SIZE] = [0; ONYFS_BLOCK_SIZE];
 
-/// In-memory block device used by host unit tests instead of virtio-blk.
 #[cfg(test)]
-pub(super) static mut TEST_DISK: Option<::alloc::vec::Vec<u8>> = None;
+pub(super) use tests::io::TEST_DISK;
 
 /// Next free journal slot (block offset from `journal_start`).
 pub(super) static mut G_JOURNAL_HEAD: u32 = 0;
@@ -93,7 +92,11 @@ pub(super) unsafe fn read_block(blk: u32, buf: &mut [u8; ONYFS_BLOCK_SIZE]) -> K
     // SAFETY: all accesses are under root mount exclusion, including this gate.
     unsafe {
         snapshot::access::access(G_SNAPSHOT_QUARANTINED)?;
-        raw_read_block(blk, buf)
+        let result = raw_read_block(blk, buf);
+        if result.is_err() {
+            G_SNAPSHOT_QUARANTINED = true;
+        }
+        result
     }
 }
 pub(super) unsafe fn raw_read_block(blk: u32, buf: &mut [u8; ONYFS_BLOCK_SIZE]) -> KResult<()> {
@@ -102,15 +105,8 @@ pub(super) unsafe fn raw_read_block(blk: u32, buf: &mut [u8; ONYFS_BLOCK_SIZE]) 
     // from multiple harts (globals are unsynchronized).
     unsafe {
         #[cfg(test)]
-        if let Some(disk) = (*&raw const TEST_DISK).as_ref() {
-            let off = blk as usize * ONYFS_BLOCK_SIZE;
-            return match disk.get(off..off + ONYFS_BLOCK_SIZE) {
-                Some(s) => {
-                    buf.copy_from_slice(s);
-                    Ok(())
-                }
-                None => Err(onyx_core::errno::Errno::Io),
-            };
+        if let Some(result) = tests::io::read(blk, buf) {
+            return result;
         }
         let lba = (G_LBA_BASE as u64) + (blk as u64) * 8;
         // A single OnyxFS block is 4096 bytes = 8 × 512-byte sectors. We issue
@@ -122,13 +118,16 @@ pub(super) unsafe fn raw_read_block(blk: u32, buf: &mut [u8; ONYFS_BLOCK_SIZE]) 
     }
 }
 
-/// Write a 4096-byte block back to disk. Used by `update_mtime`,
-/// `write_inode`, and the snapshot management stubs.
+/// Write a 4096-byte home block after its metadata before-image was logged.
 pub(super) unsafe fn write_block(blk: u32, buf: &[u8; ONYFS_BLOCK_SIZE]) -> KResult<()> {
     // SAFETY: all accesses are under root mount exclusion, including this gate.
     unsafe {
         snapshot::access::access(G_SNAPSHOT_QUARANTINED)?;
-        raw_write_block(blk, buf)
+        let result = raw_write_block(blk, buf);
+        if result.is_err() {
+            G_SNAPSHOT_QUARANTINED = true;
+        }
+        result
     }
 }
 pub(super) unsafe fn raw_write_block(blk: u32, buf: &[u8; ONYFS_BLOCK_SIZE]) -> KResult<()> {
@@ -136,15 +135,8 @@ pub(super) unsafe fn raw_write_block(blk: u32, buf: &[u8; ONYFS_BLOCK_SIZE]) -> 
     // caller; G_DEV/G_LBA_BASE were set by mount(). Same exclusion contract as read_block.
     unsafe {
         #[cfg(test)]
-        if let Some(disk) = (*&raw mut TEST_DISK).as_mut() {
-            let off = blk as usize * ONYFS_BLOCK_SIZE;
-            return match disk.get_mut(off..off + ONYFS_BLOCK_SIZE) {
-                Some(s) => {
-                    s.copy_from_slice(buf);
-                    Ok(())
-                }
-                None => Err(onyx_core::errno::Errno::Io),
-            };
+        if let Some(result) = tests::io::write(blk, buf) {
+            return result;
         }
         let lba = (G_LBA_BASE as u64) + (blk as u64) * 8;
         // Same batching as `read_block` — a single `write_multi` call for the
@@ -180,3 +172,11 @@ mod tests;
 
 #[cfg(test)]
 mod large_file_tests;
+
+/// Incremental FNV-1a checksum shared by snapshot and undo records.
+pub(super) fn checksum(mut hash: u32, bytes: &[u8]) -> u32 {
+    for byte in bytes {
+        hash = (hash ^ u32::from(*byte)).wrapping_mul(16777619);
+    }
+    hash
+}

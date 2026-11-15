@@ -6,5 +6,4 @@ pub use read::stat;
 pub use write::set_mode;
 pub use write::set_timestamps;
 pub use write::set_uid_gid;
-pub use write::update_mtime;
 pub(super) use write::write_inode;

@@ -99,7 +99,6 @@ static void make_payload(unsigned char *p)
     memset(p + 22, 0xA5, PAYLOAD_LEN - 22);
 }
 
-static uint32_t g_target; /* remembered across inject/check in the driver */
 
 static void inject(const struct sb *s, int with_commit)
 {
@@ -141,11 +140,10 @@ static void inject(const struct sb *s, int with_commit)
            with_commit ? "COMMITTED" : "TORN", target,
            s->journal_start, s->journal_start + s->journal_size - 1);
     printf("TARGET_BLOCK %u\n", target);
-    g_target = target;
 }
 
 /* Verify post-boot: the payload must be present iff the transaction was
- * committed, and the journal area must be zeroed either way.
+ * committed, and the journal must be empty (legacy zeroes or a clean ONJU header).
  *
  * NOTE: the kernel's grow-on-mount rewrites the superblock's total_blocks
  * (1109 -> up to 16384 on a 64 MB image), so the target block CANNOT be
@@ -163,17 +161,17 @@ static void check(uint32_t target, uint32_t journal_start)
     make_payload(payload);
     replayed = memcmp(blk, payload, PAYLOAD_LEN) == 0;
 
-    for (uint32_t i = 0; i < scan; i++) {
-        size_t k;
-        read_block(journal_start + i, j);
-        for (k = 0; k < 64; k++) {
-            if (j[k] != 0) {
-                zeroed = 0;
-                break;
+    read_block(journal_start, j);
+    if (le32(j) == 0x554A4E4F) { /* ONJU: old image slots are intentionally retained. */
+        zeroed = le32(j + 8) == 0;
+    } else {
+        for (uint32_t i = 0; i < scan; i++) {
+            read_block(journal_start + i, j);
+            for (size_t k = 0; k < 64; k++) {
+                if (j[k] != 0) { zeroed = 0; break; }
             }
+            if (!zeroed) break;
         }
-        if (!zeroed)
-            break;
     }
 
     printf("target=%u replayed=%d journal_zeroed=%d\n",

@@ -1,195 +1,175 @@
-//! On-disk journal (circular redo log) for OnyxFS metadata writes.
+//! Ordered metadata undo journal with full-block before-images.
 //!
-//! On-disk journal entry layout (one 4096-byte block per entry):
-//!   bytes 0..4        : type   (u32) — 0=commit_start, 1=block_write, 2=commit_end
-//!   bytes 4..8        : block_num (u32) — target block this entry replays to
-//!   bytes 8..4096     : data   (4088 bytes) — block contents to replay
-//!
-//! The journal is a circular redo log: `journal_log` appends a `block_write`
-//! entry containing the NEW block contents before the actual write_block call.
-//! `journal_commit` appends a `commit_end` marker. On mount, `journal_recover`
-//! scans for a `commit_end`; if found, every preceding `block_write` entry is
-//! re-applied to its target block. Incomplete transactions (no commit_end) are
-//! discarded.
-//!
-//! MVP limitation: only the first 4088 bytes of each block are journaled. The
-//! last 8 bytes of a 4096-byte block are not protected. This is acceptable
-//! because the only metadata that fits in those 8 bytes (rare tail padding of
-//! dirent blocks) is not critical for crash recovery.
-use super::{G_JOURNAL_HEAD, G_SB, read_block, write_block};
-use onyx_core::errno::KResult;
+//! Each distinct metadata block is saved once before its first home write.
+//! The ONJU header publishes the target and checksum only after its undo
+//! image completes. Commit clears just this header after all home writes.
+//! Recovery rolls back a nonempty header; it is restartable after I/O errors.
+//! Regular file data is ordered before metadata commit but is not atomic.
+//! Legacy redo recovery remains supported. See docs/ONYXFS_JOURNAL.md.
+use super::{G_JOURNAL_HEAD, G_SB, G_SNAPSHOT_QUARANTINED, raw_read_block, raw_write_block};
+use onyx_core::errno::{Errno, KResult};
 use onyx_core::formats::{
-    JournalScanStep, ONYFS_BLOCK_SIZE, ONYFS_JOURNAL_BLOCK_WRITE, ONYFS_JOURNAL_COMMIT_END,
-    ONYFS_JOURNAL_DATA_SIZE, journal_entry_type, journal_replay_entry, journal_scan_step,
+    ONYFS_BLOCK_SIZE, ONYFS_JOURNAL_BLOCK_WRITE, ONYFS_JOURNAL_COMMIT_END,
+    ONYFS_JOURNAL_COMMIT_START, OnyfsSuper,
 };
 
-/// Append a `block_write` entry to the journal containing the NEW contents
-/// of `block_num`. Called BEFORE the actual `write_block` so that a crash
-/// between the journal append and the data write leaves a recoverable redo
-/// entry on disk. No-op if the filesystem has no journal configured.
-///
+mod format;
+mod legacy;
+mod transaction;
+use format::{MAGIC, MAX_ENTRIES, checksum, get, put, seal, valid_target, validate};
+pub(crate) use transaction::transaction;
+
 /// # Safety
-///
-/// Caller must not invoke onyxfs operations concurrently from multiple harts:
-/// G_JOURNAL_HEAD is a non-atomic module global and two racing journal_log
-/// calls could overwrite each other's entries.
-/// NOTE: no FS-level lock exists; the VFS layer does not serialize callers.
-#[inline(never)]
-pub(super) unsafe fn journal_log(block_num: u32, data: &[u8; ONYFS_BLOCK_SIZE]) -> KResult<()> {
-    // SAFETY: single-threaded onyxfs exclusion (see # Safety); head is
-    // bounds-checked against journal_size and `data` is a fixed-size
-    // caller-owned block buffer.
+/// Caller holds FS_LOCK (SIE=0) or single-threaded boot exclusion. `sb`
+/// describes a validated journal. Home writes must already have completed.
+unsafe fn clear(sb: &OnyfsSuper) -> KResult<()> {
+    // SAFETY: the header occupies one validated journal block.
     unsafe {
-        let sb_ptr = &raw const G_SB;
-        let journal_start = (*sb_ptr).journal_start;
-        if journal_start == 0 || (*sb_ptr).journal_size == 0 {
-            return Ok(());
-        }
-        let mut head = G_JOURNAL_HEAD;
-        if head + 1 >= (*sb_ptr).journal_size {
-            // Journal full (keep one slot for the commit marker). Operations
-            // that touch many blocks, such as freeing a large file, log more
-            // images than the log can hold. Every entry logged so far has
-            // already been written to its target block, so close that part
-            // of the transaction and continue with an empty log instead of
-            // failing the whole operation.
-            journal_commit()?;
-            head = G_JOURNAL_HEAD;
-        }
-        let mut entry = [0u8; ONYFS_BLOCK_SIZE];
-        entry[0..4].copy_from_slice(&ONYFS_JOURNAL_BLOCK_WRITE.to_le_bytes());
-        entry[4..8].copy_from_slice(&block_num.to_le_bytes());
-        let copy_n = ONYFS_JOURNAL_DATA_SIZE.min(ONYFS_BLOCK_SIZE);
-        entry[8..8 + copy_n].copy_from_slice(&data[..copy_n]);
-        write_block(journal_start + head, &entry)?;
-        G_JOURNAL_HEAD = head + 1;
+        let mut header = [0; ONYFS_BLOCK_SIZE];
+        seal(&mut header);
+        raw_write_block(sb.journal_start, &header)?;
+        G_JOURNAL_HEAD = 0;
         Ok(())
     }
 }
 
-/// Mark the current transaction as committed by appending a `commit_end`
-/// entry. After this, the journal entries are considered durable and will be
-/// replayed on the next mount if a crash occurs before the data writes
-/// themselves complete. Resets the in-memory journal head so the journal
-/// area can be reused for the next transaction.
-///
-/// Bug #22 fix: also ZERO every journal entry that was part of this
-/// transaction. Without this, a subsequent transaction that crashes
-/// before writing its own commit_end would leave the new (incomplete)
-/// BLOCK_WRITE entries followed by the OLD commit_end marker from this
-/// transaction. On next mount, journal_recover would scan past the new
-/// entries, hit the old commit_end, and replay BOTH the new (incomplete)
-/// entries AND any stale BLOCK_WRITE entries sitting between them and
-/// the old commit_end — silently corrupting the filesystem. Zeroing the
-/// entries after commit ensures the next transaction always starts with
-/// a clean slate on disk.
-///
+/// Save the full original block before changing metadata. Repeated writes
+/// share one undo slot; capacity exhaustion fails instead of auto-committing.
 /// # Safety
-///
-/// Caller must not invoke onyxfs operations concurrently from multiple harts:
-/// G_JOURNAL_HEAD is a non-atomic module global and racing commits would
-/// interleave their zeroing writes.
-/// NOTE: no FS-level lock exists; the VFS layer does not serialize callers.
+/// Caller holds FS_LOCK (SIE=0) or boot exclusion across log and home write.
+pub(super) unsafe fn journal_before_write(block: u32) -> KResult<()> {
+    // SAFETY: caller owns the mounted volume across the complete operation.
+    unsafe {
+        let result = before_write(block);
+        if result.is_err() {
+            G_SNAPSHOT_QUARANTINED = true;
+        }
+        result
+    }
+}
+
+/// # Safety
+/// Same exclusive volume contract as journal_before_write.
 #[inline(never)]
+unsafe fn before_write(block: u32) -> KResult<()> {
+    // SAFETY: serialized globals and raw block I/O remain within the volume.
+    unsafe {
+        super::snapshot::access::access(G_SNAPSHOT_QUARANTINED)?;
+        let sb = G_SB;
+        if sb.journal_start == 0 || sb.journal_size == 0 {
+            return Ok(());
+        }
+        valid_target(block, &sb)?;
+        let mut header = [0; ONYFS_BLOCK_SIZE];
+        raw_read_block(sb.journal_start, &mut header)?;
+        if get(&header, 0) != MAGIC {
+            journal_recover()?;
+            raw_read_block(sb.journal_start, &mut header)?;
+        }
+        let count = validate(&header, &sb)?;
+        if (0..count).any(|i| get(&header, 16 + i * 8) == block) {
+            return Ok(());
+        }
+        if count >= MAX_ENTRIES || count + 1 >= sb.journal_size as usize {
+            return Err(Errno::NoSpace);
+        }
+        let mut original = [0; ONYFS_BLOCK_SIZE];
+        raw_read_block(block, &mut original)?;
+        raw_write_block(sb.journal_start + 1 + count as u32, &original)?;
+        put(&mut header, 16 + count * 8, block);
+        put(&mut header, 20 + count * 8, checksum(&original));
+        put(&mut header, 8, (count + 1) as u32);
+        seal(&mut header);
+        raw_write_block(sb.journal_start, &header)?;
+        G_JOURNAL_HEAD = (count + 1) as u32;
+        Ok(())
+    }
+}
+
+/// Complete an operation. VFS transactions defer this to their outer edge.
+/// # Safety
+/// Caller owns the mounted volume under FS_LOCK or boot exclusion.
 pub(super) unsafe fn journal_commit() -> KResult<()> {
-    // SAFETY: single-threaded onyxfs exclusion (see # Safety); head is
-    // bounds-checked against journal_size and only fixed-size stack
-    // buffers are written.
+    // SAFETY: the operation boundary owns all journal and home writes.
     unsafe {
-        let sb_ptr = &raw const G_SB;
-        let journal_start = (*sb_ptr).journal_start;
-        if journal_start == 0 || (*sb_ptr).journal_size == 0 {
+        if transaction::deferred() {
             return Ok(());
         }
-        let head = G_JOURNAL_HEAD;
-        if head == 0 {
-            return Ok(()); // nothing to commit
+        super::snapshot::access::access(G_SNAPSHOT_QUARANTINED)?;
+        let sb = G_SB;
+        if sb.journal_start == 0 || sb.journal_size == 0 {
+            return Ok(());
         }
-        if head < (*sb_ptr).journal_size {
-            let mut entry = [0u8; ONYFS_BLOCK_SIZE];
-            entry[0..4].copy_from_slice(&ONYFS_JOURNAL_COMMIT_END.to_le_bytes());
-            write_block(journal_start + head, &entry)?;
-        }
-        G_JOURNAL_HEAD = 0;
-        // Zero every entry that was part of this transaction (positions 0..head).
-        // The commit_end marker at `head` is left in place for now so a crash
-        // mid-zero still results in correct replay on the next mount — once all
-        // zeroing is complete, the next transaction's first write will overwrite
-        // the commit_end marker.
-        let zero = [0u8; ONYFS_BLOCK_SIZE];
-        for j in 0..head {
-            write_block(journal_start + j, &zero)?;
-        }
-        // Now zero the commit_end marker too — the transaction is fully
-        // completed and the journal area is clean for reuse.
-        if head < (*sb_ptr).journal_size {
-            write_block(journal_start + head, &zero)?;
+        if G_JOURNAL_HEAD != 0
+            && let Err(error) = clear(&sb)
+        {
+            G_SNAPSHOT_QUARANTINED = true;
+            return Err(error);
         }
         Ok(())
     }
 }
 
-/// Replay journal on mount (crash recovery). Scans the journal area for a
-/// `commit_end` marker. If found, every preceding `block_write` entry is
-/// re-applied to its target block (redo). Incomplete transactions (no
-/// `commit_end`) are discarded. The journal is then zeroed so future mounts
-/// start with a clean log.
-///
+/// Restore unfinished metadata updates, retaining the header until every
+/// full before-image is restored. Failed recovery keeps the volume gated.
 /// # Safety
-///
-/// Must be called only from mount(), i.e. during single-threaded boot init
-/// before secondary harts are released, since it rewrites G_JOURNAL_HEAD and
-/// the journal area without a lock.
+/// Caller owns FS_LOCK or boot exclusion; no normal I/O may interleave.
 pub unsafe fn journal_recover() -> KResult<()> {
-    // SAFETY: boot-time single-threaded exclusion (see # Safety); entry
-    // scanning is bounded by journal_size and buffers are fixed-size.
+    // SAFETY: raw I/O is permitted only during exclusive recovery.
     unsafe {
-        let sb_ptr = &raw const G_SB;
-        let journal_start = (*sb_ptr).journal_start;
-        if journal_start == 0 || (*sb_ptr).journal_size == 0 {
+        let result = recover();
+        if result.is_err() {
+            G_SNAPSHOT_QUARANTINED = true;
+        }
+        result
+    }
+}
+
+/// # Safety
+/// Same exclusion and validated volume contract as journal_recover.
+#[inline(never)]
+unsafe fn recover() -> KResult<()> {
+    // SAFETY: header/targets are validated before any home block is changed.
+    unsafe {
+        let sb = G_SB;
+        if sb.journal_start == 0 || sb.journal_size == 0 {
             return Ok(());
         }
-        let journal_size = (*sb_ptr).journal_size;
-        let mut found_commit = false;
-        let mut commit_at: u32 = 0;
-        let mut entry = [0u8; ONYFS_BLOCK_SIZE];
-        let mut i: u32 = 0;
-        while i < journal_size {
-            read_block(journal_start + i, &mut entry)?;
-            match journal_scan_step(journal_entry_type(&entry)) {
-                JournalScanStep::Continue => {}
-                JournalScanStep::Commit => {
-                    found_commit = true;
-                    commit_at = i;
-                    break;
-                }
-                JournalScanStep::Stop => break, // empty slot or garbage — stop scanning
+        valid_target(0, &sb)?;
+        let mut header = [0; ONYFS_BLOCK_SIZE];
+        raw_read_block(sb.journal_start, &mut header)?;
+        match get(&header, 0) {
+            MAGIC => {}
+            ONYFS_JOURNAL_COMMIT_START | ONYFS_JOURNAL_BLOCK_WRITE | ONYFS_JOURNAL_COMMIT_END => {
+                return legacy::recover(&sb);
             }
-            i += 1;
+            _ => return Err(Errno::Io),
         }
-        if !found_commit {
-            G_JOURNAL_HEAD = 0;
-            return Ok(());
+        let count = validate(&header, &sb)?;
+        let mut original = [0; ONYFS_BLOCK_SIZE];
+        for i in 0..count {
+            raw_read_block(sb.journal_start + 1 + i as u32, &mut original)?;
+            if checksum(&original) != get(&header, 20 + i * 8) {
+                return Err(Errno::Io);
+            }
         }
-        // Replay every `block_write` entry before the commit marker.
-        for j in 0..commit_at {
-            read_block(journal_start + j, &mut entry)?;
-            let Some((block_num, data)) = journal_replay_entry(&entry) else {
-                continue;
-            };
-            // Read the current block contents (to preserve the un-journaled tail)
-            // and overwrite the first JOURNAL_DATA_SIZE bytes from the entry.
-            let mut blk_buf = [0u8; ONYFS_BLOCK_SIZE];
-            let _ = read_block(block_num, &mut blk_buf);
-            blk_buf[..data.len()].copy_from_slice(&data);
-            write_block(block_num, &blk_buf)?;
+        for i in 0..count {
+            raw_read_block(sb.journal_start + 1 + i as u32, &mut original)?;
+            raw_write_block(get(&header, 16 + i * 8), &original)?;
         }
-        // Clear the journal area so future mounts see an empty log.
-        let zero = [0u8; ONYFS_BLOCK_SIZE];
-        for j in 0..=commit_at {
-            write_block(journal_start + j, &zero)?;
+        clear(&sb)
+    }
+}
+
+/// Flush metadata before entering the independent snapshot protocol.
+/// # Safety
+/// Caller owns root FS_LOCK; snapshots must not nest in a metadata operation.
+pub(in crate::fs::onyxfs) unsafe fn snapshot_boundary() -> KResult<()> {
+    // SAFETY: caller owns the root context and the journal exclusion.
+    unsafe {
+        if transaction::deferred() {
+            return Err(Errno::Busy);
         }
-        G_JOURNAL_HEAD = 0;
-        Ok(())
+        journal_commit()
     }
 }

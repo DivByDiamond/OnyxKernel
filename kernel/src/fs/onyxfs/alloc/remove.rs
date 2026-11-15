@@ -1,5 +1,5 @@
 use super::super::inode;
-use super::super::journal::journal_log;
+use super::super::journal::journal_before_write;
 use super::super::{
     G_BUF, G_VERSION, ONYFS_V1, ONYFS_V1_DIRENT_SIZE, dirents_per_block, read_block, write_block,
 };
@@ -87,7 +87,7 @@ pub unsafe fn remove_dirent(dir_ino: u32, name: &[u8]) -> KResult<()> {
                     (*pb)[inode_off + 1] = 0;
                     (*pb)[inode_off + 2] = 0;
                     (*pb)[inode_off + 3] = 0;
-                    journal_log(dir_blk, &*pb)?;
+                    journal_before_write(dir_blk)?;
                     write_block(dir_blk, &*pb)?;
                     return Ok(());
                 }

@@ -66,7 +66,7 @@ pub unsafe fn create(path: &[u8], mode: u32) -> KResult<FdToken> {
                 onyxfs::lookup(parent_rel, &mut st)?
             };
             let ino = onyxfs::create(parent_ino, filename, mode)?;
-            let _ = onyxfs::set_uid_gid(ino, cur_uid, cur_gid);
+            onyxfs::set_uid_gid(ino, cur_uid, cur_gid)?;
             Ok(ino)
         })?;
         let idx = alloc_fd(PERM_READ | PERM_WRITE | PERM_SEEK)?;
@@ -124,7 +124,7 @@ pub unsafe fn mkdir(path: &[u8]) -> KResult<()> {
                 return Err(Errno::Exist);
             }
             let new_ino = onyxfs::mkdir(parent_ino, dirname)?;
-            let _ = onyxfs::set_uid_gid(new_ino, cur_uid, cur_gid);
+            onyxfs::set_uid_gid(new_ino, cur_uid, cur_gid)?;
             Ok(())
         })
     }

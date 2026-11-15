@@ -1,8 +1,7 @@
-//! Mount, persist_superblock, and inode_table_block_count — top-level
+//! Mount and persist_superblock — top-level
 //! filesystem lifecycle entry points invoked once at boot.
 use super::{
-    G_BUF, G_DEV, G_LBA_BASE, G_SB, G_VERSION, ONYFS_V1, ONYFS_V2, inodes_per_block, read_block,
-    write_block,
+    G_BUF, G_DEV, G_LBA_BASE, G_SB, G_VERSION, ONYFS_V1, ONYFS_V2, read_block, write_block,
 };
 use crate::drivers::virtio;
 use onyx_core::errno::{Errno, KResult};
@@ -141,18 +140,5 @@ pub(super) unsafe fn persist_superblock() -> KResult<()> {
         }
         (&mut *pb)[..bytes.len()].copy_from_slice(&bytes);
         write_block(0, &*pb)
-    }
-}
-
-/// Number of inode-table blocks occupied by the current filesystem.
-#[inline]
-#[allow(dead_code)]
-pub(super) unsafe fn inode_table_block_count() -> u32 {
-    // SAFETY: reads only G_SB (set by mount) and calls inodes_per_block(); no
-    // pointer arithmetic beyond the validated superblock fields.
-    unsafe {
-        let ipb = inodes_per_block() as u32;
-        let cnt = (G_SB).inode_count;
-        if cnt == 0 { 1 } else { cnt.div_ceil(ipb) }
     }
 }

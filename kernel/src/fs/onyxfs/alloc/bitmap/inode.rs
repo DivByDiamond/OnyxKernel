@@ -1,5 +1,5 @@
 use super::super::super::inode;
-use super::super::super::journal::journal_log;
+use super::super::super::journal::journal_before_write;
 use super::super::super::{G_BUF, G_SB, read_block, write_block};
 use super::free_data_block;
 use onyx_core::errno::{Errno, KResult};
@@ -43,7 +43,7 @@ pub unsafe fn alloc_inode() -> KResult<u32> {
                 }
                 if (*pb)[byte_idx] & (1 << bit) == 0 {
                     (*pb)[byte_idx] |= 1 << bit;
-                    journal_log(INODE_BITMAP_BLK, &*pb)?;
+                    journal_before_write(INODE_BITMAP_BLK)?;
                     write_block(INODE_BITMAP_BLK, &*pb)?;
                     return Ok(bit_index + 1);
                 }
@@ -168,7 +168,7 @@ pub unsafe fn free_inode(ino: u32) -> KResult<()> {
             let pb = &raw mut G_BUF;
             read_block(INODE_BITMAP_BLK, &mut *pb)?;
             (*pb)[byte_idx] &= !(1 << bit);
-            journal_log(INODE_BITMAP_BLK, &*pb)?;
+            journal_before_write(INODE_BITMAP_BLK)?;
             write_block(INODE_BITMAP_BLK, &*pb)?;
         }
         Ok(())

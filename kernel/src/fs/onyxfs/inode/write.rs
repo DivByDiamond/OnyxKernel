@@ -1,4 +1,4 @@
-use super::super::journal::journal_log;
+use super::super::journal::journal_before_write;
 use super::super::{G_BUF, G_SB, G_VERSION, ONYFS_V1, inodes_per_block, read_block, write_block};
 use super::read::read_inode;
 use crate::srv::timer;
@@ -31,38 +31,8 @@ pub unsafe fn write_inode(ino: u32, inode: &OnyfsInode) -> KResult<()> {
         let off = slot * OnyfsInode::SIZE;
         let pb = &raw mut G_BUF;
         (&mut *pb)[off..(OnyfsInode::SIZE + off)].copy_from_slice(&bytes);
-        journal_log(blk, &*pb)?;
+        journal_before_write(blk)?;
         write_block(blk, &*pb)
-    }
-}
-
-/// # Safety
-///
-/// Caller must not invoke onyxfs operations concurrently from multiple harts;
-/// `ino` must be a valid inode number (validated inside read_inode).
-pub unsafe fn update_mtime(ino: u32) -> KResult<()> {
-    // SAFETY: single-threaded onyxfs exclusion (see # Safety); ino is
-    // validated inside read_inode before any raw block access.
-    unsafe {
-        let mut inode = OnyfsInode {
-            mode: 0,
-            size: 0,
-            uid: 0,
-            gid: 0,
-            nlink: 0,
-            blocks: [0; ONYFS_DIRECT_BLKS],
-            indirect: 0,
-            double_indirect: 0,
-            crtime: 0,
-            mtime: 0,
-            atime: 0,
-            ctime: 0,
-            flags: 0,
-            reserved: 0,
-        };
-        read_inode(ino, &mut inode)?;
-        inode.mtime = timer::jiffies();
-        write_inode(ino, &inode)
     }
 }
 
@@ -74,30 +44,32 @@ pub unsafe fn set_mode(ino: u32, mode: u32) -> KResult<()> {
     // SAFETY: single-threaded onyxfs exclusion (see # Safety); ino is
     // validated inside read_inode before any raw block access.
     unsafe {
-        if G_VERSION == ONYFS_V1 {
-            return Err(Errno::NoSys);
-        }
-        let mut inode = OnyfsInode {
-            mode: 0,
-            size: 0,
-            uid: 0,
-            gid: 0,
-            nlink: 0,
-            blocks: [0; ONYFS_DIRECT_BLKS],
-            indirect: 0,
-            double_indirect: 0,
-            crtime: 0,
-            mtime: 0,
-            atime: 0,
-            ctime: 0,
-            flags: 0,
-            reserved: 0,
-        };
-        read_inode(ino, &mut inode)?;
-        inode.mode = mode;
-        inode.mtime = timer::jiffies();
-        write_inode(ino, &inode)?;
-        super::super::journal::journal_commit()
+        crate::fs::onyxfs::journal::transaction(|| {
+            if G_VERSION == ONYFS_V1 {
+                return Err(Errno::NoSys);
+            }
+            let mut inode = OnyfsInode {
+                mode: 0,
+                size: 0,
+                uid: 0,
+                gid: 0,
+                nlink: 0,
+                blocks: [0; ONYFS_DIRECT_BLKS],
+                indirect: 0,
+                double_indirect: 0,
+                crtime: 0,
+                mtime: 0,
+                atime: 0,
+                ctime: 0,
+                flags: 0,
+                reserved: 0,
+            };
+            read_inode(ino, &mut inode)?;
+            inode.mode = mode;
+            inode.mtime = timer::jiffies();
+            write_inode(ino, &inode)?;
+            super::super::journal::journal_commit()
+        })
     }
 }
 
@@ -109,31 +81,33 @@ pub unsafe fn set_uid_gid(ino: u32, uid: u32, gid: u32) -> KResult<()> {
     // SAFETY: single-threaded onyxfs exclusion (see # Safety); ino is
     // validated inside read_inode before any raw block access.
     unsafe {
-        if G_VERSION == ONYFS_V1 {
-            return Err(Errno::NoSys);
-        }
-        let mut inode = OnyfsInode {
-            mode: 0,
-            size: 0,
-            uid: 0,
-            gid: 0,
-            nlink: 0,
-            blocks: [0; ONYFS_DIRECT_BLKS],
-            indirect: 0,
-            double_indirect: 0,
-            crtime: 0,
-            mtime: 0,
-            atime: 0,
-            ctime: 0,
-            flags: 0,
-            reserved: 0,
-        };
-        read_inode(ino, &mut inode)?;
-        inode.uid = uid;
-        inode.gid = gid;
-        inode.mtime = timer::jiffies();
-        write_inode(ino, &inode)?;
-        super::super::journal::journal_commit()
+        crate::fs::onyxfs::journal::transaction(|| {
+            if G_VERSION == ONYFS_V1 {
+                return Err(Errno::NoSys);
+            }
+            let mut inode = OnyfsInode {
+                mode: 0,
+                size: 0,
+                uid: 0,
+                gid: 0,
+                nlink: 0,
+                blocks: [0; ONYFS_DIRECT_BLKS],
+                indirect: 0,
+                double_indirect: 0,
+                crtime: 0,
+                mtime: 0,
+                atime: 0,
+                ctime: 0,
+                flags: 0,
+                reserved: 0,
+            };
+            read_inode(ino, &mut inode)?;
+            inode.uid = uid;
+            inode.gid = gid;
+            inode.mtime = timer::jiffies();
+            write_inode(ino, &inode)?;
+            super::super::journal::journal_commit()
+        })
     }
 }
 
@@ -145,28 +119,30 @@ pub unsafe fn set_timestamps(ino: u32, mtime: u64, atime: u64) -> KResult<()> {
     // SAFETY: single-threaded onyxfs exclusion (see # Safety); ino is
     // validated inside read_inode before any raw block access.
     unsafe {
-        if G_VERSION == ONYFS_V1 {
-            return Err(Errno::NoSys);
-        }
-        let mut inode = OnyfsInode {
-            mode: 0,
-            size: 0,
-            uid: 0,
-            gid: 0,
-            nlink: 0,
-            blocks: [0; ONYFS_DIRECT_BLKS],
-            indirect: 0,
-            double_indirect: 0,
-            crtime: 0,
-            mtime: 0,
-            atime: 0,
-            ctime: 0,
-            flags: 0,
-            reserved: 0,
-        };
-        read_inode(ino, &mut inode)?;
-        inode.mtime = mtime;
-        inode.atime = atime;
-        write_inode(ino, &inode)
+        crate::fs::onyxfs::journal::transaction(|| {
+            if G_VERSION == ONYFS_V1 {
+                return Err(Errno::NoSys);
+            }
+            let mut inode = OnyfsInode {
+                mode: 0,
+                size: 0,
+                uid: 0,
+                gid: 0,
+                nlink: 0,
+                blocks: [0; ONYFS_DIRECT_BLKS],
+                indirect: 0,
+                double_indirect: 0,
+                crtime: 0,
+                mtime: 0,
+                atime: 0,
+                ctime: 0,
+                flags: 0,
+                reserved: 0,
+            };
+            read_inode(ino, &mut inode)?;
+            inode.mtime = mtime;
+            inode.atime = atime;
+            write_inode(ino, &inode)
+        })
     }
 }

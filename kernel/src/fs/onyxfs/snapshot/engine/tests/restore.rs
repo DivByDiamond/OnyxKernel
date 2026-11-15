@@ -123,7 +123,9 @@ fn decoder_rejects_trailing_rle_after_a_complete_block() {
     encoded.extend_from_slice(&[0, 0]);
     let mut output = [0; 4096];
     assert_eq!(
-        unsafe { crate::fs::onyxfs::snapshot::engine::compress::rle_decompress(&encoded, &mut output) },
+        unsafe {
+            crate::fs::onyxfs::snapshot::engine::compress::rle_decompress(&encoded, &mut output)
+        },
         0
     );
 }
@@ -147,7 +149,10 @@ fn failed_live_rollback_quarantines_access_until_successful_recovery() {
     io.fail_at = None;
     recover(&mut io, &mut sb, &mut quarantined).unwrap();
     assert!(!quarantined);
-    assert_eq!(crate::fs::onyxfs::snapshot::access::access(quarantined), Ok(()));
+    assert_eq!(
+        crate::fs::onyxfs::snapshot::access::access(quarantined),
+        Ok(())
+    );
     assert_eq!(io.blocks[300], original);
 }
 
@@ -159,7 +164,9 @@ fn legacy_compressed_fixed_slot_snapshot_still_restores() {
     let anchor = area.anchor(1).unwrap();
     let data = [0xa5; 4096];
     let mut compressed = [0; 8192];
-    let n = unsafe { crate::fs::onyxfs::snapshot::engine::compress::rle_compress(&data, &mut compressed) };
+    let n = unsafe {
+        crate::fs::onyxfs::snapshot::engine::compress::rle_compress(&data, &mut compressed)
+    };
     let mut hdr = [0; 4096];
     put(&mut hdr, 0, 1);
     put(&mut hdr, 4, 300);

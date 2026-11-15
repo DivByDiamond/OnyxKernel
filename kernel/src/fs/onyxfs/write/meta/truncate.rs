@@ -4,7 +4,7 @@
 
 use crate::fs::onyxfs::alloc::free_data_block;
 use crate::fs::onyxfs::inode::{read_inode, write_inode};
-use crate::fs::onyxfs::journal::{journal_commit, journal_log};
+use crate::fs::onyxfs::journal::{journal_before_write, journal_commit};
 use crate::fs::onyxfs::write::check_v2;
 use crate::fs::onyxfs::{read_block, write_block};
 use crate::srv::timer;
@@ -107,15 +107,17 @@ pub unsafe fn truncate(ino: u32) -> KResult<()> {
     // SAFETY: single-threaded onyxfs exclusion (see # Safety); raw access is
     // delegated to the bounds-checked read_inode/free_all_blocks helpers.
     unsafe {
-        check_v2()?;
-        let mut inode = OnyfsInode::default();
-        read_inode(ino, &mut inode)?;
-        free_all_blocks(&mut inode)?;
-        inode.size = 0;
-        inode.mtime = timer::jiffies();
-        write_inode(ino, &inode)?;
-        journal_commit()?;
-        Ok(())
+        crate::fs::onyxfs::journal::transaction(|| {
+            check_v2()?;
+            let mut inode = OnyfsInode::default();
+            read_inode(ino, &mut inode)?;
+            free_all_blocks(&mut inode)?;
+            inode.size = 0;
+            inode.mtime = timer::jiffies();
+            write_inode(ino, &inode)?;
+            journal_commit()?;
+            Ok(())
+        })
     }
 }
 
@@ -143,29 +145,31 @@ pub unsafe fn truncate_to_length(ino: u32, length: u64) -> KResult<()> {
     // SAFETY: single-threaded onyxfs exclusion (see # Safety); raw access is
     // delegated to the bounds-checked read_inode/shrink/extend helpers.
     unsafe {
-        check_v2()?;
-        let mut inode = OnyfsInode::default();
-        read_inode(ino, &mut inode)?;
-        let cur_size = inode.size;
+        crate::fs::onyxfs::journal::transaction(|| {
+            check_v2()?;
+            let mut inode = OnyfsInode::default();
+            read_inode(ino, &mut inode)?;
+            let cur_size = inode.size;
 
-        if length == cur_size {
-            return Ok(());
-        }
-        if length == 0 {
-            return truncate(ino);
-        }
+            if length == cur_size {
+                return Ok(());
+            }
+            if length == 0 {
+                return truncate(ino);
+            }
 
-        if length < cur_size {
-            shrink(&mut inode, length)?;
-        } else {
-            extend_to_length(&mut inode, cur_size, length)?;
-        }
+            if length < cur_size {
+                shrink(&mut inode, length)?;
+            } else {
+                extend_to_length(&mut inode, cur_size, length)?;
+            }
 
-        inode.size = length;
-        inode.mtime = timer::jiffies();
-        write_inode(ino, &inode)?;
-        journal_commit()?;
-        Ok(())
+            inode.size = length;
+            inode.mtime = timer::jiffies();
+            write_inode(ino, &inode)?;
+            journal_commit()?;
+            Ok(())
+        })
     }
 }
 
@@ -211,7 +215,7 @@ unsafe fn shrink(inode: &mut OnyfsInode, length: u64) -> KResult<()> {
                     set_ind_entry(&mut ind_buf, i, 0);
                 }
             }
-            journal_log(inode.indirect, &ind_buf)?;
+            journal_before_write(inode.indirect)?;
             write_block(inode.indirect, &ind_buf)?;
         }
         // Note: double_indirect handling skipped — OnyxFS only grows files

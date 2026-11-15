@@ -44,9 +44,9 @@ pub unsafe fn fchmod(token: FdToken, mode: u32) -> KResult<()> {
         if !is_kernel_boot() {
             let owner = with_mount(mnt, || {
                 let mut st = onyxfs::OnyfsStat::default();
-                let _ = onyxfs::stat(fd.ino, &mut st);
-                st.uid
-            });
+                onyxfs::stat(fd.ino, &mut st)?;
+                Ok(st.uid)
+            })?;
             let cur = crate::proc::current();
             if cur.uid != 0 && cur.uid != owner {
                 return Err(Errno::Perm);

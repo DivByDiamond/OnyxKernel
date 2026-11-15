@@ -10,5 +10,5 @@ mod engine;
 mod format;
 mod stream;
 
-pub use api::{snapshot_create, snapshot_list, snapshot_rollback};
 pub(super) use api::snapshot_recover;
+pub use api::{snapshot_create, snapshot_list, snapshot_rollback};

@@ -91,12 +91,8 @@ pub(super) fn get(data: &[u8], at: usize) -> u32 {
 pub(super) fn put(data: &mut [u8], at: usize, value: u32) {
     data[at..at + 4].copy_from_slice(&value.to_le_bytes());
 }
-pub(super) fn checksum(mut hash: u32, bytes: &[u8]) -> u32 {
-    for b in bytes {
-        hash = (hash ^ u32::from(*b)).wrapping_mul(16777619);
-    }
-    hash
-}
+pub(super) use super::super::checksum;
+
 pub(super) fn meta<I: Io>(io: &mut I, area: Area, id: u32) -> KResult<SnapshotMeta> {
     area.anchor(id)?;
     let mut block = [0; ONYFS_BLOCK_SIZE];
