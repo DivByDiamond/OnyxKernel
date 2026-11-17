@@ -63,7 +63,7 @@ Part of the [OnyxOS](https://github.com/DivByDiamond/OnyxOS) ecosystem. Booted b
 - **Write-ahead journal** — crash recovery on mount
 - **VFS with mount table** — OnyxFS, procfs, ipcfs
 - **IPC channels** — `chan_create` / `connect` / `send` / `recv` / `close`; named channels via `/ipc/*` VFS
-- **Syscall ABI** — 90 syscalls: POSIX-flavoured `open` with `O_CREAT/O_TRUNC/O_APPEND/O_NONBLOCK`, `fstat`, `waitpid`, `fork`, `execve`, `getdents64` (batched), `ioctl`, `mprotect`, `sigaction`/`sigprocmask`/`sigreturn`, `clock_gettime`, `isatty`, `getentropy`, `setuid`/`setgid`, `fsync`, `truncate` with length (full zero/shrink/extend support), `ftruncate`, `readlink`/`symlink` (real implementation, not stubs), `chmod`/`fchmod` (real mode-bit storage in inode), `chown`/`fchown` (real uid/gid storage), `umask`, `sched_setaffinity`/`sched_getaffinity`, `poll` (POLLIN/POLLOUT/POLLERR + timeout), `net_connect`/`net_send`/`net_recv`/`net_close` (TCP client), `net_resolve` (DNS A-record lookup), plus the original `spawn`/`wait`/`exec`/`sbrk`/`kill`/`sigmask`/`snapshot_*`/`create`/`mkdir`/IPC channel set.
+- **Syscall ABI** — 100 syscalls: POSIX-flavoured `open` with `O_CREAT/O_TRUNC/O_APPEND/O_NONBLOCK`, `fstat`, `waitpid`, `fork`, `execve`, `getdents64` (batched), `ioctl`, `mprotect`, `sigaction`/`sigprocmask`/`sigreturn`, `clock_gettime`, `isatty`, `getentropy`, `setuid`/`setgid`, `fsync`, `truncate` with length (full zero/shrink/extend support), `ftruncate`, `readlink`/`symlink` (real implementation, not stubs), `chmod`/`fchmod` (real mode-bit storage in inode), `chown`/`fchown` (real uid/gid storage), `umask`, `sched_setaffinity`/`sched_getaffinity`, `poll` (POLLIN/POLLOUT/POLLERR + timeout), `net_connect`/`net_send`/`net_recv`/`net_close` (TCP client), `net_resolve` (DNS A-record lookup), plus the original `spawn`/`wait`/`exec`/`sbrk`/`kill`/`sigmask`/`snapshot_*`/`create`/`mkdir`/IPC channel set.
 - **Dynamic module registry** — built-in drivers register as modules; `/proc/modules` lists loaded modules; infrastructure for future dynamic loading
 - **Driver unit tests** — 18 unit tests for UART and VirtIO drivers (constants, struct layouts, initial state)
 - **Preemptive multitasking** — timer tick scheduling with `NEED_RESCHED` → `sched_yield`
@@ -314,14 +314,15 @@ osh> _
 - Dynamic processes (no PROC_MAX limit)
 - Preemptive multitasking (100 Hz timer)
 - Signal delivery with user-space handlers
-- 90 syscalls total
+- 100 syscalls total
 
 ### Still open
-- **USB xHCI transfer**: the URB layer and EHCI/OHCI control/bulk transfers are done (`bus/usb/`); only the xHCI transfer path is missing
-- **Dynamic kernel modules**: loading kernel ELF modules from userspace (`/proc/modules` lists only built-in drivers)
+- **USB core enumeration**: EHCI/OHCI control/bulk transfers, the xHCI transfer path and the URB/HCD layer work (`bus/usb/`, QEMU xHCI smoke), but nothing consumes them yet: descriptors, address assignment and mass storage are missing
 - **Blocking socket `recv`**: userspace busy-polls today; the kernel has no per-socket wait queue
-- **FAT32 locking**: no per-filesystem lock yet, write paths assume single-hart I/O
-- **Wall clock**: RTC-backed `gettimeofday` landed recently; see `todo.md` for the current backlog
+- **TCP segmentation**: 536 bytes per segment with no IP fragmentation; MSS/path-MTU handling is pending
+- **No TLS**: `obrowse` stays HTTP-only
+- **Dynamic kernel modules**: loading kernel ELF modules from userspace (`/proc/modules` lists only built-in drivers)
+- **Journal durability**: flush/barrier and power-loss/partial-sector behaviour are unverified on OC2R/physical media
 
 ----
 

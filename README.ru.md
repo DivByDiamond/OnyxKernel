@@ -45,7 +45,7 @@ OnyxKernel — 64-битное RISC-V ядро ОС (~98% Rust, ассембле
 - **Журнал предзаписи (WAL)** — восстановление после сбоев при монтировании
 - **VFS с таблицей монтирования** — OnyxFS, procfs, ipcfs
 - **IPC каналы** — `chan_create` / `connect` / `send` / `recv` / `close`; именованные каналы через `/ipc/*` VFS
-- **Syscall ABI** — 90 системных вызовов: POSIX `open` (`O_CREAT`/`O_TRUNC`/`O_APPEND`/`O_NONBLOCK`)/`fstat`/`waitpid`/`fork`/`execve`, `getdents64` (батчинг), `ioctl`, `mprotect`, `sigaction`/`sigprocmask`/`sigreturn`, `clock_gettime`, `umask`, `poll`, `readlink`/`symlink`, `chmod`/`fchmod`, `chown`/`fchown`, `sched_setaffinity`, `net_connect`/`net_send`/`net_recv`/`net_close` (TCP-клиент), `net_resolve` (DNS) и др.
+- **Syscall ABI** — 100 системных вызовов: POSIX `open` (`O_CREAT`/`O_TRUNC`/`O_APPEND`/`O_NONBLOCK`)/`fstat`/`waitpid`/`fork`/`execve`, `getdents64` (батчинг), `ioctl`, `mprotect`, `sigaction`/`sigprocmask`/`sigreturn`, `clock_gettime`, `umask`, `poll`, `readlink`/`symlink`, `chmod`/`fchmod`, `chown`/`fchown`, `sched_setaffinity`, `net_connect`/`net_send`/`net_recv`/`net_close` (TCP-клиент), `net_resolve` (DNS) и др.
 - **Реестр модулей** — драйверы регистрируются как модули; `/proc/modules` показывает список; инфраструктура для будущей динамической загрузки
 - **Юнит-тесты драйверов** — 18 тестов для UART и VirtIO (константы, структуры, начальное состояние)
 - **Вытесняющая многозадачность** — планирование по таймеру, `NEED_RESCHED` → `sched_yield`
@@ -293,13 +293,15 @@ osh> _
 - Динамические процессы (без PROC_MAX)
 - Preemptive multitasking (100 Hz)
 - Сигналы с user-space обработчиками
-- 90 системных вызовов
+- 100 системных вызовов
 
 ### ❌ Осталось сделать:
-- **USB xHCI transfer** — URB-слой и EHCI/OHCI control/bulk transfer готовы (`bus/usb/`); открыт только transfer-путь xHCI
-- **FAT32 long filenames (LFN)** — сейчас поддерживаются только 8.3 короткие имена
-- **FAT32 write через VFS layer** — функции `write()`/`create()`/`unlink()` в `fat32/write.rs` готовы, но VFS-layer (`vfs/rw.rs`, `vfs/file.rs`) ещё не вызывает их для `Fs::Fat32`
+- **USB core enumeration** — URB/HCD-слой, EHCI/OHCI control/bulk и transfer-путь xHCI работают (`bus/usb/`, QEMU-smoke), но потребителя нет: нет дескрипторов, адресации и mass-storage
+- **Блокирующий `recv`** — userspace опрашивает сокет сам, в ядре нет wait-очереди
+- **TCP-сегментация** — 536 байт на сегмент, IP-фрагментации нет; MSS/MTU пути не учтены
+- **TLS отсутствует** — `obrowse` остаётся HTTP-only
 - **Динамическая загрузка модулей** — загрузка ELF-модулей ядра из userspace
+- **Долговечность журнала** — flush/barrier и поведение при power loss/частичных секторах не проверены на OC2R/физическом носителе
 
 ----
 
