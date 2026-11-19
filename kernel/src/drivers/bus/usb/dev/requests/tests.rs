@@ -16,18 +16,20 @@ fn setup_lays_out_fields_little_endian() {
 
 #[test]
 fn get_descriptor_device_is_standard_dev_in() {
+    // Spec-correct per USB 2.0 §9.4.3: wValue = (type << 8) | index, so
+    // wire byte 2 is the index (wValue low) and byte 3 the type (high).
     let p = get_descriptor(DESC_DEVICE, 0, 64);
-    assert_eq!(p, [0x80, 0x06, 0x01, 0x00, 0x00, 0x00, 0x40, 0x00]);
+    assert_eq!(p, [0x80, 0x06, 0x00, 0x01, 0x00, 0x00, 0x40, 0x00]);
 }
 
 #[test]
 fn get_descriptor_packs_type_and_index_into_wvalue() {
-    // Config descriptor, index 0, first 9 bytes: byte 2 is the type,
-    // byte 3 the index (the plan's byte order).
+    // Config descriptor, index 0, first 9 bytes: wValue low byte is the
+    // index, high byte the descriptor type.
     let p = get_descriptor(DESC_CONFIGURATION, 0, 9);
     assert_eq!(p[0], 0x80);
     assert_eq!(p[1], REQ_GET_DESCRIPTOR);
-    assert_eq!([p[2], p[3]], [DESC_CONFIGURATION, 0]);
+    assert_eq!([p[2], p[3]], [0, DESC_CONFIGURATION]);
 }
 
 #[test]

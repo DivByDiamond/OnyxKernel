@@ -25,10 +25,11 @@ pub fn setup(rtype: u8, request: u8, value: u16, index: u16, len: u16) -> [u8; 8
 }
 
 /// GET_DESCRIPTOR setup packet for descriptor type `typ` at `index`,
-/// asking for up to `len` bytes back: wire bytes 2..4 carry the type,
-/// then the index (the byte order of the plan's published patterns).
+/// asking for up to `len` bytes back. Per USB 2.0 §9.4.3, wValue packs
+/// the descriptor type in its high byte and the index in its low byte,
+/// so wire byte 2 is the index and byte 3 the type.
 pub fn get_descriptor(typ: u8, index: u8, len: u16) -> [u8; 8] {
-    let value = ((index as u16) << 8) | typ as u16;
+    let value = (u16::from(typ) << 8) | u16::from(index);
     setup(RTYPE_DEV_IN, REQ_GET_DESCRIPTOR, value, 0, len)
 }
 
