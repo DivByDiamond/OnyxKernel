@@ -1,4 +1,5 @@
 pub mod core;
+pub mod dev;
 pub mod ehci;
 pub mod hcd;
 pub mod ohci;
