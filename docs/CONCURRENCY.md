@@ -16,6 +16,10 @@
 | `UART_RX` (`uart_rx::LOCK`) | Software-кольцо входных байт консоли (4 KiB) | `drivers/uart_rx.rs` | Leaf. Писатель — PLIC-обработчик на hart 0, читатели — любой харт; с `UART_LOCK` не вкладывается |
 | Локи pmm / heap / vmm | Физические страницы, куча, таблицы страниц | `mm/` | Leaf-локи, берутся внутри NET_LOCK (аллокации в TX-пути) |
 | rq-локи (`rq_lock(hart)`) | Per-hart runqueue | `proc/scheduler/runqueue.rs` | Вложенный внутрь `PROC_LIST_LOCK` (порядок см. ниже) |
+| `USB_HID_LOCK` | `usb/hid/session`: per-slot HID-сессии + очередь событий (`HID_SESSIONS`) | `kernel/src/drivers/bus/usb/hid/session/mod.rs` | Пишется один раз на boot-probe, читается в 100 Hz input-poll (SIE=0). Вкладывает `USB_DEV_LOCK` (внутри `usb::interrupt_transfer`) — порядок `USB_HID_LOCK → USB_DEV_LOCK`, никогда наоборот |
+| `USB_DEV_LOCK` | Реестр перечисленных USB-устройств (`SLOTS`, `usb/dev/mod.rs`): boot-проба (`probe_register`), arm-пути и dispatch по owner | `kernel/src/drivers/bus/usb/dev/mod.rs` | Пишется один раз на boot-probe (SIE=0), читается в 100 Hz poll и arm-путях. Вкладывается внутрь `USB_HID_LOCK` (порядок `USB_HID_LOCK → USB_DEV_LOCK`); сам по себе — leaf |
+| `STICK_CLAIM_LOCK` | Флаг клейма стика `G_CLAIMED` (курсор-маппер `stick_cursor`) | `kernel/src/drivers/input/event/stick_cursor.rs` | Пишут open/close-хуки /dev/jsN (`js_claim`/`js_release`), читает input-drain; claim-пути берут его в одиночку, порядок `DRAIN_LOCK → STICK_CLAIM_LOCK` — никогда наоборот |
+| `JS_LOCK` | Кольца joydev-записей /dev/jsN (`JS_RINGS`) | `kernel/src/fs/devfs/js.rs` | Leaf. Пуш идёт под `DRAIN_LOCK` (input drain, порядок `DRAIN_LOCK → JS_LOCK`); `js_read` берёт его отдельно; open-хук берёт `USB_HID_LOCK` (внутри `hid::baseline`, первым — клейм латчится только на живой baseline), затем `STICK_CLAIM_LOCK`, затем `JS_LOCK` — строго по одному, без вложения; никогда не берётся до `DRAIN_LOCK` |
 
 Что НЕ требует лока:
 - per-hart структуры: `G_PROCBUF_HARTS[hart]` (procfs, `fs/procfs/content.rs`),

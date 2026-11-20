@@ -288,6 +288,7 @@ osh> _
 - /proc: version, cpuinfo, meminfo, uptime, load, stat, modules
 - Per-process FD таблицы (16 слотов, capability токены)
 - Сетевой стек (Ethernet/IP/UDP/TCP) с DHCP, DNS-резолвером и syscall-интерфейсом
+- USB HID-ввод: перечисление устройств в реестр слотов, разбор HID report-descriptor и interrupt-IN опрос (`bus/usb/`, live QEMU-smoke `OnyxOS/scripts/qemu-usb-smoke.sh` с `qemu-xhci` + `usb-kbd`/`usb-tablet`); stick-сессии открывают joydev-совместимые `/dev/jsN`
 - Write-ahead журнал + восстановление при монтировании
 - Flashback снэпшоты с RLE + COW
 - Динамические процессы (без PROC_MAX)
@@ -296,7 +297,7 @@ osh> _
 - 100 системных вызовов
 
 ### ❌ Осталось сделать:
-- **USB core enumeration** — URB/HCD-слой, EHCI/OHCI control/bulk и transfer-путь xHCI работают (`bus/usb/`, QEMU-smoke), но потребителя нет: нет дескрипторов, адресации и mass-storage
+- **USB multi-device и mass storage** — перечисление, HID-разбор и interrupt-IN ввод работают (см. выше); осталось: multi-slot xHCI, EHCI interrupt-передачи, класс mass-storage
 - **Блокирующий `recv`** — userspace опрашивает сокет сам, в ядре нет wait-очереди
 - **TCP-сегментация** — 536 байт на сегмент, IP-фрагментации нет; MSS/MTU пути не учтены
 - **TLS отсутствует** — `obrowse` остаётся HTTP-only

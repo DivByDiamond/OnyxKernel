@@ -30,10 +30,12 @@ pub const STS_HSE: u32 = 1 << 2;
 pub const STS_EINT: u32 = 1 << 3;
 pub const STS_PCD: u32 = 1 << 4;
 
-pub const CRCR_ENABLE: u32 = 1 << 0;
+pub const CRCR_RCS: u32 = 1 << 0;
 pub const CRCR_CS: u32 = 1 << 1;
 pub const CRCR_CA: u32 = 1 << 2;
-pub const CRCR_RCS: u32 = 1 << 3;
+/// Read-only Command Ring Running indicator (§5.4.6 bit 3): never
+/// written by software.
+pub const CRCR_CRR: u32 = 1 << 3;
 
 pub const HCC_CSZ: u32 = 1 << 2;
 pub const HCC_PAE: u32 = 1 << 8;
@@ -50,11 +52,17 @@ pub const PORT_PEC: u32 = 1 << 18;
 pub const PORT_WRC: u32 = 1 << 19;
 pub const PORT_WPR: u32 = 1 << 31;
 
-pub const PORT_SPEED_SHIFT: u32 = 20;
-pub const PORT_SPEED_FS: u32 = 1 << PORT_SPEED_SHIFT;
-pub const PORT_SPEED_LS: u32 = 2 << PORT_SPEED_SHIFT;
-pub const PORT_SPEED_HS: u32 = 3 << PORT_SPEED_SHIFT;
-pub const PORT_SPEED_SS: u32 = 4 << PORT_SPEED_SHIFT;
+/// PORTSC bits [13:10]: port speed ID (xHCI §5.4.8) — the default
+/// protocol mapping is 1 = full, 2 = low, 3 = high, 4 = SuperSpeed;
+/// 0 is reserved. QEMU's qemu-xhci reports the same values
+/// (PORTSC_SPEED_FULL..SUPER = 1..4 << 10). The slot-context speed
+/// field takes the same ID (§6.2.2): the mapping is 1:1, no offset.
+pub const PORT_SPEED_SHIFT: u32 = 10;
+pub const PORT_SPEED_MASK: u32 = 0xF << PORT_SPEED_SHIFT;
+pub const PORT_SPEED_ID_FS: u32 = 1;
+pub const PORT_SPEED_ID_LS: u32 = 2;
+pub const PORT_SPEED_ID_HS: u32 = 3;
+pub const PORT_SPEED_ID_SS: u32 = 4;
 
 pub const DOORBELL_TARGET_SHIFT: u32 = 0;
 pub const DOORBELL_TARGET_MASK: u32 = 0xFF;
@@ -173,10 +181,17 @@ pub unsafe fn op_w32(obase: usize, off: u32, v: u32) {
 ///
 /// `base` must be the MMIO base of an xHCI controller validated at driver init and identity-mapped at boot; the offset is a fixed register-file offset per the constants in this file.
 pub unsafe fn op_w64(obase: usize, off: u32, v: u64) {
+    // QEMU's xHCI model (xhci_oper_write) dispatches on the full offset,
+    // so a single 64-bit store lands in the LOW-word case only and the
+    // high-word side effects never run (CRCR: the command ring is armed
+    // on the high write; DCBAAP: the high half is never stored). QEMU
+    // accepts 8-byte MMIO accesses as one dispatch, so 64-bit registers
+    // must be written as two 32-bit stores, low then high.
     // SAFETY: base was validated at driver init and lies inside the
-    // controller MMIO window; offset is within the register file.
+    // controller MMIO window; both offsets are within the register file.
     unsafe {
-        Mmio::<u64>::at(obase + off as usize).write(v);
+        Mmio::<u32>::at(obase + off as usize).write(v as u32);
+        Mmio::<u32>::at(obase + off as usize + 4).write((v >> 32) as u32);
     }
 }
 
@@ -195,9 +210,11 @@ pub unsafe fn doorbell_w32(dboff: usize, slot: u8, target: u8) {
 ///
 /// `base` must be the MMIO base of an xHCI controller validated at driver init and identity-mapped at boot; the offset is a fixed register-file offset per the constants in this file.
 pub unsafe fn rt_r32(rtoff: usize, intr: u32, off: u32) -> u32 {
-    // SAFETY: caller-validated MMIO base; intr*0x20 + off stays in the
-    // runtime register set for intr 0.
-    unsafe { Mmio::<u32>::at(rtoff + (intr as usize) * 0x20 + off as usize).read() }
+    // SAFETY: caller-validated MMIO base; §5.5.2 puts MFINDEX in the
+    // first 0x20 bytes, so interrupter set `intr` starts at
+    // rtoff + 0x20 + intr*0x20 + off stays in the runtime register
+    // set for intr 0.
+    unsafe { Mmio::<u32>::at(rtoff + 0x20 + (intr as usize) * 0x20 + off as usize).read() }
 }
 
 /// # Safety
@@ -207,7 +224,7 @@ pub unsafe fn rt_w32(rtoff: usize, intr: u32, off: u32, v: u32) {
     // SAFETY: base was validated at driver init and lies inside the
     // controller MMIO window; offset is within the register file.
     unsafe {
-        Mmio::<u32>::at(rtoff + (intr as usize) * 0x20 + off as usize).write(v);
+        Mmio::<u32>::at(rtoff + 0x20 + (intr as usize) * 0x20 + off as usize).write(v);
     }
 }
 
@@ -218,6 +235,7 @@ pub unsafe fn rt_w64(rtoff: usize, intr: u32, off: u32, v: u64) {
     // SAFETY: base was validated at driver init and lies inside the
     // controller MMIO window; offset is within the register file.
     unsafe {
-        Mmio::<u64>::at(rtoff + (intr as usize) * 0x20 + off as usize).write(v);
+        rt_w32(rtoff, intr, off, v as u32);
+        rt_w32(rtoff, intr, off + 4, (v >> 32) as u32);
     }
 }

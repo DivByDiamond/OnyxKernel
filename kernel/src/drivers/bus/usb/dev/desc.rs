@@ -190,4 +190,4 @@ fn add_endpoint(cfg: &mut ConfigDesc, cur: Option<usize>, d: &[u8]) -> Result<()
 }
 
 #[cfg(test)]
-mod tests;
+pub(super) mod tests;

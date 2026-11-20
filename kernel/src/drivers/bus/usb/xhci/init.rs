@@ -28,8 +28,14 @@ pub unsafe fn init(base: usize) -> KResult<()> {
         let max_intrs = ((sparams1 >> 8) & 0xFF) as u8;
         let max_ports = ((sparams1 >> 24) & 0xFF) as u8;
         let hccparams1 = regs::read_hccparams1(base);
-        let dboff = regs::read_dboff(base) as usize;
-        let rtsoff = regs::read_rtsoff(base) as usize;
+        // DBOFF/RTSOFF hold BAR-relative offsets (xHCI §5.3.1): make
+        // them absolute MMIO addresses here — every consumer (rt_w32,
+        // doorbell_w32, the IRQ handler) writes them straight into
+        // Mmio::at. With bare offsets the runtime/doorbell writes land
+        // at PA 0x1000+/0x2000 (QEMU virt: mask ROM) and silently
+        // vanish, which is exactly what the first live smoke showed.
+        let dboff = base + regs::read_dboff(base) as usize;
+        let rtsoff = base + regs::read_rtsoff(base) as usize;
         let page_size = regs::op_r32(obase, regs::OP_PAGESIZE);
         G_XHCI = XhciCtx {
             base,
@@ -59,6 +65,8 @@ pub unsafe fn init(base: usize) -> KResult<()> {
             },
             xfer_rings: [ptr::null_mut(); 32],
             slot: 0,
+            dev_port: 0,
+            dev_speed: 0,
             operational: false,
         };
         regs::op_w32(obase, regs::OP_USBCMD, regs::CMD_HCRST);
@@ -121,13 +129,29 @@ pub unsafe fn init(base: usize) -> KResult<()> {
         regs::op_w64(
             obase,
             regs::OP_CRCR,
-            cmd_phys | (regs::CRCR_ENABLE as u64) | (regs::CRCR_RCS as u64),
+            // Bit 0 is the command-ring cycle state (1: the first TRB
+            // carries cycle 1, matching alloc_ring's initial state);
+            // bit 3 (Command Ring Running) is read-only and must not be
+            // written. The high 32-bit half arms the ring in QEMU.
+            cmd_phys | (regs::CRCR_RCS as u64),
         );
         let event_ring = ring::alloc_event_ring(32)?;
         let er_phys = event_ring.phys;
+        let er_size = event_ring.size;
         G_XHCI.event_ring = event_ring;
-        regs::rt_w64(rtsoff, 0, regs::RTS_ERSTBA, er_phys);
+        // Event Ring Segment Table (xHCI §4.9.4): ERSTBA must point at
+        // a 16-byte segment-table entry {ring base, entry count}, NOT
+        // at the ring itself. QEMU arms the ring (xhci_er_reset) on the
+        // ERSTBA HIGH write and re-reads ERSTSZ there, so ERSTSZ is
+        // programmed first; ERDP must then land inside
+        // [er_start, er_start + 16*entries) or QEMU dies on the first
+        // event.
+        // SAFETY: fresh zeroed PMM page; two u64 stores stay in bounds.
+        let erst_pa = pmm::alloc_zero()? as *mut u64;
+        ptr::write(erst_pa, er_phys);
+        ptr::write(erst_pa.add(1), er_size as u64);
         regs::rt_w32(rtsoff, 0, regs::RTS_ERSTSZ, 1);
+        regs::rt_w64(rtsoff, 0, regs::RTS_ERSTBA, erst_pa as u64);
         regs::rt_w64(rtsoff, 0, regs::RTS_ERDP, er_phys);
         regs::rt_w32(rtsoff, 0, regs::RTS_IMAN, regs::IMAN_IE);
         regs::op_w32(

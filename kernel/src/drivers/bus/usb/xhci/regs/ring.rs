@@ -56,6 +56,16 @@ impl Trb {
     pub fn set_flags(&mut self, flags: u32) {
         self.params[3] |= flags;
     }
+
+    /// Slot ID field of command TRBs (xHCI §6.4.3.4): control word bits
+    /// 31:24 — Address/Configure/Evaluate/Reset Device carry the slot
+    /// id there, never in a parameter word (Enable Slot's TRB carries
+    /// none: the controller assigns the id in the command completion).
+    /// Call after `set_type`, which rebuilds the control word from the
+    /// cycle bit.
+    pub fn set_slot_id(&mut self, id: u8) {
+        self.params[3] |= (id as u32) << 24;
+    }
 }
 
 pub struct TrbRing {

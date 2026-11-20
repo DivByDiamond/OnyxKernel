@@ -13,9 +13,11 @@
 //! - this file: public event types, handler registration and dispatch;
 //! - [`key`]: modifier tracking and key → TTY byte translation.
 use super::mouse;
+use crate::drivers::bus::usb::hid::{self, HidEvent};
 use crate::drivers::virtio_input;
 
 mod key;
+pub mod stick_cursor;
 #[cfg(test)]
 mod tests;
 
@@ -73,14 +75,39 @@ pub enum MouseButton {
 }
 
 /// Unified input event.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Event {
-    Key { code: KeyCode, down: bool },
-    MouseRel { dx: i32, dy: i32 },
-    MouseAbs { x: i32, y: i32 },
+    Key {
+        code: KeyCode,
+        down: bool,
+    },
+    MouseRel {
+        dx: i32,
+        dy: i32,
+    },
+    MouseAbs {
+        x: i32,
+        y: i32,
+    },
     MouseAbsX(i32),
     MouseAbsY(i32),
-    MouseButton { btn: MouseButton, down: bool },
+    MouseButton {
+        btn: MouseButton,
+        down: bool,
+    },
+    /// HID stick/joystick axis (axis id = first-appearance order in
+    /// the report descriptor). Consumed by the global handler; while
+    /// the cursor is unclaimed, [`stick_cursor::map`] also translates
+    /// axes 0/1 into [`Event::MouseRel`].
+    Stick {
+        axis: u8,
+        value: i16,
+    },
+    /// HID stick button edge (button index minus one).
+    StickButton {
+        index: u8,
+        down: bool,
+    },
     Syn,
 }
 
@@ -110,31 +137,88 @@ pub fn dispatch(ev: Event) {
     }
 }
 
+/// Feed one HID event into the unified stream: first the /dev/jsN ring
+/// (the raw event form — it fills regardless of claim state), then the
+/// raw `Stick` event to the global handler, then, while the cursor is
+/// unclaimed, the mapped mouse event.
+///
+/// `slot` is the attached session's registry slot, carried on the poll
+/// result: the ring push routes by the session that produced the
+/// event, never by registry class — a HID-class slot without a
+/// session (the dual-controller keyboard case) must not steal the
+/// stick's records.
+fn feed_stick(hev: HidEvent, is_init: bool, slot: usize, mut output: impl FnMut(Event)) {
+    // Ring push before any claim gating (ruling: every polled event
+    // lands in the attached session's ring). Out-of-range slots are
+    // ignored inside push_event — the drain only ever carries slot
+    // ids the session layer validated at attach time.
+    crate::fs::devfs::push_event(slot, hev, is_init);
+    let raw = match hev {
+        HidEvent::Axis { axis, value } => Event::Stick { axis, value },
+        HidEvent::Button { index, down } => Event::StickButton { index, down },
+    };
+    output(raw);
+    if !stick_cursor::claimed()
+        && let Some(mapped) = stick_cursor::map(hev)
+    {
+        output(mapped);
+    }
+}
+
 static DRAIN_LOCK: crate::sync::SpinLock = crate::sync::SpinLock::new();
 
-fn drain_with(
-    lock: &crate::sync::SpinLock,
-    mut poll: impl FnMut() -> Option<virtio_input::EventType>,
-    mut output: impl FnMut(Event),
-) {
-    // One consumer must dequeue AND dispatch in order. A competing/reentrant
-    // syscall may observe the already published state and retry on its next poll.
+/// Serializes the tests that mutate the global stick-claim flag (the
+/// stick_cursor integration test and the devfs js hooks test), so
+/// parallel test harts cannot interleave set_claimed calls — the
+/// net::lock::test_serial pattern.
+#[cfg(test)]
+pub(crate) static CLAIM_TEST_GUARD: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Drain `poll` completely, feeding each item to `output` in order.
+fn drain_with<T>(mut poll: impl FnMut() -> Option<T>, mut output: impl FnMut(T)) {
+    while let Some(ev) = poll() {
+        output(ev);
+    }
+}
+
+/// Run one exclusive input-drain pass. A competing/reentrant consumer
+/// returns immediately: it may observe the already published state
+/// and retry on its next poll — interleaved dispatch would reorder events.
+fn with_drain_lock(lock: &crate::sync::SpinLock, body: impl FnOnce()) {
     if !lock.try_lock() {
         return;
     }
-    while let Some(ev) = poll() {
-        if let Some(ev) = virtio_input::event_type(ev) {
-            output(ev);
-        }
-    }
+    body();
     lock.unlock();
 }
 
+/// virtio-input source: raw queue events translated to the unified form.
+fn drain_virtio() {
+    drain_with(virtio_input::poll, |raw| {
+        if let Some(ev) = virtio_input::event_type(raw) {
+            dispatch(ev);
+        }
+    });
+}
+
+/// USB HID source: every polled event goes through [`feed_stick`]. The
+/// is-init flag and the producing session's slot ride into the
+/// /dev/jsN ring; dispatch ignores both.
+fn drain_hid() {
+    drain_with(hid::poll, |(hev, is_init, slot)| {
+        feed_stick(hev, is_init, slot, dispatch)
+    });
+}
+
 /// Poll every known input source and dispatch any events found.
-/// Drains the virtio-input queue completely so a burst of keystrokes is
-/// not lost between ticks (one tick = 10ms at 100 Hz).
+/// Drains both queues completely so a burst of events is not lost
+/// between ticks (one tick = 10ms at 100 Hz), all under one
+/// DRAIN_LOCK pass.
 pub fn poll_all() {
-    drain_with(&DRAIN_LOCK, virtio_input::poll, dispatch);
+    with_drain_lock(&DRAIN_LOCK, || {
+        drain_virtio();
+        drain_hid();
+    });
 }
 
 /// Was a handler registered?

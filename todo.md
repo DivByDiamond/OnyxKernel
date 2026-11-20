@@ -43,7 +43,12 @@ QEMU slirp (`N2`: рендер → переход по ссылке → back) и
 ### ФС
 - Динамическая загрузка модулей (сейчас `/proc/modules` показывает только встроенные).
 - [x] FAT32: per-FS лок, write-пути сериализованы (`b1270dc`, 2026-11-09).
-- [x] xHCI: URB transfer, диспетчеризация и PCI-обнаружение (`9d83db4`, `f99101e`, `7790fdf`, 2026-11-09). В QEMU с `-device qemu-xhci` контроллер инициализируется: base 0x4000_0000, 64 слота, 8 портов. Smoke: `OnyxOS/scripts/qemu-xhci-smoke.sh` (`8c5ad8f`).
+- [x] xHCI: URB transfer, диспетчеризация и PCI-обнаружение (`9d83db4`, `f99101e`, `7790fdf`, 2026-11-09). В QEMU с `-device qemu-xhci` контроллер инициализируется: base 0x4000_0000, 64 слота, 8 портов. Smoke: `OnyxOS/scripts/qemu-xhci-smoke.sh` (`8c5ad8f`). Перечисление устройств, HID-разбор и interrupt-IN готовы и проверены LIVE в QEMU 2026-11-20 (ветка `a50d5fb`..`c3c619a` + live-фиксы `fe80f57`, `1e2d1f5`, `b7885a1`, `a181b22`): smoke `OnyxOS/scripts/qemu-usb-smoke.sh` — usb-kbd перечисляется без js-узла, usb-tablet даёт stick-сессию `/dev/jsN`.
+
+### USB (HID / джойстик)
+- [ ] Multi-slot xHCI / multi-device: boot-проба перечисляет одно устройство в первый свободный слот; роутинг событий и колец /dev/jsN теперь сессионный — слот-id едет в poll-пути (`hid/session`, 2026-11-20), остаётся перечисление нескольких устройств и несколько одновременных сессий.
+- [ ] EHCI interrupt-передачи: HS-HID сейчас честный `NoSys` + kwrn (решение 1 плана джойстика); нужен periodic-список по образцу OHCI (`ohci/intr.rs`).
+- [ ] Live-валидация Duo S (SG2000): чек-лист — arm/poll frame-timing и head-writeback в OHCI, PLE-планирование, обход HCCA-списка, семантика CBP-writeback, kwrn на отказ init каждого контроллера, повторный аудит утечек PMM/пула на ошибочных путях arm (сейчас всё проверено только в QEMU/xHCI-пути).
 
 ### Платформа / время
 - [x] RTC → `gettimeofday`: epoch-база из RTC, fallback на uptime (`1d94693`, 2026-11-09).
@@ -67,7 +72,7 @@ QEMU slirp (`N2`: рендер → переход по ссылке → back) и
 - [x] Q1: полный fmt/Clippy без dead-code bypass (2026-11-15, `1c0f188`): общие init-модули и host-тесты очищены, `scripts/quality/check.sh` и CI проходят всю поддерживаемую матрицу; RV32 smode явно отклоняется вместо ELF с entry=0.
 
 ### Документация / долг
-- README: «16 FD slots» сверить с кодом; «UDP/DHCP/DNS — осталось» устарело (реализовано); USB-формулировка (URB-слой есть, открыт только xHCI transfer); синхронизировать `README.ru.md`.
+- README: «16 FD slots» сверить с кодом; «UDP/DHCP/DNS — осталось» устарело (реализовано); синхронизировать `README.ru.md`. USB-формулировка синхронизирована 2026-11-20: перечисление/HID/interrupt — готово (live-smoke), осталось multi-device/EHCI-interrupt/mass-storage.
 - `OnyxOS/docs/dev/roadmap.md` отстал от кода (v0.4/v0.5-чекбоксы) — обновить при следующем релизном срезе.
 
 ## 4. Открытые дефекты и ограничения

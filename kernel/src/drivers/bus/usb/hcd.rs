@@ -1,5 +1,3 @@
-// TODO(2026-11-09): URB/HCD-слой без потребителя — подключить USB core
-// enumeration (дескрипторы, адресация, mass-storage) или удалить при ревизии.
 use onyx_core::errno::{Errno, KResult};
 
 use super::core::{Urb, UrbStatus, UrbTransferType, UsbHcd};

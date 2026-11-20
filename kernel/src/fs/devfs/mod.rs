@@ -9,10 +9,15 @@ use core::ptr;
 use onyx_core::errno::{Errno, KResult};
 
 mod blk;
+mod js;
 mod pty;
 mod vnode;
 
 pub use blk::{blk_ino, is_blk_ino};
+pub use js::{
+    DEVFS_JS_BASE_INO, JS_EVENT_AXIS, JS_EVENT_BUTTON, JS_EVENT_INIT, is_js_ino, js_claim, js_ino,
+    js_read, js_release, push_event,
+};
 pub use pty::pty_ioctl::pty_ioctl;
 pub use pty::pty_ioctl::{TIOCGPTN, TIOCGWINSZ, TIOCSWINSZ};
 pub use pty::pty_nodes::{
@@ -95,7 +100,29 @@ pub fn lookup(name: &[u8]) -> KResult<u32> {
         }
         return Err(Errno::NoEnt);
     }
+    if let Some(idx) = js_index(name) {
+        return Ok(js::js_ino(idx as u32));
+    }
     Err(Errno::NoEnt)
+}
+
+/// Parse "jsN" (the fb_index pattern) into a stick slot index; the
+/// node exists only while slot N holds an attached HID session (a
+/// session-less slot — the usb-kbd case — must not expose a dead
+/// /dev/jsN).
+fn js_index(name: &[u8]) -> Option<usize> {
+    let digits = name.strip_prefix(b"js")?;
+    if digits.is_empty() {
+        return None;
+    }
+    let mut idx = 0usize;
+    for &c in digits {
+        if !c.is_ascii_digit() {
+            return None;
+        }
+        idx = idx.checked_mul(10)?.checked_add((c - b'0') as usize)?;
+    }
+    js::listed(idx).then_some(idx)
 }
 
 pub fn readdir_entry(idx: u32, name_out: *mut u8, name_len: usize) -> Option<(u32, u8)> {
@@ -119,18 +146,45 @@ pub fn readdir_entry(idx: u32, name_out: *mut u8, name_len: usize) -> Option<(u3
         return Some((fb_ino(index), crate::fs::DT_CHR));
     }
     let dev_idx = index - fb::count();
-    if dev_idx < crate::drivers::virtio::count() {
+    let virtio_count = crate::drivers::virtio::count();
+    if dev_idx < virtio_count {
         copy_name(blk::name(dev_idx), name_out, name_len);
         return Some((blk_ino(dev_idx), crate::fs::DT_BLK));
     }
+    // /dev/jsN entries: one per attached stick slot, between the block
+    // devices and the console/PTY tail. `dev_idx >= virtio_count` past
+    // the branch above, so the subtraction cannot underflow.
+    let sticks = js::attached();
+    let js_count = sticks.iter().filter(|s| **s).count();
+    let mut nth = dev_idx - virtio_count;
+    for (slot, live) in sticks.iter().enumerate() {
+        if !*live {
+            continue;
+        }
+        if nth == 0 {
+            let mut name = [0u8; 4];
+            name[..2].copy_from_slice(b"js");
+            let length = if slot < 10 {
+                name[2] = b'0' + slot as u8;
+                3
+            } else {
+                name[2] = b'0' + (slot / 10) as u8;
+                name[3] = b'0' + (slot % 10) as u8;
+                4
+            };
+            copy_name(&name[..length], name_out, name_len);
+            return Some((js::js_ino(slot as u32), crate::fs::DT_CHR));
+        }
+        nth -= 1;
+    }
     if crate::drivers::virtio_console::present() {
-        if dev_idx == crate::drivers::virtio::count() {
+        if dev_idx == virtio_count + js_count {
             copy_name(b"hvc0", name_out, name_len);
             return Some((DEVFS_HVC0_INO, crate::fs::DT_CHR));
         }
-        pty_nodes::readdir_entry(idx - 1, name_out, name_len)
+        pty_nodes::readdir_entry(idx.saturating_sub(1 + js_count as u32), name_out, name_len)
     } else {
-        pty_nodes::readdir_entry(idx, name_out, name_len)
+        pty_nodes::readdir_entry(idx.saturating_sub(js_count as u32), name_out, name_len)
     }
 }
 

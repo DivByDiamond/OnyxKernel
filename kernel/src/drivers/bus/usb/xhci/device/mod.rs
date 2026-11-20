@@ -1,11 +1,13 @@
 use crate::mm::pmm;
-use core::ptr;
 use onyx_core::errno::KResult;
 
-use super::ring;
+#[cfg(test)]
+mod tests;
 
-mod ctx;
-use ctx::{EpCtx, InputCtx, SlotCtx};
+mod bringup;
+pub(crate) mod ctx;
+pub use bringup::bringup_device;
+use ctx::{CERR, EpCtx, InputCtx, SlotCtx, slot_ctx_root_port};
 
 pub const EP_TYPE_INVALID: u8 = 0;
 pub const EP_TYPE_ISO_OUT: u8 = 1;
@@ -16,21 +18,15 @@ pub const EP_TYPE_ISO_IN: u8 = 5;
 pub const EP_TYPE_BULK_IN: u8 = 6;
 pub const EP_TYPE_INT_IN: u8 = 7;
 
-pub const SPEED_LS: u8 = 1;
-pub const SPEED_FS: u8 = 2;
+/// Slot-context DW0 speed-field values (xHCI §6.2.2): the PORTSC port
+/// speed ID, 1:1 — FS=1, LS=2, HS=3, SS=4 (per §5.4.8/§6.2.2);
+/// 0 is reserved in slot contexts.
+pub const SPEED_FS: u8 = 1;
+pub const SPEED_LS: u8 = 2;
 pub const SPEED_HS: u8 = 3;
 pub const SPEED_SS: u8 = 4;
 
 const CTX_SIZE: usize = 32;
-
-pub struct UsbDevCtx {
-    pub slot_id: u8,
-    pub port: u8,
-    pub speed: u8,
-    pub device_desc: [u8; 18],
-    pub config_desc: [u8; 9],
-    pub configured: bool,
-}
 
 /// # Safety
 ///
@@ -40,7 +36,8 @@ pub struct UsbDevCtx {
 pub unsafe fn create_ctx_array() -> KResult<u64> {
     // SAFETY: this only performs a PMM allocation; the unsafe op is the
     // pmm call whose contract is honored (page-aligned, physically
-    // contiguous allocation of `pages` pages).
+    // contiguous allocation of `pages` pages). The array holds 32
+    // contexts (slot + 31 EP, §6.4.1: context index 1..31) — one page.
     unsafe {
         let ctx_slots = 32;
         let total = ctx_slots as usize * CTX_SIZE;
@@ -51,60 +48,10 @@ pub unsafe fn create_ctx_array() -> KResult<u64> {
 
 /// # Safety
 ///
-/// `dev_ctx` must point at a physically contiguous device context array of
-/// at least 33 32-byte contexts (CTX_SIZE) allocated by `create_ctx_array`;
-/// caller must have exclusive access (driver init path, single-threaded).
-pub unsafe fn set_slot_ctx(dev_ctx: *mut u8, _slot_id: u8, port: u8, speed: u8, mps0: u16) {
-    // SAFETY: caller guarantees dev_ctx has >= 2 CTX_SIZE-sized contexts,
-    // so the SlotCtx at offset 0 and EpCtx at CTX_SIZE are in bounds.
-    unsafe {
-        let p = dev_ctx;
-        // SAFETY: aligned u32 fields of the in-bounds SlotCtx (offset 0).
-        let sc = &mut *(p as *mut SlotCtx);
-        sc.dw0 = (speed as u32) << 20 | 1 << 27 | (port as u32);
-        sc.dw1 = 0;
-        sc.dw2 = 0;
-        sc.dw3 = 0;
-        // SAFETY: offset CTX_SIZE is the second context, within the
-        // caller-provided buffer.
-        let ep0 = &mut *(p.add(CTX_SIZE) as *mut EpCtx);
-        ep0.dw0 = (mps0 as u32) << 16 | (EP_TYPE_CONTROL as u32) << 3 | (3 << 1);
-        ep0.dw1 = 0;
-        ep0.dw2 = 0;
-        ep0.dw3 = 0;
-    }
-}
-
-/// # Safety
-///
-/// `dev_ctx` must point at a device context array of >= 33 CTX_SIZE-sized
-/// contexts; `ep_idx` must be < 32 (checked here); caller must have
-/// exclusive access.
-pub unsafe fn set_ep_ctx(dev_ctx: *mut u8, ep_idx: u8, ep_type: u8, mps: u16, deq: u64, dcs: bool) {
-    // SAFETY: ep_idx < 32 is checked above, so offset (ep_idx+1)*CTX_SIZE
-    // is within the caller-provided context array.
-    unsafe {
-        if ep_idx as usize >= 32 {
-            return;
-        }
-        let off = (ep_idx as usize + 1) * CTX_SIZE;
-        // SAFETY: in-bounds per the ep_idx bound check above.
-        let ep = &mut *(dev_ctx.add(off) as *mut EpCtx);
-        ep.dw0 = (mps as u32) << 16 | (ep_type as u32) << 3 | (3 << 1);
-        ep.dw1 = (deq as u32) & !0xF;
-        if dcs {
-            ep.dw1 |= 1;
-        }
-        ep.dw2 = (deq >> 32) as u32;
-        ep.dw3 = mps as u32;
-    }
-}
-
-/// # Safety
-///
 /// `input` must point at a physically contiguous input context block of at
 /// least 3 CTX_SIZE-sized contexts (control + slot + EP0); caller must have
-/// exclusive access (driver init path).
+/// exclusive access (driver init path). The slot-context encoding (route
+/// string, root hub port) is documented on `ctx::slot_ctx_root_port`.
 pub unsafe fn set_input_ctx_slot(input: *mut u8, port: u8, speed: u8, mps0: u16) {
     // SAFETY: caller guarantees the buffer covers offsets 0..=96
     // (InputCtx + SlotCtx + EpCtx at 32/64), so all writes are in bounds.
@@ -115,118 +62,26 @@ pub unsafe fn set_input_ctx_slot(input: *mut u8, port: u8, speed: u8, mps0: u16)
         ic.add_flags = 3;
         // SAFETY: offset 32 = slot context, in bounds per contract.
         let sc = &mut *(input.add(32) as *mut SlotCtx);
-        sc.dw0 = (speed as u32) << 20 | 1 << 27 | (port as u32);
-        sc.dw1 = 0;
-        sc.dw2 = 0;
-        sc.dw3 = 0;
+        slot_ctx_root_port(sc, port, speed, 1);
         // SAFETY: offset 64 = EP0 context, in bounds per contract.
         let ep0 = &mut *(input.add(64) as *mut EpCtx);
-        ep0.dw0 = (mps0 as u32) << 16 | (EP_TYPE_CONTROL as u32) << 3 | (3 << 1);
-        // EP0 dequeue comes from the transfer ring `init` allocated
-        // (xfer_rings[0]): Address Device copies it into the output
-        // context, so control transfers can run before any Configure
-        // Endpoint. DCS (bit 0) mirrors the ring's current cycle state.
+        // EP0 dequeue from the EP0 ring `init` allocated: Address Device
+        // copies it into the output context. DCS mirrors its cycle state.
         let ctx = &raw const super::G_XHCI;
         let ring_ptr = (*ctx).xfer_rings[0];
-        if ring_ptr.is_null() {
-            ep0.dw1 = 0;
-            ep0.dw2 = 0;
+        let (deq, dcs) = if ring_ptr.is_null() {
+            (0, false)
         } else {
             // SAFETY: init published a fully initialized TrbRing here.
             let r = &*ring_ptr;
-            ep0.dw1 = (r.phys as u32 & !0xF) | r.cycle as u32;
-            ep0.dw2 = (r.phys >> 32) as u32;
-        }
-        ep0.dw3 = 0;
-    }
-}
-
-/// # Safety
-///
-/// `input` must point at a physically contiguous input context block large
-/// enough for context index ep_idx+1 (i.e. >= 32 + (ep_idx+2)*CTX_SIZE
-/// bytes; 8 KiB as allocated by `configure_endpoint` covers all ep_idx);
-/// `ep_idx` must be < 31 for a valid xHCI context layout; caller must have
-/// exclusive access.
-pub unsafe fn set_input_ctx_ep(input: *mut u8, ep_idx: u8, ep_type: u8, mps: u16, deq: u64) {
-    // SAFETY: caller guarantees the buffer spans the context at offset
-    // 32 + (ep_idx+1)*CTX_SIZE and holds exclusive access.
-    unsafe {
-        // SAFETY: offset 0 = input control context, in bounds per contract.
-        let ic = &mut *(input as *mut InputCtx);
-        ic.add_flags |= 1u32.wrapping_shl(ep_idx as u32 + 1);
-        let off = 32 + (ep_idx as usize + 1) * CTX_SIZE;
-        // SAFETY: in bounds per the caller contract above.
-        let ep = &mut *(input.add(off) as *mut EpCtx);
-        ep.dw0 = (mps as u32) << 16 | (ep_type as u32) << 3 | (3 << 1);
-        ep.dw1 = (deq as u32) & !0xF;
-        ep.dw2 = (deq >> 32) as u32;
-        ep.dw3 = mps as u32;
-    }
-}
-
-/// # Safety
-///
-/// Controller initialized and operational (cmd/event rings allocated by
-/// init); `ep_idx` must be < 31 (xHCI has 31 usable endpoint contexts
-/// beyond ep0) and unique per slot; must be called from the driver's
-/// single-owner init path (no other hart touches the command ring).
-pub unsafe fn configure_endpoint(slot_id: u8, ep_idx: u8, ep_type: u8, mps: u16) -> KResult<()> {
-    // SAFETY: init path with exclusive access to the static driver state;
-    // ep_idx < 32 is the caller contract for the 32-entry xfer_rings array.
-    unsafe {
-        let xfer_ring = ring::alloc_ring(32)?;
-        let deq = xfer_ring.phys;
-        let dcs = xfer_ring.cycle;
-
-        // SAFETY: ring_ptr is a fresh PMM allocation sized for TrbRing;
-        // write fully initializes it before it is published.
-        let ring_ptr = pmm::alloc_zero()? as *mut ring::TrbRing;
-        ptr::write(ring_ptr, xfer_ring);
-        let ctx = &raw mut super::G_XHCI;
-        // SAFETY: ep_idx < 32 per caller contract, so this stays within
-        // the 32-entry xfer_rings array; exclusive access held.
-        (*ctx).xfer_rings[ep_idx as usize] = ring_ptr;
-
-        // SAFETY: input_pa is a 2-page zeroed PMM allocation; zeroing and
-        // writing via set_input_ctx_ep (ep_idx < 31 contract) stay in bounds.
-        let input_pa = pmm::alloc_n(2)? as usize;
-        ptr::write_bytes(input_pa as *mut u8, 0, 8192);
-        let deq_val = deq | if dcs { 1 } else { 0 };
-        set_input_ctx_ep(input_pa as *mut u8, ep_idx, ep_type, mps, deq_val);
-        let mut trb = ring::Trb::zero();
-        trb.params[0] = input_pa as u32;
-        // xHCI TRBs carry 64-bit addresses even though this target can
-        // only physically address 32 bits; the high word is simply zero.
-        #[cfg(target_pointer_width = "64")]
-        {
-            trb.params[1] = (input_pa >> 32) as u32;
-        }
-        #[cfg(target_pointer_width = "32")]
-        {
-            trb.params[1] = 0;
-        }
-        trb.params[2] = (slot_id as u32) << 24;
-        trb.set_type(ring::TRB_CONFIG_EP);
-        trb.set_flags(ring::TRB_IOC);
-        ring::submit_command(&trb)?;
-        Ok(())
-    }
-}
-
-/// # Safety
-///
-/// Controller initialized and operational; `slot_id` must be a slot granted
-/// by `enable_slot`; single-owner driver init path.
-pub unsafe fn reset_device(slot_id: u8) -> KResult<()> {
-    // SAFETY: init allocated cmd/event rings; submit_command keeps enqueue
-    // within the allocated ring and rings the doorbell safely.
-    unsafe {
-        let mut trb = ring::Trb::zero();
-        trb.params[0] = (slot_id as u32) << 24;
-        trb.set_type(ring::TRB_EVAL_CTX);
-        trb.set_flags(ring::TRB_IOC);
-        ring::submit_command(&trb)?;
-        Ok(())
+            (r.phys, r.cycle)
+        };
+        // EP0 per §6.2.3: Interval 0; mps0/Control type/CErr in DW1;
+        // Average TRB Length 8 in DW4 (Linux parity).
+        ep0.dw0 = 0;
+        ep0.dw1 = (mps0 as u32) << 16 | (EP_TYPE_CONTROL as u32) << 3 | CERR << 1;
+        ep0.dw2 = (deq as u32 & !0xF) | u32::from(dcs);
+        ep0.dw3 = (deq >> 32) as u32;
+        ep0.dw4 = 8;
     }
 }

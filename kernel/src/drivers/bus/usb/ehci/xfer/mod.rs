@@ -2,10 +2,10 @@ pub(super) mod bulk;
 use onyx_core::errno::{Errno, KResult};
 
 use super::{
-    G_ASYNCLIST_ENABLED, MAX_QTD, OP_USBSTS, QH_DEV_ADDR_SHIFT, QH_DTC, QH_EPS_HIGH, QH_MPL_SHIFT,
-    QH_TERMINATE, QTD_ACTIVE, QTD_BUF_SIZE, QTD_CERR_3, QTD_ERROR, QTD_PID_IN, QTD_PID_OUT,
-    QTD_PID_SETUP, QTD_TOGGLE, QTD_TOTAL_LEN_SHIFT, STS_HCHALTED, alloc_qh, alloc_qtd, op_rd,
-    qh_ptr, qtd_phys, qtd_ptr,
+    G_ASYNCLIST_ENABLED, G_OP_BASE, MAX_QTD, OP_USBSTS, QH_DEV_ADDR_SHIFT, QH_DTC, QH_EPS_HIGH,
+    QH_MPL_SHIFT, QH_TERMINATE, QTD_ACTIVE, QTD_BUF_SIZE, QTD_CERR_3, QTD_ERROR, QTD_PID_IN,
+    QTD_PID_OUT, QTD_PID_SETUP, QTD_TOGGLE, QTD_TOTAL_LEN_SHIFT, STS_HCHALTED, alloc_qh, alloc_qtd,
+    op_rd, qh_ptr, qtd_phys, qtd_ptr,
 };
 
 /// # Safety
@@ -23,6 +23,11 @@ pub unsafe fn ehci_control_transfer(
 ) -> KResult<u32> {
     // SAFETY: controller initialized by init_ehci (async list lazily brought up below); QH/QTD indices from alloc_qh/alloc_qtd so every raw-pointer write lands inside the G_DMA pool; MMIO via op_rd on in-file offsets; setup/data buffers are caller-provided and valid for the transfer.
     unsafe {
+        if G_OP_BASE == 0 {
+            // EHCI never initialized (or its init failed): the
+            // owner-routed LiveBus can still name this controller.
+            return Err(Errno::NoSys);
+        }
         if !G_ASYNCLIST_ENABLED {
             super::queue::init_async_list()?;
         }

@@ -1,17 +1,19 @@
 use crate::mm::pmm;
 use onyx_core::errno::{Errno, KResult};
 
+use super::pool::{
+    ohci_alloc_ed, ohci_alloc_td, ohci_ed_phys, ohci_ed_ptr, ohci_td_phys, ohci_td_ptr,
+};
 use super::{
     ED_FA_SHIFT, ED_MPS_SHIFT, ED_SPEED_FULL, ED_SPEED_LOW, ED_TERMINATE, G_OHCI_BASE,
     G_OHCI_HCCA_PA, G_OHCI_HCCA_READY, G_OHCI_N_PORTS, OHCI_CMD_CLF, OHCI_CMD_HCR, OHCI_CTRL_BLE,
-    OHCI_CTRL_CLE, OHCI_CTRL_HCFS_MASK, OHCI_CTRL_HCFS_OPER, OHCI_CTRL_RWE,
+    OHCI_CTRL_CLE, OHCI_CTRL_HCFS_MASK, OHCI_CTRL_HCFS_OPER, OHCI_CTRL_PLE, OHCI_CTRL_RWE,
     OHCI_HC_BULK_CURRENT_ED, OHCI_HC_BULK_HEAD_ED, OHCI_HC_COMMAND_STATUS, OHCI_HC_CONTROL,
     OHCI_HC_CONTROL_CURRENT_ED, OHCI_HC_CONTROL_HEAD_ED, OHCI_HC_FM_INTERVAL, OHCI_HC_HCCA,
     OHCI_HC_INTERRUPT_STATUS, OHCI_HC_LS_THRESHOLD, OHCI_HC_PERIODIC_START, OHCI_HC_RH_DESC_A,
     OHCI_HC_RH_PORT_STATUS, OHCI_HC_RH_STATUS, RH_PS_CSC, RH_PS_PPS, RH_PS_PRSC, TD_CC_MASK,
-    TD_CC_NOT_ACCESSED, TD_DI_NO_INTR, TD_DP_IN, TD_DP_OUT, TD_R_3, TD_T_DATA0, TD_TERMINATE,
-    ohci_alloc_ed, ohci_alloc_td, ohci_ed_phys, ohci_ed_ptr, ohci_rd, ohci_td_phys, ohci_td_ptr,
-    ohci_wr,
+    TD_CC_NOT_ACCESSED, TD_DI_NO_INTR, TD_DP_IN, TD_DP_OUT, TD_R_ROUND, TD_T_DATA0, TD_TERMINATE,
+    ohci_rd, ohci_wr,
 };
 
 /// # Safety
@@ -46,7 +48,7 @@ pub unsafe fn ohci_bulk_transfer(
             0
         };
         let dp = if data_in { TD_DP_IN } else { TD_DP_OUT };
-        (*dt).control = TD_CC_NOT_ACCESSED | TD_T_DATA0 | TD_DI_NO_INTR | dp | TD_R_3;
+        (*dt).control = TD_CC_NOT_ACCESSED | TD_T_DATA0 | TD_DI_NO_INTR | dp | TD_R_ROUND;
         (*dt).cbp = buf_phys;
         (*dt).next_td = TD_TERMINATE;
         (*dt).be = buf_phys + data_len - 1;
@@ -136,7 +138,15 @@ pub unsafe fn init_ohci(base: usize) -> KResult<()> {
             timeout -= 1;
         }
         if timeout == 0 {
+            // Error path gives back every resource taken (ruling 3): the
+            // HCCA page was allocated but the controller never came up,
+            // and the base static must not claim a live controller.
+            G_OHCI_BASE = 0;
             G_OHCI_HCCA_READY = false;
+            G_OHCI_HCCA_PA = 0;
+            // SAFETY: hcca_pa is the PMM page allocated above and is
+            // unused from here on; PMM is up (alloc succeeded) and SIE=0.
+            pmm::free(u64::from(hcca_pa));
             return Err(Errno::Io);
         }
 
@@ -158,7 +168,7 @@ pub unsafe fn init_ohci(base: usize) -> KResult<()> {
 
         ohci_wr(
             OHCI_HC_CONTROL,
-            OHCI_CTRL_HCFS_OPER | OHCI_CTRL_CLE | OHCI_CTRL_BLE | OHCI_CTRL_RWE,
+            OHCI_CTRL_HCFS_OPER | OHCI_CTRL_PLE | OHCI_CTRL_CLE | OHCI_CTRL_BLE | OHCI_CTRL_RWE,
         );
 
         timeout = 100_000u32;
@@ -167,7 +177,13 @@ pub unsafe fn init_ohci(base: usize) -> KResult<()> {
             timeout -= 1;
         }
         if timeout == 0 {
+            // Same error-path discipline as the reset failure above.
+            G_OHCI_BASE = 0;
             G_OHCI_HCCA_READY = false;
+            G_OHCI_HCCA_PA = 0;
+            // SAFETY: hcca_pa is the PMM page allocated above and is
+            // unused from here on; PMM is up (alloc succeeded) and SIE=0.
+            pmm::free(u64::from(hcca_pa));
             return Err(Errno::Io);
         }
 

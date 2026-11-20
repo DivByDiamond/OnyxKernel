@@ -2,7 +2,7 @@
 use onyx_core::errno::{Errno, KResult};
 
 use super::super::{G_XHCI, ring};
-use super::{completion_bytes, wait_transfer_event};
+use super::{completion_bytes, trb_addr_at, wait_transfer_event};
 
 /// Driver endpoint-context index for a USB endpoint address: 0 = EP0, then
 /// EP1-out, EP1-in, EP2-out, ... — xHCI endpoint contexts are
@@ -18,7 +18,7 @@ pub(super) fn ep_ctx_index(endpoint: u8) -> u8 {
 /// # Safety
 ///
 /// Requires `init` to have run (controller operational) and this endpoint
-/// configured via `device::configure_endpoint` (its transfer ring in
+/// configured by the bring-up caller (its transfer ring published in
 /// `xfer_rings[idx]`); `G_XHCI.slot` must hold a granted, addressed slot.
 /// The caller serializes USB access (single-threaded path, SIE=0 per
 /// `crate::sync`), and `data` stays valid and DMA-addressable for the
@@ -70,9 +70,11 @@ pub(crate) unsafe fn xhci_bulk_transfer(
         trb.set_type(ring::TRB_NORMAL);
         trb.set_flags(ring::TRB_IOC);
         let ring = &mut *ring_ptr;
+        // One Normal TRB: its address is the wait's wanted pointer.
+        let want = [trb_addr_at(ring, 0)];
         ring::enqueue_trb(ring, &trb);
         ring::ring_doorbell(slot, (idx + 1) as u8); // DCI = context index
-        let ev = wait_transfer_event()?;
+        let ev = wait_transfer_event((idx + 1) as u8, &want)?;
         completion_bytes(&ev, data_len as u32)
     }
 }

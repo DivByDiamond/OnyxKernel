@@ -1,14 +1,16 @@
 use crate::arch::mmio::Mmio;
 use onyx_core::errno::{Errno, KResult};
 
+use super::pool::{
+    MAX_OHCI_TD, ohci_alloc_ed, ohci_alloc_td, ohci_ed_phys, ohci_ed_ptr, ohci_td_phys, ohci_td_ptr,
+};
 use super::{
-    ED_FA_SHIFT, ED_MPS_SHIFT, ED_SPEED_FULL, ED_SPEED_LOW, ED_TERMINATE, G_OHCI_N_PORTS,
-    MAX_OHCI_TD, OHCI_CMD_CLF, OHCI_CTRL_CLE, OHCI_CTRL_HCFS_MASK, OHCI_CTRL_HCFS_OPER,
+    ED_FA_SHIFT, ED_MPS_SHIFT, ED_SPEED_FULL, ED_SPEED_LOW, ED_TERMINATE, G_OHCI_BASE,
+    G_OHCI_N_PORTS, OHCI_CMD_CLF, OHCI_CTRL_CLE, OHCI_CTRL_HCFS_MASK, OHCI_CTRL_HCFS_OPER,
     OHCI_HC_COMMAND_STATUS, OHCI_HC_CONTROL, OHCI_HC_CONTROL_CURRENT_ED, OHCI_HC_CONTROL_HEAD_ED,
     OHCI_HC_REV, OHCI_HC_RH_PORT_STATUS, RH_PS_LSDA, RH_PS_PES, RH_PS_PPS, RH_PS_PRS, TD_CC_MASK,
-    TD_CC_NOT_ACCESSED, TD_DI_NO_INTR, TD_DP_IN, TD_DP_OUT, TD_DP_SETUP, TD_R_3, TD_T_DATA0,
-    TD_T_DATA1, TD_TERMINATE, ohci_alloc_ed, ohci_alloc_td, ohci_ed_phys, ohci_ed_ptr, ohci_rd,
-    ohci_td_phys, ohci_td_ptr, ohci_wr,
+    TD_CC_NOT_ACCESSED, TD_DI_NO_INTR, TD_DP_IN, TD_DP_OUT, TD_DP_SETUP, TD_R_ROUND, TD_T_DATA0,
+    TD_T_DATA1, TD_TERMINATE, ohci_rd, ohci_wr,
 };
 
 /// # Safety
@@ -27,6 +29,11 @@ pub unsafe fn ohci_control_transfer(
 ) -> KResult<u32> {
     // SAFETY: ED/TD indices from ohci_alloc_ed/ohci_alloc_td so all raw-pointer writes land inside the G_OHCI_DMA pool; MMIO via ohci_rd/ohci_wr on in-file offsets (G_OHCI_BASE set by init_ohci); setup/data buffers are caller-provided and valid for the transfer.
     unsafe {
+        if G_OHCI_BASE == 0 {
+            // OHCI never initialized (or its init failed): the
+            // owner-routed LiveBus can still name this controller.
+            return Err(Errno::NoSys);
+        }
         let data_len = data.as_ref().map(|d| d.len() as u32).unwrap_or(0);
 
         if 2 + if data_len > 0 { 1 } else { 0 } > MAX_OHCI_TD as u32 {
@@ -53,7 +60,7 @@ pub unsafe fn ohci_control_transfer(
         let next_after_setup = data_td_phys.unwrap_or(status_td_phys);
 
         (*setup_td).control =
-            TD_CC_NOT_ACCESSED | TD_T_DATA0 | TD_DI_NO_INTR | TD_DP_SETUP | TD_R_3;
+            TD_CC_NOT_ACCESSED | TD_T_DATA0 | TD_DI_NO_INTR | TD_DP_SETUP | TD_R_ROUND;
         (*setup_td).cbp = setup_phys;
         (*setup_td).next_td = next_after_setup;
         (*setup_td).be = setup_phys + 7;
@@ -67,7 +74,7 @@ pub unsafe fn ohci_control_transfer(
             };
 
             let dp = if data_in { TD_DP_IN } else { TD_DP_OUT };
-            (*dt).control = TD_CC_NOT_ACCESSED | TD_T_DATA1 | TD_DI_NO_INTR | dp | TD_R_3;
+            (*dt).control = TD_CC_NOT_ACCESSED | TD_T_DATA1 | TD_DI_NO_INTR | dp | TD_R_ROUND;
             (*dt).cbp = buf_phys;
             (*dt).next_td = status_td_phys;
             (*dt).be = buf_phys + data_len - 1;
@@ -78,7 +85,8 @@ pub unsafe fn ohci_control_transfer(
         } else {
             TD_DP_IN
         };
-        (*status_td).control = TD_CC_NOT_ACCESSED | TD_T_DATA1 | TD_DI_NO_INTR | status_dp | TD_R_3;
+        (*status_td).control =
+            TD_CC_NOT_ACCESSED | TD_T_DATA1 | TD_DI_NO_INTR | status_dp | TD_R_ROUND;
         (*status_td).cbp = 0;
         (*status_td).next_td = TD_TERMINATE;
         (*status_td).be = 0;

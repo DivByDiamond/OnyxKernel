@@ -7,6 +7,7 @@ use super::pty::pty_ioctl::pty_ioctl;
 use super::pty::pty_nodes;
 use super::{
     DEVFS_FB0_INO, DEVFS_HVC0_INO, DevfsStat, blk, framebuffer, is_blk_ino, is_framebuffer_ino,
+    is_js_ino, js_read,
 };
 
 fn st(ino: u32, size: u32, mode: u32) -> DevfsStat {
@@ -28,6 +29,12 @@ pub fn stat(ino: u32) -> KResult<DevfsStat> {
         DEVFS_HVC0_INO if crate::drivers::virtio_console::present() => {
             Ok(st(ino, u32::MAX, 0o100600))
         }
+        // js before fb: a js inode must never resolve as a framebuffer
+        // (they cannot collide at plausible display counts, but a js
+        // read misrouted into fb memory would be far worse than the
+        // reverse). u32::MAX size keeps the positional fd layer from
+        // truncating ring reads (the pty/block trick).
+        ino if is_js_ino(ino).is_some() => Ok(st(ino, u32::MAX, 0o100600)),
         ino if is_framebuffer_ino(ino) => {
             Ok(st(ino, framebuffer(ino).unwrap().size as u32, 0o100666))
         }
@@ -51,6 +58,13 @@ pub unsafe fn read(ino: u32, buf: *mut u8, offset: u32, len: u32) -> KResult<u32
             // SAFETY: caller guarantees buf points to a writable region of at
             // least `len` bytes; blk::read validates the device index.
             return blk::read(idx, buf, offset, len);
+        }
+        if let Some(idx) = is_js_ino(ino) {
+            // SAFETY: buf covers len bytes per the caller contract;
+            // js_read re-checks the slot bounds under its ring lock.
+            // Records are non-positional — the fd offset is ignored
+            // (the pty read contract).
+            return js_read(idx, buf, len);
         }
         match ino {
             DEVFS_HVC0_INO => crate::drivers::virtio_console::read(buf, len as usize),

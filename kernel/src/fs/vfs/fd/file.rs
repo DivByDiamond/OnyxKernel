@@ -57,6 +57,12 @@ pub unsafe fn open(path: &[u8], perms: u32) -> KResult<FdToken> {
                     }
                 };
                 let st = devfs::stat(ino)?;
+                // /dev/jsN open: claim the stick for userspace and seed
+                // the ring with the joydev init burst (task 9, the
+                // PTMX-pattern open hook).
+                if let Some(idx) = devfs::is_js_ino(ino) {
+                    devfs::js_claim(idx);
+                }
                 // /dev/ptmx is a clone node: each open claims a fresh pair
                 // and the fd is rebound to that pair's master inode.
                 if ino == devfs::DEVFS_PTMX_INO {
@@ -150,12 +156,18 @@ pub unsafe fn close(token: FdToken) -> KResult<()> {
     // owning context's slot unused.
     unsafe {
         let idx = fd_check(token)?;
-        // Master-close frees the PTY pair (slave fds then see EPIPE).
         let f = fd_get(idx);
-        if f.fs == Fs::Devfs
-            && let Some(pair) = devfs::ptym_ino_idx(f.ino)
-        {
-            crate::fs::pty::free(pair);
+        if f.fs == Fs::Devfs {
+            // Master-close frees the PTY pair (slave fds then see EPIPE).
+            if let Some(pair) = devfs::ptym_ino_idx(f.ino) {
+                crate::fs::pty::free(pair);
+            }
+            // Closing ANY /dev/jsN fd releases the single stick claim
+            // (no per-fd refcount — the single-reader contract in
+            // devfs::js docs).
+            if devfs::is_js_ino(f.ino).is_some() {
+                devfs::js_release();
+            }
         }
         fd_clear(idx);
         Ok(())

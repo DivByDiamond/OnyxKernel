@@ -9,8 +9,8 @@ use super::*;
 const DESC_HID: u8 = 0x21;
 
 /// Correct 18-byte device descriptor: max_packet_size0=64, vid=0x044f,
-/// pid=0xb10a, one configuration.
-fn device_fixture() -> [u8; 18] {
+/// pid=0xb10a, one configuration. `pub(crate)`: shared with dev::tests.
+pub(crate) fn device_fixture() -> [u8; 18] {
     let mut d = [0u8; 18];
     d[0] = 18; // bLength
     d[1] = DESC_DEVICE;
@@ -27,8 +27,8 @@ fn device_fixture() -> [u8; 18] {
 
 /// Correct config blob: 9-byte header + 9-byte HID interface (class 0x03,
 /// 1 endpoint) + 7-byte interrupt IN endpoint (address 0x81, attributes 3,
-/// max_packet 8, interval 10). wTotalLength = 25.
-fn config_fixture() -> [u8; 25] {
+/// max_packet 8, interval 10). wTotalLength = 25. Shared with dev::tests.
+pub(crate) fn config_fixture() -> [u8; 25] {
     let mut c = [0u8; 25];
     c[0] = 9; // header bLength
     c[1] = DESC_CONFIGURATION;

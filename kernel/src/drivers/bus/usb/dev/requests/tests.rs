@@ -2,6 +2,7 @@
 //! `ControlBus` double and host-side coverage of the `LiveBus` contract.
 
 use super::*;
+use crate::drivers::usb::dev::Owner;
 use crate::drivers::usb::dev::desc::DESC_CONFIGURATION;
 use crate::drivers::usb::dev::desc::DESC_DEVICE;
 use onyx_core::errno::Errno;
@@ -64,6 +65,10 @@ impl ControlBus for FakeBus {
             None => Ok(0),
         }
     }
+    fn set_addr(&mut self, _addr: u8) {
+        // The Task 2 double is addressless; the re-target behavior is
+        // covered by Task 3's scripted bus in dev/tests.rs.
+    }
 }
 
 #[test]
@@ -83,12 +88,26 @@ fn control_bus_double_records_request_and_fills_in_data() {
 }
 
 #[test]
-fn live_bus_without_active_controller_reports_nosys() {
-    // SAFETY: no controller is initialized in the host test binary, so
-    // the dispatch reads the inert G_ACTIVE (None) and takes the
-    // memory-safe Err(NoSys) branch without touching hardware.
-    let mut bus = unsafe { LiveBus::new(5) };
+fn live_bus_routes_each_owner_to_its_controller() {
+    // Owner-routed dispatch (ruling 2): the host binary has no
+    // controller initialized, so each owner's entry guard reports its
+    // own not-initialized failure without touching MMIO — xHCI checks
+    // its operational flag, OHCI/EHCI their init base statics.
     let mut buf = [0u8; 8];
+    // SAFETY: the guards make the uninitialized path memory-safe.
+    let mut bus = unsafe { LiveBus::new(Owner::Xhci, 5) };
+    assert_eq!(
+        bus.control(&set_address(5), Some(&mut buf), true),
+        Err(Errno::NoSys)
+    );
+    // SAFETY: as above.
+    let mut bus = unsafe { LiveBus::new(Owner::Ohci, 5) };
+    assert_eq!(
+        bus.control(&set_address(5), Some(&mut buf), true),
+        Err(Errno::NoSys)
+    );
+    // SAFETY: as above.
+    let mut bus = unsafe { LiveBus::new(Owner::Ehci, 5) };
     assert_eq!(
         bus.control(&set_address(5), Some(&mut buf), true),
         Err(Errno::NoSys)
@@ -97,8 +116,8 @@ fn live_bus_without_active_controller_reports_nosys() {
 
 #[test]
 fn live_bus_set_addr_retargets_without_panic() {
-    // SAFETY: as above — the host dispatch path is the inert None branch.
-    let mut bus = unsafe { LiveBus::new(0) };
+    // SAFETY: as above — every owner guard bails before hardware.
+    let mut bus = unsafe { LiveBus::new(Owner::Xhci, 0) };
     bus.set_addr(42);
     assert_eq!(
         bus.control(&set_configuration(1), None, false),

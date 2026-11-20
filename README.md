@@ -309,6 +309,7 @@ osh> _
 - /proc filesystem: version, cpuinfo, meminfo, uptime, load, stat, modules
 - Per-process FD tables (16 slots with capability tokens)
 - Network stack (Ethernet/IP/UDP/TCP) with DHCP, DNS resolver and syscall interface
+- USB HID input: device enumeration into the slot registry, HID report-descriptor parsing and interrupt-IN polling (`bus/usb/`, live QEMU smoke `OnyxOS/scripts/qemu-usb-smoke.sh` with `qemu-xhci` + `usb-kbd`/`usb-tablet`); stick sessions expose joydev-compatible `/dev/jsN`
 - Write-ahead journal + crash recovery on mount
 - Flashback snapshots with RLE compression + COW
 - Dynamic processes (no PROC_MAX limit)
@@ -317,7 +318,7 @@ osh> _
 - 100 syscalls total
 
 ### Still open
-- **USB core enumeration**: EHCI/OHCI control/bulk transfers, the xHCI transfer path and the URB/HCD layer work (`bus/usb/`, QEMU xHCI smoke), but nothing consumes them yet: descriptors, address assignment and mass storage are missing
+- **USB multi-device & mass storage**: enumeration, HID parsing and interrupt-IN input are live (see above); still missing: multi-slot xHCI, EHCI interrupt transfers, USB mass-storage class
 - **Blocking socket `recv`**: userspace busy-polls today; the kernel has no per-socket wait queue
 - **TCP segmentation**: 536 bytes per segment with no IP fragmentation; MSS/path-MTU handling is pending
 - **No TLS**: `obrowse` stays HTTP-only

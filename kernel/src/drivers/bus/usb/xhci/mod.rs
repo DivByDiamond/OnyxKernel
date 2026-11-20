@@ -13,7 +13,11 @@ pub(super) use xfer::xhci_control_transfer;
 pub struct XhciCtx {
     pub base: usize,
     pub obase: usize,
+    /// Absolute MMIO address of the doorbell register array (BAR base +
+    /// DBOFF) — `doorbell_w32` writes it as-is.
     pub dboff: usize,
+    /// Absolute MMIO address of the runtime register set (BAR base +
+    /// RTSOFF) — the rt_* helpers write it as-is.
     pub rtsoff: usize,
     pub cap_len: u8,
     pub hci_version: u16,
@@ -26,6 +30,12 @@ pub struct XhciCtx {
     pub event_ring: ring::EventRing,
     pub xfer_rings: [*mut ring::TrbRing; 32],
     pub slot: u8,
+    /// Root-port index of the live device (bringup) — for rebuilding the
+    /// slot context when a Configure Endpoint raises Context Entries.
+    pub dev_port: u8,
+    /// Slot-context speed of the live device (bringup) — the interrupt
+    /// interval encoding depends on it (§6.2.3.6 Table 6-12).
+    pub dev_speed: u8,
     pub operational: bool,
 }
 
@@ -57,10 +67,16 @@ pub(crate) static mut G_XHCI: XhciCtx = XhciCtx {
     },
     xfer_rings: [ptr::null_mut(); 32],
     slot: 0,
+    dev_port: 0,
+    dev_speed: 0,
     operational: false,
 };
 
+pub use device::bringup_device;
 pub use init::init;
+/// Interrupt-IN arm/poll for the HID stick channel (task 4).
+pub use xfer::intr::xhci_arm_interrupt;
+pub(super) use xfer::intr::xhci_poll_interrupt;
 
 /// # Safety
 ///
@@ -124,9 +140,10 @@ pub unsafe fn address_device(slot_id: u8, input_ctx_pa: u64) -> KResult<()> {
         let mut trb = ring::Trb::zero();
         trb.params[0] = input_ctx_pa as u32;
         trb.params[1] = (input_ctx_pa >> 32) as u32;
-        trb.params[2] = (slot_id as u32) << 24;
         trb.set_type(ring::TRB_ADDRESS_DEVICE);
         trb.set_flags(ring::TRB_IOC);
+        // Slot id rides in the control word (§6.4.3.4), after set_type.
+        trb.set_slot_id(slot_id);
         ring::submit_command(&trb)?;
         let dcbaap = G_XHCI.dcbaap;
         let dev_ctx_pa = ptr::read(dcbaap.add(slot_id as usize));
