@@ -82,9 +82,9 @@ pub unsafe fn exit(pid: u32, code: i32) {
             // the last point where the pointer is guaranteed to still be the
             // dead process's own.
             crate::ipc::disconnect_waiter(p_ptr);
-            for i in 0..p.fds.len() {
-                if p.fds[i].used {
-                    let token = crate::fs::vfs::fd_token(i, p.fds[i].epoch);
+            for (i, fd) in p.fds.iter().enumerate() {
+                if fd.used {
+                    let token = crate::fs::vfs::fd_token(i, fd.epoch);
                     let _ = crate::fs::vfs::close(token);
                 }
             }

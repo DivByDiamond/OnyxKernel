@@ -191,10 +191,10 @@ unsafe fn shrink(inode: &mut OnyfsInode, length: u64) -> KResult<()> {
         let last_needed: u64 = (length - 1) / bs;
         if last_needed < ONYFS_DIRECT_BLKS as u64 {
             // Free direct blocks past last_needed.
-            for i in (last_needed as usize + 1)..ONYFS_DIRECT_BLKS {
-                if inode.blocks[i] != 0 {
-                    free_data_block(inode.blocks[i])?;
-                    inode.blocks[i] = 0;
+            for slot in inode.blocks.iter_mut().skip(last_needed as usize + 1) {
+                if *slot != 0 {
+                    free_data_block(*slot)?;
+                    *slot = 0;
                 }
             }
             // The indirect block is now entirely unneeded.

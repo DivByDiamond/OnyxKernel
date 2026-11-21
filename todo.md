@@ -31,6 +31,8 @@ QEMU slirp (`N2`: рендер → переход по ссылке → back) и
 | EX1 | [x] Отклонять недопустимые ONX permissions до маппинга, проверять PA перед копированием | `proc/onx/load.rs`, `segments.rs` | 2026-11-15, `14937bc`; согласовано с linker `e7a57ec`: 293 kernel-теста, QEMU linked-C++ и отказ malformed image без падения shell |
 | FS-J1 | [x] Fault injection на первом rollover журнала при большом truncate | `fs/onyxfs/journal.rs`, `write/meta/truncate.rs` | 2026-11-15, `cf6ca42`: full-block undo, dedup и откат по внешней операции; write-cut регрессии и QEMU legacy/undo прошли (`docs/ONYXFS_JOURNAL.md`, границы модели там же) |
 | FS-J2 | [x] Безопасное повторное использование журнала после ошибки очистки | `fs/onyxfs/journal.rs` | 2026-11-15, `cf6ca42`: header-only commit, quarantine, restartable recovery; ошибка clear → короткая транзакция → recovery покрыта регрессией |
+| MK1 | [x] `mkimage`: вложенный каталог создавался повторно (`/usr/share/music` дважды, утечка inode и блока) | `tools/src/mkimage/tree.rs` | 2026-11-21: поиск существующего каталога через `find_parent_dir`; тест `tree/tests.rs` падает на старом коде; заодно битовая карта больше не помечает занятым лишний последний inode (`next_ino - 1`) |
+| FS-R1 | [x] `rename` поверх существующего файла не освобождал вытесненный inode и его блоки (утечка при каждой перезаписи `/etc/passwd`/`shadow` через temp-файл); rename на самого себя — no-op, каталог поверх имени — `EISDIR`/`ENOTDIR`/`EEXIST` | `fs/onyxfs/ops/dir/rename.rs` | 2026-11-21: `free_inode` в той же транзакции; тесты `rename_over_a_file_frees_the_replaced_inode_atomically` (обрыв на каждой записи) и `rename_onto_itself_or_a_directory_keeps_everything` падали на старом коде |
 
 ## 3. P2 — backlog по подсистемам
 

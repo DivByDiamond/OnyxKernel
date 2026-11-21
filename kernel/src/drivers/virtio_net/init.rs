@@ -1,8 +1,7 @@
 //! virtio-net device probe and virtqueue setup.
 use super::queue::push_avail;
 use super::{
-    DEVICE_COUNT, DEVICES, EMPTY_NET, G_NET, HDR_LEN, MAX_NET_DEVICES, NET_MTU, RX_DESCS,
-    VIRTIO_ID_NET,
+    DEVICE_COUNT, DEVICES, EMPTY_NET, G_NET, HDR_LEN, MAX_NET_DEVICES, NET_MTU, VIRTIO_ID_NET,
 };
 use crate::arch::mmio::Mmio;
 use crate::drivers::virtio::{
@@ -103,8 +102,8 @@ unsafe fn init_device(base: usize) -> KResult<()> {
             }
         }
         // MAC address lives at device-specific config offset 0x100 in legacy MMIO.
-        for i in 0..6 {
-            G_NET.mac[i] = Mmio::<u8>::at(base + 0x100 + i).read();
+        for (i, mac_byte) in G_NET.mac.iter_mut().enumerate() {
+            *mac_byte = Mmio::<u8>::at(base + 0x100 + i).read();
         }
         // Only expose the device to the network stack once the queues are fully
         // set up — G_NET.base non-zero is the "ready" signal used by present().
@@ -131,9 +130,9 @@ unsafe fn setup_rx_queue(base: usize, modern: bool) -> KResult<()> {
         G_NET.rx_desc = desc_pa as *mut VqDesc;
         G_NET.rx_avail = avail_pa as *mut VqAvail;
         G_NET.rx_used = used_pa as *mut VqUsed;
-        for i in 0..RX_DESCS {
+        for (i, rx_buf) in G_NET.rx_bufs.iter_mut().enumerate() {
             let buf_pa = pmm::alloc_zero()? as *mut u8;
-            G_NET.rx_bufs[i] = buf_pa;
+            *rx_buf = buf_pa;
             (*G_NET.rx_desc.add(i)) = VqDesc {
                 addr: buf_pa as u64,
                 len: (HDR_LEN + NET_MTU) as u32,

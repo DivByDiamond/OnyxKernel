@@ -111,10 +111,12 @@ pub fn ensure_parent_dirs(dirs: &mut Vec<DirNode>, path: &str, next_ino: &mut u3
         }
         cur.push('/');
         cur.push_str(comp);
-        let exists = dirs.iter().any(|d| {
-            let name = basename(&cur);
-            d.parent_ino == dirs[0].ino && d.entries.iter().any(|(n, _, _)| n == name)
-        });
+        let parent = find_parent_dir(dirs, &cur);
+        let name = basename(&cur);
+        let exists = dirs[parent]
+            .entries
+            .iter()
+            .any(|(n, _, is_dir)| *is_dir && n == name);
         if !exists {
             add_dir(dirs, &cur, next_ino);
         }
@@ -163,3 +165,6 @@ fn basename(path: &str) -> &str {
         None => path,
     }
 }
+
+#[cfg(test)]
+mod tests;

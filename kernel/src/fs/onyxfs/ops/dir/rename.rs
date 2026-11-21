@@ -1,5 +1,5 @@
 use super::super::super::OnyfsStat;
-use super::super::super::alloc::{add_dirent, remove_dirent};
+use super::super::super::alloc::{add_dirent, free_inode, remove_dirent};
 use super::super::super::journal::journal_commit;
 use super::super::super::lookup::{lookup, lookup_nofollow};
 use onyx_core::errno::{Errno, KResult};
@@ -60,8 +60,30 @@ pub unsafe fn rename(old_path: &[u8], new_path: &[u8]) -> KResult<()> {
                 st.ino
             };
 
+            // add_dirent overwrites an existing entry in place, so the inode that the
+            // name pointed to must be released here or it stays allocated forever
+            // (the guest's passwd/shadow temp-file renames leaked one per rewrite).
+            let mut victim_st = OnyfsStat::default();
+            let victim = lookup_nofollow(new_path, &mut victim_st).ok();
+            if let Some(victim_ino) = victim {
+                if victim_ino == old_ino {
+                    return Ok(());
+                }
+                let old_is_dir = u32::from(dtype) == 0o040000 >> 12;
+                let victim_is_dir = victim_st.mode & 0o170000 == 0o040000;
+                match (old_is_dir, victim_is_dir) {
+                    (false, true) => return Err(Errno::IsDir),
+                    (true, false) => return Err(Errno::NotDir),
+                    (true, true) => return Err(Errno::Exist),
+                    (false, false) => {}
+                }
+            }
+
             add_dirent(new_parent_ino, new_filename, old_ino, dtype)?;
             remove_dirent(old_parent_ino, old_filename)?;
+            if let Some(victim_ino) = victim {
+                free_inode(victim_ino)?;
+            }
             journal_commit()?;
             Ok(())
         })

@@ -13,9 +13,9 @@ fn spawn_inherits_only_the_standard_stream_bindings() {
         };
     }
     inherit_stdio(&parent, &mut child);
-    for slot in 0..3 {
-        assert!(child.fds[slot].used, "stdio slot {slot} is inherited");
-        assert_eq!(child.fds[slot].ino, 100 + slot as u32);
+    for (slot, fd) in child.fds.iter().take(3).enumerate() {
+        assert!(fd.used, "stdio slot {slot} is inherited");
+        assert_eq!(fd.ino, 100 + slot as u32);
     }
     assert!(
         !child.fds[3].used && !child.fds[4].used,

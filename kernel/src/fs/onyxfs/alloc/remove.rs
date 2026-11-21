@@ -46,8 +46,7 @@ pub unsafe fn remove_dirent(dir_ino: u32, name: &[u8]) -> KResult<()> {
             _ => OnyfsDirent::SIZE,
         };
 
-        for blk_idx in 0..ONYFS_DIRECT_BLKS {
-            let dir_blk = dir_inode.blocks[blk_idx];
+        for &dir_blk in &dir_inode.blocks {
             if dir_blk == 0 {
                 continue;
             }

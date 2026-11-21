@@ -42,18 +42,12 @@ pub unsafe fn snapshot_list(names_out: *mut u8, max_len: usize) -> KResult<u32> 
                 None => continue,
             };
             // Copy name (up to 32 bytes, stopping at NUL) + trailing newline.
-            let mut name_len = 0;
-            for j in 0..32 {
-                if meta.name[j] == 0 {
-                    break;
-                }
-                name_len += 1;
-            }
-            for j in 0..name_len {
+            let name_len = meta.name.iter().take_while(|&&b| b != 0).count();
+            for &b in meta.name.iter().take(name_len) {
                 if written + 1 >= max_len {
                     return Ok(listed); // out of space
                 }
-                *names_out.add(written) = meta.name[j];
+                *names_out.add(written) = b;
                 written += 1;
             }
             if written + 1 < max_len {

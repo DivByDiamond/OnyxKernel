@@ -33,8 +33,7 @@ pub unsafe fn lookup_in(dir_ino: u32, name: &[u8], out: &mut OnyfsStat) -> KResu
         };
         read_inode(dir_ino, &mut inode)?;
         let dpb = dirents_per_block();
-        for blk_idx in 0..ONYFS_DIRECT_BLKS {
-            let dir_blk = inode.blocks[blk_idx];
+        for &dir_blk in &inode.blocks {
             if dir_blk == 0 {
                 continue;
             }

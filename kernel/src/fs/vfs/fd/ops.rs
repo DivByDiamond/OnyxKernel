@@ -78,13 +78,13 @@ pub(crate) unsafe fn alloc_fd(perms: u32) -> KResult<usize> {
         // for user-space processes (all rings). Kernel boot uses ring 0 but there
         // is no UART redirection for kernel fds, so we skip unconditionally here
         // and kernel-boot fds come from G_KERNEL_FDS above.
-        for i in 3..VFS_MAX_FDS {
-            if !p.fds[i].used {
-                p.fds[i].used = true;
-                p.fds[i].perms = perms;
-                p.fds[i].epoch = p.fds[i].epoch.wrapping_add(1);
-                if p.fds[i].epoch == 0 {
-                    p.fds[i].epoch = 1;
+        for (i, fd) in p.fds.iter_mut().enumerate().skip(3) {
+            if !fd.used {
+                fd.used = true;
+                fd.perms = perms;
+                fd.epoch = fd.epoch.wrapping_add(1);
+                if fd.epoch == 0 {
+                    fd.epoch = 1;
                 }
                 return Ok(i);
             }

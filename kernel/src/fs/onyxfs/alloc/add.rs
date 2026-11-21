@@ -82,8 +82,7 @@ pub unsafe fn add_dirent(dir_ino: u32, name: &[u8], target_ino: u32, dtype: u8) 
         }
 
         // Pass 1: look for an existing entry with the same name to overwrite.
-        for blk_idx in 0..ONYFS_DIRECT_BLKS {
-            let dir_blk = dir_inode.blocks[blk_idx];
+        for &dir_blk in &dir_inode.blocks {
             if dir_blk == 0 {
                 continue;
             }
@@ -124,8 +123,7 @@ pub unsafe fn add_dirent(dir_ino: u32, name: &[u8], target_ino: u32, dtype: u8) 
         }
 
         // Pass 2: look for a free slot (inode == 0) in any existing block.
-        for blk_idx in 0..ONYFS_DIRECT_BLKS {
-            let dir_blk = dir_inode.blocks[blk_idx];
+        for &dir_blk in &dir_inode.blocks {
             if dir_blk == 0 {
                 continue;
             }

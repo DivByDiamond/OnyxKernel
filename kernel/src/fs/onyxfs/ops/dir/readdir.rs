@@ -83,9 +83,9 @@ pub unsafe fn readdir_entry(
                     .unwrap_or(ONYFS_NAME_MAX)
             };
             let copy_n = nl.min(name_len.saturating_sub(1));
-            for i in 0..copy_n {
-                *name_out.add(i) = d.name[i];
-            }
+            // SAFETY: copy_n <= ONYFS_NAME_MAX = d.name.len(), and name_out is
+            // writable for name_len bytes per the caller contract, copy_n <= name_len.
+            core::ptr::copy_nonoverlapping(d.name.as_ptr(), name_out, copy_n);
             if copy_n < name_len {
                 *name_out.add(copy_n) = 0;
             }

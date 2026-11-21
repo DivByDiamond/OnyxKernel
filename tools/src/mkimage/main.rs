@@ -129,7 +129,8 @@ fn main() {
     // read_inode() correctly rejects an out-of-range ino). Reserve headroom
     // beyond what's actually used at build time; only the bitmap bits for
     // real files are marked used; the rest stay free for runtime creates.
-    let used_inodes = next_ino;
+    // `next_ino` is the next free number (root is 1), so one fewer inode is actually allocated.
+    let used_inodes = next_ino - 1;
     const SPARE_INODES: u32 = 256;
     let total_inodes = used_inodes + SPARE_INODES;
     let inode_table_blocks = (total_inodes as usize).div_ceil(inodes_per_block) as u32;
