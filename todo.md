@@ -57,6 +57,7 @@ QEMU slirp (`N2`: рендер → переход по ссылке → back) и
 - rv32 non-smode: `nanosleep` через прямой CLINT MMIO вместо SBI (нужен `mtrap_32`-путь, как у rv64).
 
 ### Userland: GUI (v0.7+)
+- [x] D1: onyxdesk v1 — десктоп-демон (C99, ring 1): claim `/dev/fb0` на сеанс, панель + лаунчер из `/etc/desk.conf`, managed-запуск приложений с возвратом по выходу | `OnyxDesktop` + `OnyxOS/scripts` (упаковка `/bin/onyxdesk` + `/etc/desk.conf`, smoke `qemu-desk-smoke.sh`) | готово: 237 host-проверок, smoke-маркеры `DESK_READY`/`APP_STARTED osnake`/`APP_RETURN`/`DESK_EXIT 0` — 2026-11-21, `OnyxDesktop 7e131ec`
 - Window manager (создание/удаление окон).
 - Compositor (z-order, clipping).
 - Mouse cursor + click handling.
@@ -74,8 +75,8 @@ QEMU slirp (`N2`: рендер → переход по ссылке → back) и
 - [x] Q1: полный fmt/Clippy без dead-code bypass (2026-11-15, `1c0f188`): общие init-модули и host-тесты очищены, `scripts/quality/check.sh` и CI проходят всю поддерживаемую матрицу; RV32 smode явно отклоняется вместо ELF с entry=0.
 
 ### Документация / долг
-- README: «16 FD slots» сверить с кодом; «UDP/DHCP/DNS — осталось» устарело (реализовано); синхронизировать `README.ru.md`. USB-формулировка синхронизирована 2026-11-20: перечисление/HID/interrupt — готово (live-smoke), осталось multi-device/EHCI-interrupt/mass-storage.
-- `OnyxOS/docs/dev/roadmap.md` отстал от кода (v0.4/v0.5-чекбоксы) — обновить при следующем релизном срезе.
+- [x] README: «16 FD slots» сверить с кодом; «UDP/DHCP/DNS — осталось» устарело (реализовано); синхронизировать `README.ru.md`. USB-формулировка синхронизирована 2026-11-20: перечисление/HID/interrupt — готово (live-smoke), осталось multi-device/EHCI-interrupt/mass-storage. Закрыто 2026-11-21, `2e5f475`: «16 FD slots» подтверждено кодом (`PROC_MAX_FDS: usize = 16`, `kernel/src/proc/process/types.rs:30`, тест `proc/tests.rs:149`); UDP/DHCP/DNS отражены как реализованные; RU вкатан в единый `README.md`, `README.ru.md` удалён.
+- [x] `OnyxOS/docs/dev/roadmap.md` отстал от кода (v0.4/v0.5-чекбоксы). Закрыто 2026-11-21, OnyxOS `67ac3ed`: срез 2026-11-21 записан в roadmap (сверка по heads, смоки boot/interactive/desk PASS, CI зелёный), статус архивного линкера дополнен по `OnyxCompiller/docs/STATUS.md`, `roadmap.en.md` синхронизирован (OnyxDesktop-секция, USB HID, срез).
 
 ## 4. Открытые дефекты и ограничения
 
