@@ -11,7 +11,8 @@ pub const TRB_ENABLE_SLOT: u32 = 9;
 pub const TRB_ADDRESS_DEVICE: u32 = 11;
 pub const TRB_CONFIG_EP: u32 = 12;
 pub const TRB_EVAL_CTX: u32 = 13;
-pub const TRB_CMD_NOOP: u32 = 10;
+pub const TRB_DISABLE_SLOT: u32 = 10;
+pub const TRB_CMD_NOOP: u32 = 23;
 pub const TRB_CMD_COMPL: u32 = 33;
 pub const TRB_PORT_STATUS: u32 = 34;
 pub const TRB_TRANSFER_EVENT: u32 = 32;
@@ -81,37 +82,41 @@ pub struct TrbRing {
 /// `nentries` must be >= 2 and the resulting ring must be used with a
 /// controller base validated at init; PMM must be initialized.
 pub unsafe fn alloc_ring(nentries: u16) -> KResult<TrbRing> {
-    // SAFETY: pa is a physically contiguous PMM allocation of
-    // nentries*16 bytes; the link TRB write targets index nentries-1,
-    // the last entry of that buffer.
+    // SAFETY: the PMM allocation covers nentries*16 bytes (page-rounded)
+    // and is handed to `init_ring` under its contract.
     unsafe {
-        let n = nentries as usize;
-        let bytes = n * 16;
-        let pages = bytes.div_ceil(4096);
-        let pa = pmm::alloc_n(pages)? as usize;
+        let pages = (nentries as usize * 16).div_ceil(4096);
+        let pa = pmm::alloc_n(pages)?;
+        Ok(init_ring(pa, nentries))
+    }
+}
+
+/// Build a ring over an already-allocated, zeroed buffer at `pa` and
+/// write its closing link TRB. Splitting this from the allocation lets
+/// callers that track their pages (per-device `PageSet`) own the free.
+///
+/// # Safety
+///
+/// `pa` must be the identity-mapped base of a zeroed, physically
+/// contiguous buffer of at least `nentries * 16` bytes, and
+/// `nentries >= 2`.
+pub unsafe fn init_ring(pa: u64, nentries: u16) -> TrbRing {
+    // SAFETY: base covers nentries entries per the contract; index
+    // nentries-1 is the last valid entry.
+    unsafe {
         let ring = TrbRing {
-            base: pa as *mut Trb,
-            phys: pa as u64,
+            base: pa as usize as *mut Trb,
+            phys: pa,
             size: nentries,
             enqueue: 0,
             cycle: true,
         };
-        // SAFETY: base was allocated with nentries entries; index
-        // nentries-1 is the last valid entry.
         let link = &mut *ring.base.add((nentries - 1) as usize);
         link.params[0] = pa as u32;
-        #[cfg(target_pointer_width = "64")]
-        {
-            link.params[1] = (pa >> 32) as u32;
-        }
-        #[cfg(target_pointer_width = "32")]
-        {
-            // See device.rs: high TRB address word is zero on rv32.
-            link.params[1] = 0;
-        }
+        link.params[1] = (pa >> 32) as u32;
         link.params[2] = 0;
         link.params[3] = TRB_C | trb_type_flags(TRB_LINK);
-        Ok(ring)
+        ring
     }
 }
 
@@ -178,10 +183,20 @@ pub unsafe fn ring_doorbell(slot: u8, target: u8) {
 mod events;
 pub use events::{EventRing, alloc_event_ring, poll_event};
 
+/// Command Completion Code of a command-completion event (DW2 bits
+/// 31:24); 1 is Success (§6.4.2.2).
+pub fn command_ok(ev: &Trb) -> bool {
+    (ev.params[2] >> 24) & 0xFF == 1
+}
+
 /// # Safety
 ///
 /// Controller initialized and operational (cmd/event rings allocated by
 /// init); single-owner driver path only — it mutates G_XHCI rings.
+/// Transfer events that arrive while the command waits (an armed
+/// interrupt endpoint of ANOTHER device) are parked for that device's
+/// poll, never dropped; the event-ring dequeue pointer is acknowledged
+/// per event.
 pub unsafe fn submit_command(trb: &Trb) -> KResult<Trb> {
     // SAFETY: exclusive access to G_XHCI on this path; cmd_ring and
     // event_ring were allocated by init with size-sized contiguous
@@ -191,13 +206,17 @@ pub unsafe fn submit_command(trb: &Trb) -> KResult<Trb> {
         let cmd_ring = &mut (*ctx).cmd_ring;
         enqueue_trb(cmd_ring, trb);
         crate::drivers::usb::xhci::regs::doorbell_w32((*ctx).dboff, 0, 0);
-        let er = &mut (*ctx).event_ring;
         let mut timeout = 1_000_000u32;
         while timeout > 0 {
+            let er = &mut (*ctx).event_ring;
             if let Some(ev) = poll_event(er) {
-                let t = (ev.params[3] >> 10) & 0x3F;
-                if t == TRB_CMD_COMPL {
-                    return Ok(ev);
+                crate::drivers::usb::xhci::ack_event_ring(ctx);
+                match (ev.params[3] >> 10) & 0x3F {
+                    TRB_CMD_COMPL => return Ok(ev),
+                    TRB_TRANSFER_EVENT => {
+                        crate::drivers::usb::xhci::park_if_armed(&ev);
+                    }
+                    _ => {}
                 }
             }
             timeout -= 1;

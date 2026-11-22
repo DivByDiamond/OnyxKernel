@@ -179,5 +179,6 @@ pub fn enumerate(bus: &mut dyn ControlBus, owner: Owner) -> KResult<UsbSlot> {
         ep_in: ep.address,
         max_packet: ep.max_packet,
         interval: ep.interval,
+        hc_slot: bus.hc_slot(),
     })
 }

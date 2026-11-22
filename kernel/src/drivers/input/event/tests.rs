@@ -72,6 +72,7 @@ fn stick_events_route_to_the_session_slot_not_the_hid_class_slot() {
         ep_in: 0x81,
         max_packet: 8,
         interval: 10,
+        hc_slot: 0,
     };
     assert_eq!(dev::set_slot(1, decoy), Ok(()));
 

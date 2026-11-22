@@ -1,12 +1,9 @@
-use crate::mm::pmm;
-use onyx_core::errno::KResult;
-
 #[cfg(test)]
 mod tests;
 
 mod bringup;
 pub(crate) mod ctx;
-pub use bringup::bringup_device;
+pub use bringup::{bringup_device, release_device};
 use ctx::{CERR, EpCtx, InputCtx, SlotCtx, slot_ctx_root_port};
 
 pub const EP_TYPE_INVALID: u8 = 0;
@@ -26,33 +23,21 @@ pub const SPEED_LS: u8 = 2;
 pub const SPEED_HS: u8 = 3;
 pub const SPEED_SS: u8 = 4;
 
-const CTX_SIZE: usize = 32;
-
-/// # Safety
-///
-/// No preconditions beyond PMM availability; safe to call once per device
-/// during device setup under the driver's init path (single-threaded with
-/// SIE=0).
-pub unsafe fn create_ctx_array() -> KResult<u64> {
-    // SAFETY: this only performs a PMM allocation; the unsafe op is the
-    // pmm call whose contract is honored (page-aligned, physically
-    // contiguous allocation of `pages` pages). The array holds 32
-    // contexts (slot + 31 EP, §6.4.1: context index 1..31) — one page.
-    unsafe {
-        let ctx_slots = 32;
-        let total = ctx_slots as usize * CTX_SIZE;
-        let pages = total.div_ceil(4096);
-        pmm::alloc_n(pages)
-    }
-}
-
 /// # Safety
 ///
 /// `input` must point at a physically contiguous input context block of at
 /// least 3 CTX_SIZE-sized contexts (control + slot + EP0); caller must have
-/// exclusive access (driver init path). The slot-context encoding (route
+/// exclusive access (driver init path). `ep0_deq`/`ep0_dcs` are the
+/// device's EP0 ring start and cycle state. The slot-context encoding (route
 /// string, root hub port) is documented on `ctx::slot_ctx_root_port`.
-pub unsafe fn set_input_ctx_slot(input: *mut u8, port: u8, speed: u8, mps0: u16) {
+pub unsafe fn set_input_ctx_slot(
+    input: *mut u8,
+    port: u8,
+    speed: u8,
+    mps0: u16,
+    ep0_deq: u64,
+    ep0_dcs: bool,
+) {
     // SAFETY: caller guarantees the buffer covers offsets 0..=96
     // (InputCtx + SlotCtx + EpCtx at 32/64), so all writes are in bounds.
     unsafe {
@@ -65,17 +50,9 @@ pub unsafe fn set_input_ctx_slot(input: *mut u8, port: u8, speed: u8, mps0: u16)
         slot_ctx_root_port(sc, port, speed, 1);
         // SAFETY: offset 64 = EP0 context, in bounds per contract.
         let ep0 = &mut *(input.add(64) as *mut EpCtx);
-        // EP0 dequeue from the EP0 ring `init` allocated: Address Device
+        // EP0 dequeue from the device's own EP0 ring: Address Device
         // copies it into the output context. DCS mirrors its cycle state.
-        let ctx = &raw const super::G_XHCI;
-        let ring_ptr = (*ctx).xfer_rings[0];
-        let (deq, dcs) = if ring_ptr.is_null() {
-            (0, false)
-        } else {
-            // SAFETY: init published a fully initialized TrbRing here.
-            let r = &*ring_ptr;
-            (r.phys, r.cycle)
-        };
+        let (deq, dcs) = (ep0_deq, ep0_dcs);
         // EP0 per §6.2.3: Interval 0; mps0/Control type/CErr in DW1;
         // Average TRB Length 8 in DW4 (Linux parity).
         ep0.dw0 = 0;

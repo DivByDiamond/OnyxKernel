@@ -63,3 +63,15 @@ fn ep_ctx_words_follow_spec_6_2_3() {
     // DW4: Average TRB Length = mps, Max ESIT Payload = mps (burst 0).
     assert_eq!(w[4], 8 | 8 << 16);
 }
+
+#[test]
+fn in_range_is_half_open_and_overflow_safe() {
+    use super::in_range;
+    assert!(in_range(0x1000, 0x200, 0x1000));
+    assert!(in_range(0x1000, 0x200, 0x11FF));
+    assert!(!in_range(0x1000, 0x200, 0x1200)); // one past the end
+    assert!(!in_range(0x1000, 0x200, 0xFFF)); // below the base
+    // Hostile completion pointers (near u64::MAX) must not wrap.
+    assert!(!in_range(0x1000, 0x200, u64::MAX));
+    assert!(!in_range(u64::MAX - 8, 0x200, 0));
+}

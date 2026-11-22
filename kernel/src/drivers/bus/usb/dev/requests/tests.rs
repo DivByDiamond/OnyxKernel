@@ -124,3 +124,18 @@ fn live_bus_set_addr_retargets_without_panic() {
         Err(Errno::NoSys)
     );
 }
+
+#[test]
+fn live_bus_reports_its_controller_slot_and_survives_set_addr() {
+    // SAFETY: as above — the host guards bail before any MMIO.
+    let mut bus = unsafe { LiveBus::new(Owner::Xhci, 0) }.with_hc_slot(3);
+    // The xHCI slot id is the routing handle recorded in the registry;
+    // the enumeration's re-address step must not clobber it.
+    assert_eq!(bus.hc_slot(), 3);
+    bus.set_addr(1);
+    assert_eq!(bus.hc_slot(), 3);
+    // Controllers that address by USB address report no slot.
+    // SAFETY: as above.
+    let ohci = unsafe { LiveBus::new(Owner::Ohci, 0) };
+    assert_eq!(ohci.hc_slot(), 0);
+}

@@ -30,7 +30,7 @@ pub(crate) unsafe fn probe_usb() {
                 Some(base) => match usb::xhci::init(base as usize) {
                     Ok(()) => {
                         crate::kinf!("usb", "xhci bar0=%p", Arg::from(base));
-                        probe_device(usb::dev::Owner::Xhci);
+                        probe_xhci_ports();
                     }
                     Err(_) => {
                         crate::kwrn!("usb", "xhci init failed at bar0=%p", Arg::from(base))
@@ -81,37 +81,94 @@ unsafe fn first_connected_port(owner: usb::dev::Owner) -> Option<u8> {
     None
 }
 
-/// Enumerate the attached device through one controller. xHCI
-/// additionally needs the port-reset + slot-enable + Address Device
-/// bring-up first — its controller init covers none of that (ruling 5
-/// finding); the platform controllers get a best-effort port reset.
+/// Enumerate EVERY connected xHCI root port (multi-device): each port
+/// gets its own bring-up (port reset, controller slot, Address Device)
+/// and registry slot, then a HID session where the device is a stick —
+/// so several sticks coexist as /dev/js0, /dev/js1, ... (registry index
+/// = js number). A port that fails costs its own resources only and
+/// the loop moves on; the loop stops once the registry is full, before
+/// a controller slot is wasted on a device that could not register.
 ///
 /// # Safety
 ///
-/// Requires a prior successful controller init (`xhci::init` or
-/// `init_usb`); boot-probe context (single-threaded, SIE=0).
-unsafe fn probe_device(owner: usb::dev::Owner) {
+/// Requires a prior successful `usb::xhci::init`; boot-probe context
+/// (single-threaded, SIE=0).
+unsafe fn probe_xhci_ports() {
     unsafe {
-        if owner == usb::dev::Owner::Xhci {
-            if let Err(e) = usb::xhci::bringup_device() {
+        let owner = usb::dev::Owner::Xhci;
+        for port in 0..usb::ports::owner_n_ports(owner) {
+            let connected = usb::ports::owner_port_status(owner, port)
+                .map(|st| st & PORT_CCS != 0)
+                .unwrap_or(false);
+            if !connected {
+                continue;
+            }
+            if !usb::dev::has_free_slot() {
                 crate::kwrn!(
                     "usb",
-                    "xhci device bringup failed errno=%d",
+                    "device registry full, port %d skipped",
+                    Arg::from(u32::from(port))
+                );
+                break;
+            }
+            probe_xhci_port(port);
+        }
+    }
+}
+
+/// Bring up, enumerate and (for a stick) attach the device on `port`.
+/// Cleanup contract: a failure after the controller slot was granted
+/// gives the slot back and frees its pages — inside `bringup_device`
+/// for bring-up failures, here for a device the registry refused
+/// (non-HID class, malformed descriptors, full registry).
+///
+/// # Safety
+///
+/// Requires a prior successful `usb::xhci::init`; boot-probe context.
+unsafe fn probe_xhci_port(port: u8) {
+    unsafe {
+        let owner = usb::dev::Owner::Xhci;
+        let slot_id = match usb::xhci::bringup_device(port) {
+            Ok(id) => id,
+            Err(e) => {
+                crate::kwrn!(
+                    "usb",
+                    "xhci port %d bringup failed errno=%d",
+                    Arg::from(u32::from(port)),
                     Arg::from(e.as_i64())
                 );
                 return;
             }
-        } else {
-            // EHCI/OHCI init also does not reset a port; reset the first
-            // connected one, best-effort (ruling 5 applies
-            // symmetrically).
-            reset_first_port(owner);
+        };
+        // SAFETY: bringup succeeded: controller up, `slot_id` addressed.
+        let mut bus = usb::dev::requests::LiveBus::new(owner, usb::dev::requests::ADDR_DEFAULT)
+            .with_hc_slot(slot_id);
+        match usb::dev::probe_register(&mut bus, owner) {
+            // SAFETY: boot-probe context per attach_hid's contract.
+            Some(idx) => attach_hid(idx, &mut bus),
+            // Not registered: nothing will ever poll this device, so
+            // give its controller slot and pages back.
+            None => usb::xhci::release_device(slot_id),
         }
+    }
+}
+
+/// Enumerate the attached device through one platform controller
+/// (EHCI/OHCI): a best-effort port reset, then enumeration into the
+/// registry and the HID attach.
+///
+/// # Safety
+///
+/// Requires a prior successful `init_usb`; boot-probe context
+/// (single-threaded, SIE=0).
+unsafe fn probe_device(owner: usb::dev::Owner) {
+    unsafe {
+        // EHCI/OHCI init does not reset a port either: best-effort reset.
+        reset_first_port(owner);
         // SAFETY: the controller init above succeeded, per LiveBus::new's contract.
         let mut bus = usb::dev::requests::LiveBus::new(owner, usb::dev::requests::ADDR_DEFAULT);
-        // probe_register takes and releases USB_DEV_LOCK internally;
-        // the returned slot index lets the HID attach continue on the
-        // same bus (re-targeted to the device address) without holding it.
+        // probe_register takes and releases USB_DEV_LOCK internally; the
+        // returned index lets the HID attach continue on the same bus.
         if let Some(idx) = usb::dev::probe_register(&mut bus, owner) {
             // SAFETY: boot-probe context per attach_hid's contract; the
             // registry lock is free here.

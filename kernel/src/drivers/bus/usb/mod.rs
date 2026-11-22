@@ -32,7 +32,8 @@ pub const OHCI_BASE: usize = 0x04C1_0000;
 /// the OHCI companion, which owns the full/low-speed devices the
 /// legacy URB path serves. Owner-correct routing across both
 /// controllers goes through the `owner_*` dispatchers and
-/// `dev::requests::LiveBus`.
+/// `dev::requests::LiveBus`. On xHCI `dev_addr` is read as the
+/// controller SLOT ID (what `LiveBus` carries), not a USB address.
 pub unsafe fn control_transfer(
     dev_addr: u8,
     setup_pkt: &[u8; 8],
@@ -106,7 +107,7 @@ pub unsafe fn interrupt_transfer(slot_idx: usize, buf: &mut [u8]) -> KResult<u32
     unsafe {
         match dev::slot(slot_idx) {
             Some(s) => match s.owner {
-                dev::Owner::Xhci => xhci::xhci_poll_interrupt(buf),
+                dev::Owner::Xhci => xhci::xhci_poll_interrupt(s.hc_slot, buf),
                 dev::Owner::Ohci => ohci::ohci_poll_interrupt(buf),
                 dev::Owner::Ehci => Err(Errno::NoSys),
             },

@@ -2,10 +2,18 @@ use core::ptr;
 use onyx_core::errno::{Errno, KResult};
 
 pub mod device;
+mod devs;
 pub mod init;
+mod pages;
+mod ports;
+pub use ports::port_connect;
+pub(super) use ports::{xhci_n_ports, xhci_port_enable, xhci_port_reset, xhci_port_status};
 pub mod regs;
 pub use regs::ring;
 mod xfer;
+
+use devs::park_if_armed;
+use xfer::ack_event_ring;
 
 pub(super) use xfer::bulk::xhci_bulk_transfer;
 pub(super) use xfer::xhci_control_transfer;
@@ -28,14 +36,6 @@ pub struct XhciCtx {
     pub dcbaap: *mut u64,
     pub cmd_ring: ring::TrbRing,
     pub event_ring: ring::EventRing,
-    pub xfer_rings: [*mut ring::TrbRing; 32],
-    pub slot: u8,
-    /// Root-port index of the live device (bringup) — for rebuilding the
-    /// slot context when a Configure Endpoint raises Context Entries.
-    pub dev_port: u8,
-    /// Slot-context speed of the live device (bringup) — the interrupt
-    /// interval encoding depends on it (§6.2.3.6 Table 6-12).
-    pub dev_speed: u8,
     pub operational: bool,
 }
 
@@ -65,14 +65,10 @@ pub(crate) static mut G_XHCI: XhciCtx = XhciCtx {
         dequeue: 0,
         cycle: false,
     },
-    xfer_rings: [ptr::null_mut(); 32],
-    slot: 0,
-    dev_port: 0,
-    dev_speed: 0,
     operational: false,
 };
 
-pub use device::bringup_device;
+pub use device::{bringup_device, release_device};
 pub use init::init;
 /// Interrupt-IN arm/poll for the HID stick channel (task 4).
 pub use xfer::intr::xhci_arm_interrupt;
@@ -93,20 +89,6 @@ pub unsafe fn probe(base: usize) -> bool {
 
 /// # Safety
 ///
-/// The driver must have been initialized via `init`; G_XHCI.obase must be a
-/// valid operational register base. `port` must be < max_ports.
-pub unsafe fn port_connect(port: u8) -> bool {
-    // SAFETY: G_XHCI.obase was set by init from the validated controller
-    // base; OP_PORTSC + port*0x10 is within the operational register file.
-    unsafe {
-        let reg = regs::OP_PORTSC + (port as u32) * 0x10;
-        let v = regs::op_r32(G_XHCI.obase, reg);
-        (v & regs::PORT_CCS) != 0
-    }
-}
-
-/// # Safety
-///
 /// The controller must be initialized and operational (cmd/event rings
 /// allocated by init); must run before secondary harts start or serialized
 /// by the driver's lock.
@@ -119,10 +101,9 @@ pub unsafe fn enable_slot() -> KResult<u8> {
         trb.set_flags(ring::TRB_IOC);
         let ev = ring::submit_command(&trb)?;
         let slot_id = (ev.params[3] >> 24) as u8;
-        if slot_id == 0 {
+        if !ring::command_ok(&ev) || slot_id == 0 {
             return Err(Errno::Io);
         }
-        G_XHCI.slot = slot_id;
         Ok(slot_id)
     }
 }
@@ -144,7 +125,10 @@ pub unsafe fn address_device(slot_id: u8, input_ctx_pa: u64) -> KResult<()> {
         trb.set_flags(ring::TRB_IOC);
         // Slot id rides in the control word (§6.4.3.4), after set_type.
         trb.set_slot_id(slot_id);
-        ring::submit_command(&trb)?;
+        let ev = ring::submit_command(&trb)?;
+        if !ring::command_ok(&ev) {
+            return Err(Errno::Io);
+        }
         let dcbaap = G_XHCI.dcbaap;
         let dev_ctx_pa = ptr::read(dcbaap.add(slot_id as usize));
         if dev_ctx_pa == 0 {
@@ -177,77 +161,17 @@ pub unsafe fn irq_handler() {
     }
 }
 
-/// Root-hub port count (0 until `init` runs).
-pub(super) fn xhci_n_ports() -> u8 {
-    // SAFETY: plain read of G_XHCI, written once by single-threaded init.
-    unsafe {
-        if G_XHCI.operational {
-            G_XHCI.max_ports
-        } else {
-            0
-        }
-    }
+/// Has `init` brought the controller up? Plain read of `G_XHCI`,
+/// written only by single-threaded init.
+pub(crate) fn is_operational() -> bool {
+    let ctx = &raw const G_XHCI;
+    // SAFETY: plain read of a flag written once by boot-time init.
+    unsafe { (*ctx).operational }
 }
 
-/// # Safety
-///
-/// Requires `init` to have run (obase valid); `idx` is 0-based and
-/// bounds-checked against `max_ports` below (PORTSC stride is 0x10).
-pub(super) unsafe fn xhci_port_status(idx: u8) -> KResult<u32> {
-    // SAFETY: obase from init; the bound check keeps the PORTSC offset
-    // within the operational register file.
-    unsafe {
-        if !G_XHCI.operational || idx >= G_XHCI.max_ports {
-            return Err(Errno::Range);
-        }
-        Ok(regs::op_r32(
-            G_XHCI.obase,
-            regs::OP_PORTSC + (idx as u32) * 0x10,
-        ))
-    }
-}
-
-/// # Safety
-///
-/// Same contract as [`xhci_port_status`].
-pub(super) unsafe fn xhci_port_reset(idx: u8) -> KResult<()> {
-    // SAFETY: same as xhci_port_status — validated obase, checked offset.
-    unsafe {
-        if !G_XHCI.operational || idx >= G_XHCI.max_ports {
-            return Err(Errno::Range);
-        }
-        let reg = regs::OP_PORTSC + (idx as u32) * 0x10;
-        // Set PR; the read-back write also acknowledges any pending change
-        // (those bits are RW1C). Poll until the controller clears PR.
-        let v = regs::op_r32(G_XHCI.obase, reg);
-        regs::op_w32(G_XHCI.obase, reg, v | regs::PORT_PR);
-        let mut timeout = 100_000u32;
-        while timeout > 0 && (regs::op_r32(G_XHCI.obase, reg) & regs::PORT_PR) != 0 {
-            timeout -= 1;
-        }
-        if timeout == 0 {
-            return Err(Errno::Io);
-        }
-        Ok(())
-    }
-}
-
-/// # Safety
-///
-/// Same contract as [`xhci_port_status`].
-pub(super) unsafe fn xhci_port_enable(idx: u8) -> KResult<()> {
-    // SAFETY: same as xhci_port_status — validated obase, checked offset.
-    unsafe {
-        if !G_XHCI.operational || idx >= G_XHCI.max_ports {
-            return Err(Errno::Range);
-        }
-        // xHCI has no software port-enable: the controller enables the port
-        // itself when a reset completes (PED bit) — verify that it did.
-        let v = regs::op_r32(G_XHCI.obase, regs::OP_PORTSC + (idx as u32) * 0x10);
-        if v & regs::PORT_PED != 0 {
-            Ok(())
-        } else {
-            Err(Errno::Io)
-        }
-    }
+/// DCBAA base (null until `init` runs).
+pub(crate) fn dcbaa() -> *mut u64 {
+    let ctx = &raw const G_XHCI;
+    // SAFETY: plain read of a pointer written once by boot-time init.
+    unsafe { (*ctx).dcbaap }
 }

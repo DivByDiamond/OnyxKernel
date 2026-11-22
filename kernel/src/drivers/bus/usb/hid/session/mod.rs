@@ -19,15 +19,12 @@
 //! Lock order: `USB_HID_LOCK` → `USB_DEV_LOCK` (the poll's transfer
 //! takes the registry lock internally) — never the reverse.
 //!
-//! Layout: the session lives in a `hid/session/` subfolder because
-//! `hid/` was already at the ≤4-code-files-per-folder cap
-//! (`items.rs`, `mod.rs`, `report.rs`, `state.rs`) — the same shape
-//! as `report.rs` + `report/`: code file with a dedicated subfolder,
-//! tests next to their modules.
+//! Layout: a `hid/session/` subfolder (`hid/` is at the ≤4-files cap).
+//!
+//! Multi-device: every attached slot is polled round-robin (`rr`
+//! cursor) so one busy stick cannot starve the others' reports.
 
-// `&raw mut` on a `static mut` is deliberate: clippy's suggested bare
-// `HID_SESSIONS` would create a reference to it and trip
-// `static_mut_refs` (the same allowance virtio_input carries).
+// `&raw mut` on a `static mut` is deliberate (see virtio_input).
 #![allow(clippy::deref_addrof)]
 
 use onyx_core::errno::{Errno, KResult};
@@ -65,18 +62,17 @@ pub enum HidEvent {
     Button { index: u8, down: bool },
 }
 
-/// Session store: per-slot sessions plus the one pending-event FIFO a
-/// poll tick drains (poll decodes one report per call and hands its
-/// events out one by one).
+/// Session store: per-slot sessions plus the pending-event FIFO.
 struct SessionStore {
     slots: [SlotSession; MAX_SLOTS],
-    /// Queued `(event, is_init, slot)` triples, FIFO from `pend_head`.
-    /// The producing session's slot rides every queued event so the
-    /// /dev/jsN drain routes ring pushes by session, never by registry
-    /// class (a HID-class slot without a session must not steal them).
+    /// Queued `(event, is_init, slot)` triples, FIFO from `pend_head`;
+    /// the producing session's slot rides every event so /dev/jsN
+    /// routes by session, never by registry class.
     pend: [(HidEvent, bool, usize); MAX_PEND],
     pend_head: usize,
     pend_len: usize,
+    /// Slot the next poll scan starts at (round-robin fairness).
+    rr: usize,
 }
 
 impl SessionStore {
@@ -86,15 +82,13 @@ impl SessionStore {
             pend: [(HidEvent::Axis { axis: 0, value: 0 }, false, 0); MAX_PEND],
             pend_head: 0,
             pend_len: 0,
+            rr: 0,
         }
     }
 }
 
-// All session state is serialized on the HID lock, mirroring the
-// virtio_input INPUTS pattern: attach writes it once on the
-// single-threaded boot probe (SIE=0), poll runs in the serialized
-// single-consumer input loop. Order: USB_HID_LOCK → USB_DEV_LOCK
-// (inside usb::interrupt_transfer) — never the reverse.
+// Serialized on the HID lock (virtio_input INPUTS pattern); order
+// USB_HID_LOCK → USB_DEV_LOCK (inside usb::interrupt_transfer).
 static USB_HID_LOCK: crate::sync::SpinLock = crate::sync::SpinLock::new();
 static mut HID_SESSIONS: SessionStore = SessionStore::new();
 
@@ -125,9 +119,7 @@ pub unsafe fn attach(slot_idx: usize, bus: &mut dyn ControlBus) -> KResult<()> {
         match s.owner {
             Owner::Xhci => crate::drivers::usb::xhci::xhci_arm_interrupt(slot_idx)?,
             Owner::Ohci => crate::drivers::usb::ohci::ohci_arm_interrupt(slot_idx)?,
-            // EHCI interrupt transfers are out of scope (ruling 1): a
-            // high-speed interrupt device fails the arm with NoSys —
-            // the boot probe kwrns it, nothing is silently ignored.
+            // EHCI interrupt transfers are out of scope (ruling 1).
             Owner::Ehci => return Err(Errno::NoSys),
         }
     }
@@ -174,30 +166,34 @@ unsafe fn poll_locked(store: &mut SessionStore) -> Option<(HidEvent, bool, usize
         if let Some(ev) = pop_pend(store) {
             return Some(ev);
         }
-        for idx in 0..MAX_SLOTS {
+        for step in 0..MAX_SLOTS {
+            let idx = scan_slot(store.rr, step);
             if !store.slots[idx].attached {
                 continue;
             }
             let mut buf = [0u8; MAX_REPORT];
             // One NON-BLOCKING attempt on this slot's armed pipe.
             match crate::drivers::usb::interrupt_transfer(idx, &mut buf) {
-                // Idle: the armed pipe holds no report yet.
                 Ok(0) => {}
                 Ok(n) => {
                     let end = (n as usize).min(buf.len());
                     let mut evs = [(HidEvent::Axis { axis: 0, value: 0 }, false); MAX_PEND];
                     let m = apply_report(&mut store.slots[idx], &buf[..end], &mut evs);
                     push_pend(store, idx, &evs[..m]);
+                    store.rr = scan_slot(idx, 1);
                     return pop_pend(store);
                 }
-                // Error-retired: the controller path re-arms itself,
-                // so a transient stall must not kill the session —
-                // keep polling.
+                // Error-retired: the path re-arms itself — keep polling.
                 Err(_) => {}
             }
         }
         None
     }
+}
+
+/// Slot visited at `step` of a scan that starts at `start`, wrapping.
+fn scan_slot(start: usize, step: usize) -> usize {
+    (start + step) % MAX_SLOTS
 }
 
 /// Pop the oldest queued event.
@@ -211,9 +207,8 @@ fn pop_pend(store: &mut SessionStore) -> Option<(HidEvent, bool, usize)> {
     Some(ev)
 }
 
-/// Queue `slot`'s `evs` FIFO; a full queue drops the tail — capacity
-/// equals the max events one report can emit, and the 100 Hz consumer
-/// drains long before an overflow could only be caused by a stuck one.
+/// Queue `slot`'s `evs` FIFO; a full queue drops the tail (capacity =
+/// max events one report emits, so only a stuck consumer overflows).
 fn push_pend(store: &mut SessionStore, slot: usize, evs: &[(HidEvent, bool)]) {
     for (ev, init) in evs {
         if store.pend_len >= MAX_PEND {

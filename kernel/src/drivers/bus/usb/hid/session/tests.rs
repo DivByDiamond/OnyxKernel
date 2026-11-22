@@ -4,6 +4,7 @@
 //! drop. No MMIO anywhere; the attach/poll wrappers stay
 //! boot-probe/100 Hz MMIO paths.
 
+use super::MAX_SLOTS;
 use super::diff::{SlotSession, apply_report};
 use crate::drivers::usb::hid::report::fixtures::joystick_desc;
 use crate::drivers::usb::hid::{HidEvent, MAX_FIELDS, parse_report_desc};
@@ -240,4 +241,10 @@ fn snapshot_reports_baseline_state_and_counts() {
 #[test]
 fn unattached_session_snapshots_none() {
     assert!(SlotSession::empty().snapshot().is_none());
+}
+
+#[test]
+fn scan_rotates_from_the_cursor_and_visits_every_slot_once() {
+    let order: Vec<usize> = (0..MAX_SLOTS).map(|s| super::scan_slot(2, s)).collect();
+    assert_eq!(order, [2, 3, 0, 1]);
 }

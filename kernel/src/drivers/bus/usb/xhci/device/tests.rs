@@ -22,9 +22,9 @@ fn ctx_buf() -> [u32; CTX_DWS] {
 fn input_ctx_slot_matches_slot_ctx_encoding() {
     let mut buf = ctx_buf();
     // SAFETY: local u32-aligned buffer covering offsets 0..=96 (input
-    // control + slot + EP0 contexts); exclusive stack access. On the
-    // host G_XHCI.xfer_rings[0] is null, so the EP0 dequeue stays zero.
-    unsafe { set_input_ctx_slot(buf.as_mut_ptr() as *mut u8, 0, SPEED_FS, 8) };
+    // control + slot + EP0 contexts); exclusive stack access. No EP0
+    // ring on the host: dequeue 0, DCS clear.
+    unsafe { set_input_ctx_slot(buf.as_mut_ptr() as *mut u8, 0, SPEED_FS, 8, 0, false) };
     // Input control context: add slot + EP0 (flags 3), nothing dropped.
     assert_eq!(buf[0], 0);
     assert_eq!(buf[1], 3);
@@ -42,4 +42,25 @@ fn input_ctx_slot_matches_slot_ctx_encoding() {
     assert_eq!(buf[19], 0);
     // DW4: Average TRB Length 8.
     assert_eq!(buf[20], 8);
+}
+
+#[test]
+fn input_ctx_programs_the_devices_own_ep0_ring() {
+    // Per-device EP0 rings: the dequeue pointer and DCS come from the
+    // caller's ring, not a shared global.
+    let mut buf = ctx_buf();
+    // SAFETY: as above.
+    unsafe {
+        set_input_ctx_slot(
+            buf.as_mut_ptr() as *mut u8,
+            5,
+            SPEED_HS,
+            64,
+            0x1_8000_2000,
+            true,
+        )
+    };
+    assert_eq!(buf[9], 6 << 16); // root port index 5 → port 6
+    assert_eq!(buf[18], 0x8000_2001); // dequeue low | DCS
+    assert_eq!(buf[19], 1); // dequeue high
 }

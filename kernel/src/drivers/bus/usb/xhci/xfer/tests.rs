@@ -1,4 +1,5 @@
-use super::{DCI_EP0, completion_bytes, control_trbs, event_completes};
+use super::wait::event_completes;
+use super::{DCI_EP0, completion_bytes, control_trbs};
 use crate::drivers::usb::xhci::ring::{Trb, setup_trb};
 use onyx_core::errno::Errno;
 
@@ -89,13 +90,23 @@ fn event_filter_separates_control_and_interrupt_waits() {
     // A control completion (EP0, DCI 1) satisfies a control wait only —
     // never an interrupt wait (ruling 1: one shared event ring).
     let ctl = transfer_event(1, 1);
-    assert!(event_completes(&ctl, DCI_EP0));
-    assert!(!event_completes(&ctl, 3));
+    assert!(event_completes(&ctl, 1, DCI_EP0));
+    assert!(!event_completes(&ctl, 1, 3));
     // An interrupt completion (EP1 IN, DCI 3) satisfies an interrupt
     // wait only — never the control wait.
     let intr = transfer_event(1, 3);
-    assert!(event_completes(&intr, 3));
-    assert!(!event_completes(&intr, DCI_EP0));
+    assert!(event_completes(&intr, 1, 3));
+    assert!(!event_completes(&intr, 1, DCI_EP0));
+}
+
+#[test]
+fn event_filter_separates_devices_on_the_same_endpoint() {
+    // Two HID devices both use DCI 3: the slot id alone decides whose
+    // completion this is — the multi-device routing key.
+    let a = transfer_event(1, 3);
+    let b = transfer_event(2, 3);
+    assert!(event_completes(&a, 1, 3) && !event_completes(&a, 2, 3));
+    assert!(event_completes(&b, 2, 3) && !event_completes(&b, 1, 3));
 }
 
 #[test]
@@ -104,9 +115,9 @@ fn event_filter_ignores_command_and_port_events() {
     // changes satisfy no transfer wait: they are consumed and dropped.
     let mut ev = Trb::zero();
     ev.params[3] = (33 << 10) | 1; // COMMAND COMPLETE, slot 1, EP0 fields set
-    assert!(!event_completes(&ev, DCI_EP0));
-    assert!(!event_completes(&ev, 3));
+    assert!(!event_completes(&ev, 1, DCI_EP0));
+    assert!(!event_completes(&ev, 1, 3));
     ev.params[3] = (34 << 10) | 1; // PORT STATUS CHANGE
-    assert!(!event_completes(&ev, DCI_EP0));
-    assert!(!event_completes(&ev, 3));
+    assert!(!event_completes(&ev, 1, DCI_EP0));
+    assert!(!event_completes(&ev, 1, 3));
 }

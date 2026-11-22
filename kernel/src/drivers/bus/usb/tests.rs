@@ -23,6 +23,7 @@ fn dispatch_slot(owner: dev::Owner) -> dev::UsbSlot {
         ep_in: 0x81,
         max_packet: 8,
         interval: 10,
+        hc_slot: 0,
     }
 }
 

@@ -1,7 +1,8 @@
 //! xHCI bulk transfers: one Normal TRB on the endpoint's transfer ring.
 use onyx_core::errno::{Errno, KResult};
 
-use super::super::{G_XHCI, ring};
+use super::super::devs;
+use super::super::ring;
 use super::{completion_bytes, trb_addr_at, wait_transfer_event};
 
 /// Driver endpoint-context index for a USB endpoint address: 0 = EP0, then
@@ -17,41 +18,34 @@ pub(super) fn ep_ctx_index(endpoint: u8) -> u8 {
 
 /// # Safety
 ///
-/// Requires `init` to have run (controller operational) and this endpoint
-/// configured by the bring-up caller (its transfer ring published in
-/// `xfer_rings[idx]`); `G_XHCI.slot` must hold a granted, addressed slot.
-/// The caller serializes USB access (single-threaded path, SIE=0 per
-/// `crate::sync`), and `data` stays valid and DMA-addressable for the
-/// duration of the transfer.
+/// Requires `init` to have run (controller operational) and the device
+/// of controller slot `slot` addressed, with this endpoint configured
+/// by the bring-up caller (its transfer ring published in the
+/// per-device table). The caller serializes USB access
+/// (single-threaded path, SIE=0 per `crate::sync`), and `data` stays
+/// valid and DMA-addressable for the duration of the transfer.
 ///
-/// `dev_addr` is unused: xHCI addresses transfers by slot id (kept for
-/// URB parity with the EHCI/OHCI signatures). Direction comes from the
-/// endpoint address — the endpoint context carries it, not the TRB.
+/// The first parameter is the controller slot id: xHCI addresses
+/// transfers by slot (kept first for URB parity with the EHCI/OHCI
+/// signatures). Direction comes from the endpoint address — the
+/// endpoint context carries it, not the TRB.
 pub(crate) unsafe fn xhci_bulk_transfer(
-    _dev_addr: u8,
+    slot: u8,
     endpoint: u8,
     mut data: Option<&mut [u8]>,
 ) -> KResult<u32> {
-    // SAFETY: init allocated the controller rings; raw-ptr accesses to
-    // G_XHCI are transient on the single-owner path; the data buffer is
-    // caller-provided and valid for the transfer.
+    // SAFETY: init allocated the controller rings; the per-device
+    // table is single-owner here, with no reference held across the
+    // event wait; the data buffer is caller-provided and valid.
     unsafe {
-        let ctx = &raw mut G_XHCI;
-        if !(*ctx).operational {
+        if !super::super::is_operational() {
             return Err(Errno::NoSys);
-        }
-        let slot = (*ctx).slot;
-        if slot == 0 {
-            return Err(Errno::NoEnt);
         }
         let idx = ep_ctx_index(endpoint) as usize;
         if idx == 0 || idx >= 32 {
             return Err(Errno::Inval); // bulk never runs on EP0
         }
-        let ring_ptr = (*ctx).xfer_rings[idx];
-        if ring_ptr.is_null() {
-            return Err(Errno::NoEnt); // endpoint not configured yet
-        }
+        let dci = (idx + 1) as u8; // DCI = context index
         let data_len = data.as_ref().map_or(0, |d| d.len());
         if data_len == 0 {
             return Ok(0);
@@ -69,12 +63,18 @@ pub(crate) unsafe fn xhci_bulk_transfer(
         trb.params[2] = data_len as u32;
         trb.set_type(ring::TRB_NORMAL);
         trb.set_flags(ring::TRB_IOC);
-        let ring = &mut *ring_ptr;
-        // One Normal TRB: its address is the wait's wanted pointer.
-        let want = [trb_addr_at(ring, 0)];
-        ring::enqueue_trb(ring, &trb);
-        ring::ring_doorbell(slot, (idx + 1) as u8); // DCI = context index
-        let ev = wait_transfer_event((idx + 1) as u8, &want)?;
+        let want = {
+            let ring = devs::dev(slot)
+                .ok_or(Errno::NoEnt)?
+                .ring_mut(dci)
+                .ok_or(Errno::NoEnt)?; // endpoint not configured yet
+            // One Normal TRB: its address is the wait's wanted pointer.
+            let want = [trb_addr_at(ring, 0)];
+            ring::enqueue_trb(ring, &trb);
+            want
+        };
+        ring::ring_doorbell(slot, dci);
+        let ev = wait_transfer_event(slot, dci, &want)?;
         completion_bytes(&ev, data_len as u32)
     }
 }

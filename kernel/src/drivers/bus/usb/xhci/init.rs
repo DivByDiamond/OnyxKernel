@@ -63,10 +63,6 @@ pub unsafe fn init(base: usize) -> KResult<()> {
                 dequeue: 0,
                 cycle: false,
             },
-            xfer_rings: [ptr::null_mut(); 32],
-            slot: 0,
-            dev_port: 0,
-            dev_speed: 0,
             operational: false,
         };
         regs::op_w32(obase, regs::OP_USBCMD, regs::CMD_HCRST);
@@ -117,15 +113,6 @@ pub unsafe fn init(base: usize) -> KResult<()> {
         let cmd_ring = ring::alloc_ring(32)?;
         let cmd_phys = cmd_ring.phys;
         G_XHCI.cmd_ring = cmd_ring;
-        // EP0 transfer ring: control transfers enqueue here, and
-        // set_input_ctx_slot programs its dequeue pointer into the input
-        // context before Address Device.
-        let ep0_ring = ring::alloc_ring(32)?;
-        // SAFETY: fresh page-sized zeroed PMM allocation; ptr::write fully
-        // initializes the TrbRing before it is published in xfer_rings.
-        let ep0_ptr = pmm::alloc_zero()? as *mut ring::TrbRing;
-        ptr::write(ep0_ptr, ep0_ring);
-        G_XHCI.xfer_rings[0] = ep0_ptr;
         regs::op_w64(
             obase,
             regs::OP_CRCR,

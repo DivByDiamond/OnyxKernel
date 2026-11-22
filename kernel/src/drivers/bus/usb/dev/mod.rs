@@ -21,9 +21,8 @@ pub enum Owner {
     Ehci,
 }
 
-/// Registry capacity: one slot per concurrently supported device (the
-/// single-device boot enumeration fills one; the rest stay for the
-/// multi-device follow-up).
+/// Registry capacity: one slot per concurrently supported device. The
+/// registry index is the device's /dev/jsN number.
 pub const MAX_SLOTS: usize = 4;
 
 /// One enumerated USB device as seen by registry consumers: the
@@ -45,6 +44,10 @@ pub struct UsbSlot {
     pub ep_in: u8,
     pub max_packet: u16,
     pub interval: u8,
+    /// Controller-side handle of the device: the xHCI slot id (0 on
+    /// EHCI/OHCI, which address devices by `addr`). Routes xHCI control
+    /// transfers and the interrupt poll to this device's own rings.
+    pub hc_slot: u8,
 }
 
 /// Inactive-slot template; `owner` is never read while `active` is false.
@@ -59,6 +62,7 @@ const EMPTY: UsbSlot = UsbSlot {
     ep_in: 0,
     max_packet: 0,
     interval: 0,
+    hc_slot: 0,
 };
 
 // Registry access is serialized on the device lock: the boot probe runs
@@ -81,6 +85,20 @@ pub fn slot(idx: usize) -> Option<UsbSlot> {
     };
     USB_DEV_LOCK.unlock();
     if s.active { Some(s) } else { None }
+}
+
+/// Does the registry still have an inactive position? The boot probe
+/// checks before bringing up another device, so a full registry costs
+/// no controller slot.
+pub fn has_free_slot() -> bool {
+    USB_DEV_LOCK.lock();
+    // SAFETY: USB_DEV_LOCK serializes all registry access.
+    let free = unsafe {
+        let slots = &raw const SLOTS;
+        (*slots).iter().any(|d| !d.active)
+    };
+    USB_DEV_LOCK.unlock();
+    free
 }
 
 /// Store `s` into slot `idx` (under `USB_DEV_LOCK`). `Err(Errno::Range)`

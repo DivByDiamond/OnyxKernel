@@ -22,6 +22,11 @@
 | `JS_LOCK` | Кольца joydev-записей /dev/jsN (`JS_RINGS`) | `kernel/src/fs/devfs/js.rs` | Leaf. Пуш идёт под `DRAIN_LOCK` (input drain, порядок `DRAIN_LOCK → JS_LOCK`); `js_read` берёт его отдельно; open-хук берёт `USB_HID_LOCK` (внутри `hid::baseline`, первым — клейм латчится только на живой baseline), затем `STICK_CLAIM_LOCK`, затем `JS_LOCK` — строго по одному, без вложения; никогда не берётся до `DRAIN_LOCK` |
 
 Что НЕ требует лока:
+- xHCI per-device таблица `DEVS` (`usb/xhci/devs.rs`: кольца, страницы, armed-канал
+  и FIFO отложенных завершений каждого controller slot): single-owner как `G_XHCI` —
+  boot-проба, затем сериализованный SIE=0 USB-poll. Ссылки на таблицу не держатся
+  через ожидание команд/событий (оно заходит в таблицу, чтобы припарковать чужие
+  завершения); общий event ring разбирается по (slot id, DCI);
 - per-hart структуры: `G_PROCBUF_HARTS[hart]` (procfs, `fs/procfs/content.rs`),
   `G_HART_CURRENT[hart]` (пишет только владелец-харт);
 - атомики: `G_NEXT_PID`, `G_USER_PAGES`, `G_NEED_RESCHED`, `BAD_CKSUM`;

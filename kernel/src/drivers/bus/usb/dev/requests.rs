@@ -70,6 +70,13 @@ pub trait ControlBus {
     /// completes: every later transfer is issued to `addr` instead of
     /// the address the bus was constructed with.
     fn set_addr(&mut self, addr: u8);
+
+    /// Controller-side handle of the target device (the xHCI slot id),
+    /// recorded in the registry slot at enumeration. Buses over
+    /// controllers that address by USB address report 0.
+    fn hc_slot(&self) -> u8 {
+        0
+    }
 }
 
 /// Live bus routing one enumerated device's control transfers to its
@@ -81,6 +88,8 @@ pub trait ControlBus {
 pub struct LiveBus {
     owner: Owner,
     dev_addr: u8,
+    /// xHCI slot id of the target (0 for the other controllers).
+    hc_slot: u8,
 }
 
 impl LiveBus {
@@ -92,7 +101,18 @@ impl LiveBus {
     /// lock for the whole transfer. Construct one per enumerated device
     /// address.
     pub unsafe fn new(owner: Owner, dev_addr: u8) -> Self {
-        LiveBus { owner, dev_addr }
+        LiveBus {
+            owner,
+            dev_addr,
+            hc_slot: 0,
+        }
+    }
+
+    /// Target the xHCI device of controller slot `hc_slot`: xHCI
+    /// transfers are routed by slot id, not by USB address.
+    pub fn with_hc_slot(mut self, hc_slot: u8) -> Self {
+        self.hc_slot = hc_slot;
+        self
     }
 }
 
@@ -107,7 +127,7 @@ impl ControlBus for LiveBus {
         unsafe {
             match self.owner {
                 Owner::Xhci => crate::drivers::usb::xhci::xhci_control_transfer(
-                    self.dev_addr,
+                    self.hc_slot,
                     setup,
                     data,
                     data_in,
@@ -136,6 +156,10 @@ impl ControlBus for LiveBus {
 
     fn set_addr(&mut self, dev_addr: u8) {
         self.dev_addr = dev_addr;
+    }
+
+    fn hc_slot(&self) -> u8 {
+        self.hc_slot
     }
 }
 
