@@ -71,6 +71,13 @@ pub trait ControlBus {
     /// the address the bus was constructed with.
     fn set_addr(&mut self, addr: u8);
 
+    /// Does the controller assign the device address itself? xHCI does
+    /// (Address Device command) and forbids the driver sending
+    /// SET_ADDRESS on its own.
+    fn assigns_address(&self) -> bool {
+        false
+    }
+
     /// Controller-side handle of the target device (the xHCI slot id),
     /// recorded in the registry slot at enumeration. Buses over
     /// controllers that address by USB address report 0.
@@ -160,6 +167,10 @@ impl ControlBus for LiveBus {
 
     fn hc_slot(&self) -> u8 {
         self.hc_slot
+    }
+
+    fn assigns_address(&self) -> bool {
+        matches!(self.owner, Owner::Xhci)
     }
 }
 

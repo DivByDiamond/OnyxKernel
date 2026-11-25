@@ -1,6 +1,6 @@
 //! The USB enumeration sequence over any [`ControlBus`]: device-
 //! descriptor head read at the default address, SET_ADDRESS(1) with the
-//! bus re-targeting, full descriptor reads, configuration-blob parse,
+//! bus re-targeting (unless the controller assigns addresses), full descriptor reads, configuration-blob parse,
 //! first-HID-interface selection and SET_CONFIGURATION.
 
 use onyx_core::errno::{Errno, KResult};
@@ -68,7 +68,8 @@ fn map_desc_err(e: DescError) -> Errno {
 /// (`attributes & 0x03 == 0x03`, `address & 0x80 != 0`) and issue
 /// SET_CONFIGURATION(1).
 ///
-/// Returns the filled slot with `addr = 1` on success; the caller
+/// Returns the filled slot on success (`addr` is 1, or 0 when the
+/// controller assigned an address the driver never sees); the caller
 /// registers it via [`super::set_slot`]. Returns
 /// `Err(Errno::NoEnt)` when the parsed configuration has no interface
 /// with `class == CLASS_HID` and an interrupt-IN endpoint, and
@@ -96,9 +97,15 @@ pub fn enumerate(bus: &mut dyn ControlBus, owner: Owner) -> KResult<UsbSlot> {
     }
 
     // Step 2: address the device; every later transfer goes through a
-    // bus targeted at the new address (ruling 3).
-    bus.control(&set_address(ENUM_ADDR), None, false)?;
-    bus.set_addr(ENUM_ADDR);
+    // bus targeted at the new address (ruling 3). A controller that
+    // addresses devices itself already has, and gets no SET_ADDRESS.
+    let addr = if bus.assigns_address() {
+        0
+    } else {
+        bus.control(&set_address(ENUM_ADDR), None, false)?;
+        bus.set_addr(ENUM_ADDR);
+        ENUM_ADDR
+    };
 
     // Step 3: the full device descriptor — vendor/product identity.
     let mut dev_raw = [0u8; DEV_DESC_LEN as usize];
@@ -171,7 +178,7 @@ pub fn enumerate(bus: &mut dyn ControlBus, owner: Owner) -> KResult<UsbSlot> {
     Ok(UsbSlot {
         active: true,
         owner,
-        addr: ENUM_ADDR,
+        addr,
         vendor: dev.vendor,
         product: dev.product,
         class: CLASS_HID,
@@ -182,3 +189,6 @@ pub fn enumerate(bus: &mut dyn ControlBus, owner: Owner) -> KResult<UsbSlot> {
         hc_slot: bus.hc_slot(),
     })
 }
+
+#[cfg(test)]
+mod tests;

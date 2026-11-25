@@ -32,7 +32,8 @@ pub const MAX_SLOTS: usize = 4;
 pub struct UsbSlot {
     pub active: bool,
     pub owner: Owner,
-    /// Device address assigned during the enumeration pass.
+    /// Device address assigned during the enumeration pass; 0 when the
+    /// controller assigned it (xHCI routes by `hc_slot`).
     pub addr: u8,
     pub vendor: u16,
     pub product: u16,

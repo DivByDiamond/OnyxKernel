@@ -58,4 +58,5 @@ EHCI/OHCI multi-device (на SG2000 по одному устройству на 
 `OnyxOS/scripts/qemu-jstest-smoke.sh` (+ `qemu-jstest-drive.py`): S-mode ядро,
 диск OnyxFS, qemu-xhci + usb-tablet, QMP `input-send-event`. Проверено live:
 init-бёрст js0, live оси и кнопка 0 down/up, чистый выход `jstest -t`. Claim курсора
-теперь per-slot. Не подтверждено live: события второго стика (см. todo.md, USB).
+теперь per-slot. События второго стика подтверждены live 2026-11-25 после
+отказа от `SET_ADDRESS` на xHCI (см. todo.md, USB).
