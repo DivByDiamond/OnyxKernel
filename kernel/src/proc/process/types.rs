@@ -60,15 +60,6 @@ pub struct Proc {
     pub root_pa: u64,
     pub entry: u64,
     pub ustack: u64,
-    /// argv array base established by execve/spawn (`tf.a1` at entry): the
-    /// canonical argv pointer restored into a forked child's a1, since the
-    /// parent's live a1 is caller-saved and may be clobbered by the time it
-    /// calls fork. 0 when the process was spawned without arguments.
-    pub argv_sp: u64,
-    /// envp array base established by execve (`tf.a2` at entry), restored
-    /// into a forked child's a2 the same way. 0 when the process was
-    /// spawned without an environment (SYS_spawn passes none).
-    pub envp_sp: u64,
     pub heap_brk: u64,
     pub mmap_brk: u64,
     pub cwd: [u8; 256],
@@ -149,8 +140,6 @@ impl Proc {
             root_pa: 0,
             entry: 0,
             ustack: 0,
-            argv_sp: 0,
-            envp_sp: 0,
             heap_brk: 0,
             mmap_brk: 0x3000_0000,
             cwd: [0; 256],
