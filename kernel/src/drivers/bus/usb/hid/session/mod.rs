@@ -41,7 +41,7 @@ mod tests;
 
 pub use diff::Baseline;
 pub(crate) use diff::{SlotSession, apply_report};
-pub(crate) use fetch::fetch_table;
+use fetch::fetch_session;
 
 /// Interrupt-IN report buffer: full/low-speed interrupt endpoints cap
 /// at 64 bytes (USB 2.0 §5.6.3) — the same range the arm paths
@@ -112,7 +112,7 @@ static mut HID_SESSIONS: SessionStore = SessionStore::new();
 /// call.
 pub unsafe fn attach(slot_idx: usize, bus: &mut dyn ControlBus) -> KResult<()> {
     let s = registry_slot(slot_idx).ok_or(Errno::NoEnt)?;
-    let table = fetch_table(bus, s.iface)?;
+    let session = fetch_session(bus, s.iface)?;
     // SAFETY: boot-probe context per the contract; the registry lock
     // is free here (dev::slot released it before the control transfers).
     unsafe {
@@ -128,7 +128,7 @@ pub unsafe fn attach(slot_idx: usize, bus: &mut dyn ControlBus) -> KResult<()> {
     // validated in range by registry_slot (MAX_SLOTS-bounded).
     unsafe {
         let store = &mut *(&raw mut HID_SESSIONS);
-        store.slots[slot_idx] = SlotSession::from_table(table);
+        store.slots[slot_idx] = session;
     }
     USB_HID_LOCK.unlock();
     Ok(())
