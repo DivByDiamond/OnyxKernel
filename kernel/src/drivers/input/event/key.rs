@@ -16,6 +16,8 @@ pub(super) fn update_modifiers(flags: &AtomicU8, code: KeyCode, down: bool) {
         KeyCode::RightShift => 2,
         KeyCode::LeftCtrl => 4,
         KeyCode::RightCtrl => 8,
+        KeyCode::LeftAlt => 32,
+        KeyCode::RightAlt => 64,
         KeyCode::CapsLock if down => {
             flags.fetch_xor(16, Ordering::AcqRel);
             return;
@@ -27,6 +29,12 @@ pub(super) fn update_modifiers(flags: &AtomicU8, code: KeyCode, down: bool) {
     } else {
         flags.fetch_and(!bit, Ordering::AcqRel);
     }
+}
+
+/// Current modifier flag byte (shift 1|2, ctrl 4|8, caps 16, alt 32|64);
+/// the hotkey intercept maps it to chord bits.
+pub(super) fn flags() -> u8 {
+    MODIFIERS.load(Ordering::Acquire)
 }
 
 /// Track a key event and, on press, feed its TTY bytes.

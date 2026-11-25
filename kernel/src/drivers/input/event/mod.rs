@@ -11,7 +11,8 @@
 //!
 //! Module layout (responsibility split):
 //! - this file: public event types, handler registration and dispatch;
-//! - [`key`]: modifier tracking and key → TTY byte translation.
+//! - [`key`]: modifier tracking and key → TTY byte translation;
+//! - `hotkey` (sibling module): chords intercepted before [`key`].
 use super::mouse;
 use crate::drivers::bus::usb::hid::{self, HidEvent};
 use crate::drivers::virtio_input;
@@ -123,9 +124,14 @@ pub fn on_event(h: Handler) {
     }
 }
 
-/// Dispatch one event: mouse model, TTY FIFO (for Key down), then handler.
+/// Dispatch one event: hotkey intercept, mouse model, TTY FIFO (for Key
+/// down), then handler. A key that completes a registered hotkey chord is
+/// swallowed before `key::handle_key`: it never reaches the TTY, but the
+/// handler still sees the raw event.
 pub fn dispatch(ev: Event) {
-    if let Event::Key { code, down } = ev {
+    if let Event::Key { code, down } = ev
+        && !crate::drivers::input::hotkey::intercept(code, down, key::flags())
+    {
         key::handle_key(code, down);
     }
     mouse::handle(ev);
@@ -140,25 +146,32 @@ pub fn dispatch(ev: Event) {
 /// Feed one HID event into the unified stream: first the /dev/jsN ring
 /// (the raw event form — it fills regardless of claim state), then the
 /// raw `Stick` event to the global handler, then, while the cursor is
-/// unclaimed, the mapped mouse event.
+/// unclaimed (per slot), the mapped mouse event.
 ///
 /// `slot` is the attached session's registry slot, carried on the poll
 /// result: the ring push routes by the session that produced the
 /// event, never by registry class — a HID-class slot without a
 /// session (the dual-controller keyboard case) must not steal the
 /// stick's records.
-fn feed_stick(hev: HidEvent, is_init: bool, slot: usize, mut output: impl FnMut(Event)) {
+fn feed_stick(hev: HidEvent, is_init: bool, slot: usize, output: impl FnMut(Event)) {
     // Ring push before any claim gating (ruling: every polled event
     // lands in the attached session's ring). Out-of-range slots are
     // ignored inside push_event — the drain only ever carries slot
     // ids the session layer validated at attach time.
     crate::fs::devfs::push_event(slot, hev, is_init);
+    forward_stick(hev, slot, output);
+}
+
+/// The non-ring half of [`feed_stick`]: the raw `Stick*` event, then
+/// the cursor-mapped event while slot `slot`'s stick is unclaimed.
+/// Split out so claim gating is testable without touching a ring.
+fn forward_stick(hev: HidEvent, slot: usize, mut output: impl FnMut(Event)) {
     let raw = match hev {
         HidEvent::Axis { axis, value } => Event::Stick { axis, value },
         HidEvent::Button { index, down } => Event::StickButton { index, down },
     };
     output(raw);
-    if !stick_cursor::claimed()
+    if !stick_cursor::claimed(slot)
         && let Some(mapped) = stick_cursor::map(hev)
     {
         output(mapped);
@@ -167,9 +180,9 @@ fn feed_stick(hev: HidEvent, is_init: bool, slot: usize, mut output: impl FnMut(
 
 static DRAIN_LOCK: crate::sync::SpinLock = crate::sync::SpinLock::new();
 
-/// Serializes the tests that mutate the global stick-claim flag (the
+/// Serializes the tests that mutate the stick-claim counters (the
 /// stick_cursor integration test and the devfs js hooks test), so
-/// parallel test harts cannot interleave set_claimed calls — the
+/// parallel test harts cannot interleave claim/release calls — the
 /// net::lock::test_serial pattern.
 #[cfg(test)]
 pub(crate) static CLAIM_TEST_GUARD: std::sync::Mutex<()> = std::sync::Mutex::new(());

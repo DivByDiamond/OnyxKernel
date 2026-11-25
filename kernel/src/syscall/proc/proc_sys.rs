@@ -124,8 +124,43 @@ pub(in crate::syscall) unsafe fn sys_kill(pid: u32, signal: u32) -> i64 {
             return Errno::Perm.as_i64();
         }
         match proc::signal_send(pid, signal) {
-            Ok(()) => 0,
+            Ok(()) => {
+                job_control_hooks(pid, signal);
+                0
+            }
             Err(e) => e.as_i64(),
+        }
+    }
+}
+
+/// Desktop switching hooks on top of SIGSTOP/SIGCONT (OnyxDesktop M3).
+/// SIGCONT makes the resumed process the foreground (Ctrl+C target) and
+/// the owner of its /dev/jsN nodes with a re-synced ring
+/// (`devfs::js_resume`); stopping the foreground hands the foreground to
+/// the hotkey owner (the desktop daemon), so a Ctrl+C typed at the desktop
+/// never lands on a stopped app. Stopped processes keep their fds and
+/// claims untouched.
+///
+/// # Safety
+///
+/// Syscall context after a successful `signal_send`; takes
+/// `proc_list_lock` only inside `by_pid`.
+unsafe fn job_control_hooks(pid: u32, signal: u32) {
+    // SAFETY: by_pid locks the list for the lookup; the node stays valid
+    // until reaped, and the fd table is only read (copied) here.
+    unsafe {
+        if signal == proc::SIGCONT {
+            proc::set_foreground(pid);
+            if let Some(p) = proc::by_pid(pid) {
+                crate::fs::devfs::js_resume(pid, &p.fds);
+            }
+        } else if (signal == proc::SIG_STOP || signal == proc::SIG_TSTP)
+            && proc::foreground() == pid
+        {
+            let desk = crate::drivers::input::hotkey::owner();
+            if desk != 0 {
+                proc::set_foreground(desk);
+            }
         }
     }
 }

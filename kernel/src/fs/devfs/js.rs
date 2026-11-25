@@ -11,11 +11,11 @@
 //! `Errno::Again`, never a fake EOF (`Ok(0)`). The open hook (the
 //! vfs/fd/file.rs DEVFS branch, the PTMX pattern) claims the stick
 //! and synthesizes the `JS_EVENT_INIT` burst from the session
-//! baseline — axes first, then buttons; closing ANY js fd releases
-//! the claim. The kernel keeps no per-fd refcount: a single claimed
-//! flag is the contract (single-reader expectation, like the PTY pair
-//! lifetime) — a second reader shares the claim, and whichever fd
-//! closes first unclaims for both.
+//! baseline — axes first, then buttons. The claim is a per-slot open
+//! count (`stick_cursor::claim`/`release`): closing one js fd drops
+//! only its own node's count. Known limit: a close whose open did not
+//! latch (no session) or a dup'd fd closed twice decrements anyway
+//! (saturating at 0) — no per-fd bookkeeping exists.
 //!
 //! Lock order: the push side runs under `DRAIN_LOCK` → `JS_LOCK`,
 //! never reversed; `js_read` takes `JS_LOCK` alone; `js_claim` takes
@@ -32,16 +32,18 @@ mod rec;
 
 use rec::{INIT_BURST_CAP, JsRec};
 pub use rec::{JS_EVENT_AXIS, JS_EVENT_BUTTON, JS_EVENT_INIT, JS_REC_BYTES};
+pub use resume::js_resume;
 
 use core::ptr;
 use onyx_core::errno::{Errno, KResult};
 
 use crate::drivers::bus::usb::dev::MAX_SLOTS;
-use crate::drivers::bus::usb::hid::{HidEvent, baseline, stick_slots};
+use crate::drivers::bus::usb::hid::{Baseline, HidEvent, baseline, stick_slots};
 use crate::drivers::input::event::stick_cursor;
 
 #[cfg(test)]
 mod record_tests;
+mod resume;
 #[cfg(test)]
 mod tests;
 
@@ -196,27 +198,43 @@ pub fn js_claim(idx: usize) {
     let Some(base) = baseline(idx) else {
         return; // idx is out of range or has no session: nothing to claim
     };
-    stick_cursor::set_claimed(true);
+    stick_cursor::claim(idx);
+    stick_cursor::set_owner(idx, crate::proc::current_pid());
+    push_burst(idx, &base, false);
+}
+
+/// Synthesize the init burst from `base` into slot `idx`'s ring; with
+/// `flush` the stale history is dropped first (the SIGCONT re-sync: a
+/// stopped owner's ring holds only the last `JS_RING_RECS` records, an
+/// incoherent tail the resumed reader must not replay).
+fn push_burst(idx: usize, base: &Baseline, flush: bool) {
     let now = now_ms();
-    let mut recs = [const { JsRec::zero() }; INIT_BURST_CAP];
-    let n = rec::init_recs(&base, now, &mut recs);
     JS_LOCK.lock();
-    // SAFETY: JS_LOCK serializes ring access; baseline() returned
-    // Some, so idx < MAX_SLOTS.
+    // SAFETY: JS_LOCK serializes ring access; callers hold a baseline
+    // for `idx`, so idx < MAX_SLOTS.
     unsafe {
-        let rings = &mut *(&raw mut JS_RINGS);
-        for rec in &recs[..n] {
-            rings[idx].push(*rec);
-        }
+        burst_into(&mut (*(&raw mut JS_RINGS))[idx], base, now, flush);
     }
     JS_LOCK.unlock();
 }
 
-/// Close hook: closing ANY /dev/jsN fd releases the single stick
-/// claim — no per-fd refcount exists (single-reader contract, see the
-/// module docs), like the PTY pair's close lifetime.
-pub fn js_release() {
-    stick_cursor::set_claimed(false);
+/// Ring-local half of [`push_burst`] (testable without the globals).
+fn burst_into(ring: &mut Ring, base: &Baseline, now: u32, flush: bool) {
+    let mut recs = [const { JsRec::zero() }; INIT_BURST_CAP];
+    let n = rec::init_recs(base, now, &mut recs);
+    if flush {
+        *ring = Ring::new();
+    }
+    for rec in &recs[..n] {
+        ring.push(*rec);
+    }
+}
+
+/// Close hook: drop one claim on slot `idx`. The claim is a per-slot
+/// open count, so closing js0 never releases js1, and one of two
+/// readers of the same node closing keeps the other's claim.
+pub fn js_release(idx: usize) {
+    stick_cursor::release(idx);
 }
 
 /// Does registry slot `idx` currently hold an attached stick session?

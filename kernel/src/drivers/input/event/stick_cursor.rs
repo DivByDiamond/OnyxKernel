@@ -1,10 +1,11 @@
 //! Stick → cursor mapper with claim semantics.
 //!
-//! While no userspace consumer holds the joystick (the /dev/jsN
-//! open/close path of the devfs ring, task 9, calls [`set_claimed`]),
-//! the 100 Hz input drain feeds every HID event through [`map`] and
-//! dispatches the result as ordinary mouse events — an unclaimed
-//! stick drives the kernel cursor. A claimed stick stops mapping:
+//! While no userspace consumer holds a given stick (the /dev/jsN
+//! open/close path of the devfs ring calls [`claim`]/[`release`], a
+//! per-slot open count), the 100 Hz input drain feeds that stick's HID
+//! events through [`map`] and dispatches the result as ordinary mouse
+//! events — an unclaimed stick drives the kernel cursor. A claimed
+//! stick stops mapping (other sticks are unaffected):
 //! only the raw `Event::Stick*` stream flows on to the global handler
 //! (and, from task 9 on, the per-device ring).
 //!
@@ -18,6 +19,7 @@
 //! `STICK_CLAIM_LOCK` alone — never the reverse.
 
 use super::{Event, MouseButton};
+use crate::drivers::bus::usb::dev::MAX_SLOTS;
 use crate::drivers::bus::usb::hid::HidEvent;
 
 /// Below this |value| an axis never emits a cursor event.
@@ -32,28 +34,91 @@ pub const CURSOR_AXIS_Y: u8 = 1;
 pub const CURSOR_BUTTON: u8 = 0;
 
 static STICK_CLAIM_LOCK: crate::sync::SpinLock = crate::sync::SpinLock::new();
-static mut G_CLAIMED: bool = false;
+/// Per-slot count of open /dev/jsN fds that latched a claim. Per slot
+/// (not global): closing js0 must not hand js1's stick back to the
+/// cursor mapper.
+static mut G_CLAIMS: [u8; MAX_SLOTS] = [0; MAX_SLOTS];
+/// Per-slot input owner: the pid that last opened (or was resumed
+/// with) the node — the foreground consumer the desktop switches to.
+/// 0 = no known owner. Informational for the switcher: a SIGSTOP of
+/// the owner never drops the claim (the app still has the fd open),
+/// only closing the last fd does.
+static mut G_OWNERS: [u32; MAX_SLOTS] = [0; MAX_SLOTS];
 
-/// Claim (true) or release (false) the stick as a userspace joystick.
-/// Called from the /dev/jsN open/close path (task 9); kernel context
-/// with interrupts disabled, the same discipline `MOUSE_LOCK` documents.
-pub fn set_claimed(claimed: bool) {
+/// Make `pid` the owner of slot `slot` (open, or SIGCONT resume).
+/// Out-of-range slots are ignored.
+pub fn set_owner(slot: usize, pid: u32) {
+    if slot >= MAX_SLOTS {
+        return;
+    }
     STICK_CLAIM_LOCK.lock();
-    // SAFETY: STICK_CLAIM_LOCK serializes the flag; callers run with
-    // interrupts disabled as crate::sync requires. Direct place access,
-    // no reference to the static is taken (the fb/mod.rs pattern).
+    // SAFETY: STICK_CLAIM_LOCK serializes the owner table; slot was
+    // bounds-checked; no reference to the static is taken.
     unsafe {
-        G_CLAIMED = claimed;
+        G_OWNERS[slot] = pid;
     }
     STICK_CLAIM_LOCK.unlock();
 }
 
-/// Is a userspace consumer currently claiming the stick?
-pub fn claimed() -> bool {
+/// Owner pid of `slot` (0 = none or out of range).
+pub fn owner(slot: usize) -> u32 {
+    if slot >= MAX_SLOTS {
+        return 0;
+    }
     STICK_CLAIM_LOCK.lock();
-    // SAFETY: the lock excludes every devfs writer of the flag; plain
-    // copy-out, no reference taken.
-    let value = unsafe { G_CLAIMED };
+    // SAFETY: as in `set_owner`; plain copy-out.
+    let pid = unsafe { G_OWNERS[slot] };
+    STICK_CLAIM_LOCK.unlock();
+    pid
+}
+
+/// Take one claim on registry slot `slot` (a /dev/jsN open that
+/// latched on a live baseline). Out-of-range slots are ignored; the
+/// count saturates. Kernel context with interrupts disabled, the same
+/// discipline `MOUSE_LOCK` documents.
+pub fn claim(slot: usize) {
+    if slot >= MAX_SLOTS {
+        return;
+    }
+    STICK_CLAIM_LOCK.lock();
+    // SAFETY: STICK_CLAIM_LOCK serializes the counters; slot < MAX_SLOTS
+    // was checked above; direct place access, no reference to the
+    // static is taken (the fb/mod.rs pattern).
+    unsafe {
+        G_CLAIMS[slot] = G_CLAIMS[slot].saturating_add(1);
+    }
+    STICK_CLAIM_LOCK.unlock();
+}
+
+/// Drop one claim on `slot` (a /dev/jsN close). The count saturates at
+/// zero: a close whose open never latched (session-less slot) or a
+/// double close of a dup'd fd cannot underflow. Out-of-range ignored.
+pub fn release(slot: usize) {
+    if slot >= MAX_SLOTS {
+        return;
+    }
+    STICK_CLAIM_LOCK.lock();
+    // SAFETY: as in `claim`.
+    unsafe {
+        G_CLAIMS[slot] = G_CLAIMS[slot].saturating_sub(1);
+        // The last close leaves nobody to own the stick.
+        if G_CLAIMS[slot] == 0 {
+            G_OWNERS[slot] = 0;
+        }
+    }
+    STICK_CLAIM_LOCK.unlock();
+}
+
+/// Is a userspace consumer currently claiming the stick of `slot`?
+/// Out-of-range slots are never claimed.
+pub fn claimed(slot: usize) -> bool {
+    if slot >= MAX_SLOTS {
+        return false;
+    }
+    STICK_CLAIM_LOCK.lock();
+    // SAFETY: the lock excludes every writer of the counters; plain
+    // copy-out, no reference taken; slot < MAX_SLOTS.
+    let value = unsafe { G_CLAIMS[slot] } > 0;
     STICK_CLAIM_LOCK.unlock();
     value
 }
@@ -95,5 +160,7 @@ pub fn map(event: HidEvent) -> Option<Event> {
     }
 }
 
+#[cfg(test)]
+mod claim_tests;
 #[cfg(test)]
 mod tests;

@@ -16,7 +16,7 @@ mod vnode;
 pub use blk::{blk_ino, is_blk_ino};
 pub use js::{
     DEVFS_JS_BASE_INO, JS_EVENT_AXIS, JS_EVENT_BUTTON, JS_EVENT_INIT, is_js_ino, js_claim, js_ino,
-    js_read, js_release, push_event,
+    js_read, js_release, js_resume, push_event,
 };
 pub use pty::pty_ioctl::pty_ioctl;
 pub use pty::pty_ioctl::{TIOCGPTN, TIOCGWINSZ, TIOCSWINSZ};
@@ -24,8 +24,8 @@ pub use pty::pty_nodes::{
     DEVFS_PTMX_INO, is_pty_ino, pty_poll, ptym_ino, ptym_ino_idx, ptys_ino_idx,
 };
 pub use vnode::{
-    FB_IOCTL_CLAIM_GRAPHICS, FB_IOCTL_GET_INFO, FB_IOCTL_RELEASE_GRAPHICS, ioctl, mmap,
-    mmap_prefix, read, stat, write,
+    FB_IOCTL_CLAIM_GRAPHICS, FB_IOCTL_GET_INFO, FB_IOCTL_HOTKEY_CLEAR, FB_IOCTL_HOTKEY_POLL,
+    FB_IOCTL_HOTKEY_SET, FB_IOCTL_RELEASE_GRAPHICS, ioctl, mmap, mmap_prefix, read, stat, write,
 };
 
 use pty::pty_nodes;
@@ -191,9 +191,14 @@ pub fn readdir_entry(idx: u32, name_out: *mut u8, name_len: usize) -> Option<(u3
 fn copy_name(name: &[u8], out: *mut u8, max_len: usize) {
     let n = name.len().min(max_len);
     // SAFETY: n <= max_len by construction, so the copy stays within the
-    // caller-provided name_out buffer of max_len bytes (no NUL is written
-    // by this helper).
+    // caller-provided name_out buffer of max_len bytes; the NUL terminator
+    // is written only when n < max_len (still inside the buffer). Without
+    // it a shorter name ("js0") kept the tail of the previous entry
+    // ("blk0") and the shell listed "js00".
     unsafe {
         ptr::copy_nonoverlapping(name.as_ptr(), out, n);
+        if n < max_len {
+            out.add(n).write(0);
+        }
     }
 }

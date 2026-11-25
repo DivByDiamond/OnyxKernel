@@ -163,6 +163,30 @@ pub fn mmap_prefix(ino: u32) -> u64 {
 pub const FB_IOCTL_GET_INFO: u64 = 0x4600;
 pub const FB_IOCTL_CLAIM_GRAPHICS: u64 = 0x46F0;
 pub const FB_IOCTL_RELEASE_GRAPHICS: u64 = 0x46F1;
+/// Register a hotkey chord (arg packs id/mods/code, see `input::hotkey`);
+/// claim owner only.
+pub const FB_IOCTL_HOTKEY_SET: u64 = 0x46F2;
+/// Pop the next pending hotkey id (0 = none); claim owner only.
+pub const FB_IOCTL_HOTKEY_POLL: u64 = 0x46F3;
+/// Drop every registered hotkey; claim owner only.
+pub const FB_IOCTL_HOTKEY_CLEAR: u64 = 0x46F4;
+
+/// The three hotkey requests are valid only for the process that holds
+/// the display claim: the desktop daemon owns both the screen and the
+/// global key chords.
+fn hotkey_ioctl(pid: u32, request: u64, arg: u64) -> KResult<i64> {
+    if crate::drivers::fb_term::graphics::owner() != pid {
+        return Err(Errno::Perm);
+    }
+    match request {
+        FB_IOCTL_HOTKEY_SET => crate::drivers::input::hotkey::register(pid, arg).map(|()| 0),
+        FB_IOCTL_HOTKEY_POLL => crate::drivers::input::hotkey::poll(pid).map(i64::from),
+        _ => {
+            crate::drivers::input::hotkey::clear(pid);
+            Ok(0)
+        }
+    }
+}
 
 /// # Safety
 ///
@@ -189,6 +213,12 @@ pub unsafe fn ioctl(ino: u32, request: u64, arg: u64) -> KResult<i64> {
                     } else {
                         Err(Errno::Perm)
                     }
+                }
+                FB_IOCTL_HOTKEY_SET | FB_IOCTL_HOTKEY_POLL | FB_IOCTL_HOTKEY_CLEAR
+                    if ino == DEVFS_FB0_INO =>
+                {
+                    // SAFETY: syscall context, current() is the caller.
+                    hotkey_ioctl(crate::proc::current().pid, request, arg)
                 }
                 FB_IOCTL_GET_INFO => {
                     let p = crate::proc::current();

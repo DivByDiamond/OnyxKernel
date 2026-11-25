@@ -162,11 +162,9 @@ pub unsafe fn close(token: FdToken) -> KResult<()> {
             if let Some(pair) = devfs::ptym_ino_idx(f.ino) {
                 crate::fs::pty::free(pair);
             }
-            // Closing ANY /dev/jsN fd releases the single stick claim
-            // (no per-fd refcount — the single-reader contract in
-            // devfs::js docs).
-            if devfs::is_js_ino(f.ino).is_some() {
-                devfs::js_release();
+            // /dev/jsN close drops one claim on that node's slot.
+            if let Some(slot) = devfs::is_js_ino(f.ino) {
+                devfs::js_release(slot);
             }
         }
         fd_clear(idx);

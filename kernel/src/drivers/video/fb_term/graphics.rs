@@ -36,6 +36,11 @@ pub fn active() -> bool {
     OWNER.0.load(Ordering::Acquire) != 0
 }
 
+/// Pid holding the display claim (0 = nobody).
+pub fn owner() -> u32 {
+    OWNER.0.load(Ordering::Acquire)
+}
+
 pub fn claim(pid: u32) -> KResult<()> {
     // Match console writers/presenters so no in-progress console write can
     // land after this call returns and the application starts painting.
@@ -49,6 +54,8 @@ pub fn release(pid: u32) -> bool {
     crate::srv::klog::UART_LOCK.lock();
     let released = OWNER.release(pid);
     if released {
+        // The claim owner's hotkeys die with the claim (also on exit).
+        crate::drivers::input::hotkey::clear(pid);
         if !crate::drivers::fb::double_buffered() {
             crate::drivers::fb::clear();
         }

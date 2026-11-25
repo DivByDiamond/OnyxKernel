@@ -188,10 +188,10 @@ fn claim_hooks_claim_and_release_the_stick() {
     // Host tests attach no HID session, so js_claim resolves no
     // baseline: the claim must NOT latch on a session-less slot.
     js_claim(0);
-    assert!(!crate::drivers::input::event::stick_cursor::claimed());
+    assert!(!crate::drivers::input::event::stick_cursor::claimed(0));
     // The release hook still clears a claim latched by the live path
     // (open with a session attached).
-    crate::drivers::input::event::stick_cursor::set_claimed(true);
-    js_release();
-    assert!(!crate::drivers::input::event::stick_cursor::claimed());
+    crate::drivers::input::event::stick_cursor::claim(0);
+    js_release(0);
+    assert!(!crate::drivers::input::event::stick_cursor::claimed(0));
 }

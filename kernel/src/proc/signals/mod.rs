@@ -30,6 +30,11 @@ pub fn set_foreground(pid: u32) {
     G_FG_PID.store(pid, Ordering::Release);
 }
 
+/// Current foreground pid (0 = none yet).
+pub fn foreground() -> u32 {
+    G_FG_PID.load(Ordering::Acquire)
+}
+
 #[inline]
 fn protected_mask() -> u32 {
     (1u32 << SIG_KILL) | (1u32 << SIG_STOP)

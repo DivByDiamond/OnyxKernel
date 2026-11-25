@@ -12,6 +12,7 @@ use super::{
 };
 use crate::drivers::bus::usb::dev::MAX_SLOTS;
 use crate::drivers::bus::usb::hid::HidEvent;
+use crate::fs::vfs::{Fs, VfsFd};
 use onyx_core::errno::{Errno, KResult};
 
 /// Reset slot `idx`'s ring under the ring lock (test isolation).
@@ -82,7 +83,7 @@ fn read_delivers_whole_records_and_empty_is_eagain() {
         .lock()
         .unwrap();
     js_claim(2);
-    assert!(!crate::drivers::input::event::stick_cursor::claimed());
+    assert!(!crate::drivers::input::event::stick_cursor::claimed(2));
     let (r, _) = read_bytes(2, 8);
     assert_eq!(r, Err(Errno::Again));
     drop(guard);
@@ -121,4 +122,92 @@ fn js_nodes_do_not_exist_without_an_attached_session() {
     // refuse /dev/jsN instead of exposing a dead node.
     assert_eq!(crate::fs::devfs::lookup(b"js0"), Err(Errno::NoEnt));
     assert_eq!(crate::fs::devfs::lookup(b"jsX"), Err(Errno::NoEnt));
+}
+
+/// Regression: a short name ("js0") written after a longer one ("blk0")
+/// into the same readdir buffer kept the stale tail and listed "js00".
+#[test]
+fn readdir_names_are_nul_terminated_over_a_dirty_buffer() {
+    let mut buf = *b"blk0xxxx";
+    super::super::copy_name(b"js0", buf.as_mut_ptr(), buf.len());
+    assert_eq!(&buf[..4], b"js0\0");
+    // A full-width name needs no terminator and must not overrun.
+    let mut tight = *b"abc";
+    super::super::copy_name(b"js1", tight.as_mut_ptr(), tight.len());
+    assert_eq!(&tight, b"js1");
+}
+
+fn fd(fs: Fs, ino: u32, used: bool) -> VfsFd {
+    VfsFd {
+        fs,
+        ino,
+        used,
+        ..VfsFd::default()
+    }
+}
+
+#[test]
+fn resume_finds_only_live_devfs_js_fds() {
+    use super::resume::held_slots;
+    let fds = [
+        fd(Fs::Devfs, js_ino(1), true),
+        fd(Fs::Devfs, js_ino(1), true),  // dup/second open: one slot
+        fd(Fs::Devfs, js_ino(3), false), // closed
+        fd(Fs::Onyx, js_ino(2), true),   // same number, other fs
+        fd(Fs::Devfs, DEVFS_JS_BASE_INO - 1, true), // not a js node
+    ];
+    let held = held_slots(&fds);
+    assert!(held[1]);
+    assert_eq!(held.iter().filter(|h| **h).count(), 1);
+}
+
+/// SIGCONT re-sync: stale history is dropped and only the fresh init
+/// burst (current state) is left, in axes-then-buttons order.
+#[test]
+fn resync_drops_the_stale_tail_and_leaves_one_init_burst() {
+    use crate::drivers::bus::usb::hid::Baseline;
+    use crate::fs::devfs::js::rec::JsRec;
+    let mut ring = Ring::new();
+    for v in 0..(JS_RING_RECS as i16 + 10) {
+        ring.push(JsRec::from_event(
+            HidEvent::Axis { axis: 0, value: v },
+            false,
+            0,
+        ));
+    }
+    let base = Baseline {
+        axes: [9, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        axis_n: 1,
+        buttons: 0,
+        button_n: 1,
+    };
+    super::burst_into(&mut ring, &base, 0, true);
+    assert_eq!(ring.len, 2);
+    let axis = ring.pop().unwrap().bytes();
+    assert_eq!(axis[4], 9, "burst axis value, not the stale tail");
+    assert_eq!(axis[6], super::JS_EVENT_AXIS | super::JS_EVENT_INIT);
+    let button = ring.pop().unwrap().bytes();
+    assert_eq!(button[6], super::JS_EVENT_BUTTON | super::JS_EVENT_INIT);
+}
+
+/// Without flush the burst appends (the open path): history is kept.
+#[test]
+fn open_burst_appends_without_dropping_history() {
+    use crate::drivers::bus::usb::hid::Baseline;
+    use crate::fs::devfs::js::rec::JsRec;
+    let mut ring = Ring::new();
+    ring.push(JsRec::from_event(
+        HidEvent::Axis { axis: 0, value: 1 },
+        false,
+        0,
+    ));
+    let base = Baseline {
+        axes: [0; 16],
+        axis_n: 1,
+        buttons: 0,
+        button_n: 0,
+    };
+    super::burst_into(&mut ring, &base, 0, false);
+    assert_eq!(ring.len, 2);
+    assert_eq!(ring.pop().unwrap().bytes()[6], super::JS_EVENT_AXIS);
 }
